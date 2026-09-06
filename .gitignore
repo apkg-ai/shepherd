@@ -91,3 +91,4 @@ aider.conf.yml
 
 # Node
 node_modules/
+coverage/

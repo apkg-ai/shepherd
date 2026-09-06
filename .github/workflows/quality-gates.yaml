@@ -75,20 +75,39 @@ jobs:
         uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools
 
       - name: Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: core
 
-      - name: Unit Tests
+      - name: Install cargo-llvm-cov
+        env:
+          LLVM_COV_VERSION: 0.9.0
+          LLVM_COV_SHA256: 9af53b273e50d01d8bde8785de8541f6738cc4375248cd7683aec8b5768b9d21
         run: |
-          cargo test --workspace --lib --bins
+          set -euo pipefail
+          curl -sSLo cargo-llvm-cov.tar.gz "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz"
+          echo "${LLVM_COV_SHA256}  cargo-llvm-cov.tar.gz" | sha256sum -c -
+          tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
+          rm cargo-llvm-cov.tar.gz
+
+      - name: Unit Tests (Coverage)
+        run: |
+          mkdir -p coverage
+          cargo llvm-cov --workspace --lib --bins --lcov --output-path coverage/core-unit.lcov
 
       - name: Doc Tests
         run: |
           cargo test --workspace --doc
+
+      - name: Upload Coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-core-unit
+          path: core/coverage/core-unit.lcov
 
   ui-lint:
     name: UI / Lint
@@ -171,9 +190,16 @@ jobs:
         run: |
           npm ci --prefer-offline
 
-      - name: Unit Tests
+      - name: Unit Tests (Coverage)
         run: |
-          npm run test:unit
+          npm run test:unit:cov
+
+      - name: Upload Coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-ui-unit
+          path: ui/coverage/ui-unit.lcov
 
   ui-build:
     name: UI / Build
@@ -224,6 +250,55 @@ jobs:
       - name: Spectral
         run: |
           npm run lint:spec
+
+  coverage-report:
+    name: Coverage Report
+    runs-on: ubuntu-24.04-arm
+    needs:
+      - core-test-unit
+      - ui-test-unit
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download Coverage Artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+          path: coverage
+
+      # The report script is dependency-free (node:fs only) — the runner's
+      # system Node is enough, no setup-node/npm ci needed.
+      - name: Generate Report
+        run: |
+          node scripts/coverage-report.mjs --dir coverage --out coverage/report.md
+          cat coverage/report.md
+
+      - name: Post Sticky Comment
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          MARKER='<!-- shepherd-coverage-report -->'
+          COMMENT_ID=$( (gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" || true) | head -n 1)
+          if [ -n "${COMMENT_ID}" ]; then
+            gh api --method PATCH "repos/${REPO}/issues/comments/${COMMENT_ID}" \
+              -F body=@coverage/report.md
+          else
+            gh api --method POST "repos/${REPO}/issues/${PR}/comments" \
+              -F body=@coverage/report.md
+          fi
 
   test-smoke:
     name: Test (Smoke)
