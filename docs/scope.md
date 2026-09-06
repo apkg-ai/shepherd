@@ -68,6 +68,7 @@ into shepherd.
 - Agent-facing REST loop: claim a task (lease-based), receive a **context bundle**, report back sessions,
   knowledge, and artifacts.
 - Review queue for agent-completed work.
+- Versioned **JSON export/import** of a project (backup, portability, and any external processing).
 
 ### Version roadmap
 
@@ -117,11 +118,19 @@ from any state.
 - **Claiming** is lease-based: a claim records the agent session and expires on a timeout, so a crashed
   agent never holds a task forever.
 - The `in_review` gate is **on by default** for agent-completed tasks, with a per-project toggle.
+- **Failure** is a *session outcome*, not a task state: an unsuccessful session records `failed` + reason,
+  and the task returns to `ready`. The task keeps its attempt history (failure count + past failed
+  sessions), surfaced in the UI so repeated failures are visible at a glance.
 
 ### Session records
 
-Structured, not just blobs: which tool/agent, start/end timestamps, outcome summary, decisions made —
-plus typed attachments (below). A full transcript can be attached for deep post-project review.
+Structured, not just blobs: caller identity, start/end timestamps, outcome (`succeeded` / `failed` +
+reason), summary, decisions made — plus typed attachments (below). A full transcript can be attached for
+deep post-project review.
+
+**Caller identity (not auth):** callers self-declare who they are on claim/report — the **harness** (e.g.
+Claude Code, Cursor), the **agent/model** (e.g. Opus 5), a session id, and an optional label. Stored on
+sessions and claims; humans get an identity too. This is the natural hook for a token layer later.
 
 ### Knowledge items (first-class entities)
 
@@ -129,6 +138,11 @@ Typed information items: `link` (GitHub issue/PR/doc), `transcript`, `decision`,
 (refined, reusable content). They attach to a task or session but are **addressable project-wide**, so any
 future session or human can pull "everything we know about X" regardless of which task produced it. This
 is the mechanism that solves the shared-information problem.
+
+**Project-scoped knowledge:** each project also carries a global set of knowledge items attached to the
+project itself (conventions, goals, glossary). These are explicitly **flagged as project-level**, distinct
+from task-produced knowledge, and feed the "project-level notes" part of every context bundle. No new
+entity type — same knowledge items, different scope.
 
 ### Context bundle
 
@@ -147,6 +161,10 @@ What an agent receives when it claims a task:
 - Real-time updates over **SSE**.
 - Design envelope: dozens of projects, hundreds to low-thousands of tasks per project, a handful of
   concurrent agent sessions.
+- **Data location:** a single SQLite file under the user's home (e.g. `~/.shepherd/shepherd.db`,
+  XDG-compliant). The JSON export (see §4) is the backup and portability story.
+- **Distribution (v1):** clone the repo and build from source (`cargo` + `npm`). Prebuilt release
+  binaries come later, alongside the CLI version.
 
 ## 7. Expectations & success criteria
 
