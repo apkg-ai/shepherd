@@ -99,7 +99,14 @@ const evaluate = (name) => {
   for (const [suite, { label, threshold, pending }] of Object.entries(config.suites)) {
     const parsed = parseSuite(suite);
     if (!parsed) {
-      rows.push({ label, lines: "—", fns: "—", threshold, status: `⏳ lands in ${pending ?? "a later session"}` });
+      // Only suites explicitly marked pending may be absent; anything else
+      // missing means a test job failed or its artifact was lost (#22).
+      if (pending) {
+        rows.push({ label, lines: "—", fns: "—", threshold, status: `⏳ lands in ${pending}` });
+      } else {
+        failures.push(`${name}/${suite}: coverage artifact missing`);
+        rows.push({ label, lines: "—", fns: "—", threshold, status: "❌ missing artifact" });
+      }
       continue;
     }
     const { hit, found } = lineStats(parsed.lines);
