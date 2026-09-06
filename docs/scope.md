@@ -95,8 +95,10 @@ into shepherd.
 
 ### Task
 
-Common core shared by every task: `id`, `title`, `description`, `status`, links, sessions, artifacts —
-plus a `type` string and a structured `metadata` JSON field.
+Common core shared by every task: `id`, `title`, `description`, `status`, optional `assignee` (an
+identity — human or agent), links, sessions, artifacts — plus a `type` string and a structured `metadata`
+JSON field. **"Artifacts"** are not a separate entity: they are knowledge items of type `link` (commits,
+PRs, files) attached to the task.
 
 - Built-in types are **conventions over that shape**, not separate schemas: `code`, `question`,
   `refactor`, `review`, `research`. New types cost nothing.
@@ -115,6 +117,9 @@ plus a `type` string and a structured `metadata` JSON field.
 `proposed → approved → ready → in_progress → in_review → done`, with `blocked` / `cancelled` reachable
 from any state.
 
+- **`approved → ready` is automatic**: a task becomes `ready` when every task it `depends_on` is `done`.
+  Waiting on dependencies is *not* `blocked` — `blocked` is an explicit flag for external impediments
+  (raised by a human or an agent, with a reason).
 - **Claiming** is lease-based: a claim records the agent session and expires on a timeout, so a crashed
   agent never holds a task forever.
 - The `in_review` gate is **on by default** for agent-completed tasks, with a per-project toggle.
@@ -214,6 +219,11 @@ Recorded, non-blocking:
 - Formatting tooling alongside oxlint (oxc formatter maturity) — decided at scaffolding time.
 - REST resource naming and shapes — deferred to the spec-first design task, the first implementation task
   after this issue closes.
+- Representation of a project's start/end (explicit nodes vs derived from the dependency graph) —
+  deferred to the spec-first design task.
+- **Agent integration guide** — how an agent session learns to use the hub (a short agent-facing usage
+  doc or minimal skill, distinct from bbq). Likely ships in this repo once the spec exists; exact form
+  decided then.
 - bbq skill design — external, tracked outside this repo; only constraint is conformance to the API
   contract.
 - Tauri packaging validation — deferred until the native-app version.
