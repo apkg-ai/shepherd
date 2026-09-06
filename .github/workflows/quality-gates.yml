@@ -25,11 +25,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Installs the toolchain pinned in rust-toolchain.toml (with rustfmt + clippy)
+      # rust-toolchain.toml is the single source of truth for the toolchain;
+      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
         with:
-          cache-workspaces: core
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
 
       - name: Format
         run: |
@@ -51,10 +62,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # rust-toolchain.toml is the single source of truth for the toolchain;
+      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
         with:
-          cache-workspaces: core
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
 
       - name: Test
         run: |
@@ -203,10 +226,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # rust-toolchain.toml is the single source of truth for the toolchain;
+      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
         with:
-          cache-workspaces: core
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
