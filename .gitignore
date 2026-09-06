@@ -19,3 +19,72 @@ target
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Agentic tooling — local agent configs, sessions, caches, and rules
+# Mistral Vibe
+.vibe/
+
+# Anthropic Claude Code
+.claude/
+.claude.json
+.claudeignore
+
+# OpenAI Codex CLI
+.codex/
+
+# Google Gemini CLI
+.gemini/
+
+# Cursor
+.cursor/
+.cursorrules
+.cursorignore
+.cursorindexingignore
+
+# GitHub Copilot
+.github/copilot/
+.copilot/
+copilot-instructions.md
+
+# Windsurf (Codeium)
+.windsurf/
+.windsurfrules
+.codeium/
+
+# Continue
+.continue/
+
+# Aider
+.aider*
+aider.conf.yml
+
+# Cline / Roo Code
+.cline/
+.clinerules
+.roo/
+.roorules
+
+# Trae
+.trae/
+.traeignore
+
+# Zed AI
+.zed/
+
+# Replit / Project IDX
+.replit/
+.idx/
+
+# Devin / Lovable / v0 / Bolt
+.devin/
+.lovable/
+.v0/
+.bolt/
+
+# Generic agent folders / rules
+.agents/
+.agent/
+.agentic/
+.mcp/
+*.mcp.json
+
