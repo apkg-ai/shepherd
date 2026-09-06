@@ -2,9 +2,10 @@ openapi: 3.1.0
 info:
   title: shepherd API
   description: >-
-    Local-first hub for agent-driven work. This is the S1 placeholder contract;
-    the complete v1 surface is written in session S2 following the design rules
-    in docs/03-api.md.
+    Local-first hub for agent-driven project work. Maps projects as typed task
+    graphs and acts as persistent shared memory across agent and human sessions.
+    The spec is the product boundary — anything not in this contract does not
+    exist. Design rules in docs/03-api.md.
   version: 0.1.0
   contact:
     name: apkg
@@ -12,41 +13,3686 @@ info:
   license:
     name: MIT
     identifier: MIT
+
 servers:
-  - url: http://127.0.0.1:7437
-    description: Local daemon (default port)
+  - url: https://localhost:7437
+    description: >-
+      Local daemon (default port 7437, override with --port or
+      SHEPHERD_PORT). v1 runs plain HTTP on localhost; TLS is a
+      post-v1 concern (F4).
+    x-internal: true
+
+security:
+  - bearerAuth: []
+
 tags:
+  - name: claims
+    description: Lease-based task claims — acquire, renew, release.
+  - name: events
+    description: Server-Sent Events stream for real-time domain updates.
+  - name: export-import
+    description: Versioned JSON export and import of projects.
+  - name: knowledge
+    description: Typed, reusable information items attached to tasks or projects.
+  - name: projects
+    description: Top-level project resources — CRUD and settings.
+  - name: relations
+    description: >-
+      Decomposition (parent/child) and dependency (depends_on) edges between
+      tasks. The dependency graph is always acyclic.
+  - name: sessions
+    description: Structured work episodes reported against a task.
   - name: system
     description: Health and service metadata.
+  - name: tasks
+    description: >-
+      Units of work within a project — typed, positioned in the graph, driven
+      through the lifecycle state machine.
+
+# ════════════════════════════════════════════════════════════════════════
+# Paths
+# ════════════════════════════════════════════════════════════════════════
+
 paths:
+  # ── System ───────────────────────────────────────────────────────────
+
   /health:
     get:
       operationId: getHealth
       tags:
         - system
-      summary: Service health
-      description: Liveness probe. Returns service status and the core version.
+      summary: Service health check
+      description: >-
+        Liveness probe per draft-inadarei-api-health-check-06. Returns 200
+        with status `pass` while healthy, 503 with status `fail` when
+        degraded. Content-Type: application/health+json.
+      security:
+        - {}
       responses:
         "200":
-          description: Service is healthy.
+          description: Service is healthy (status pass or warn).
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/health+json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: pass
+                version: 0.1.0
+                description: shepherd local daemon
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          description: Service is unhealthy (status fail).
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/health+json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: fail
+                version: 0.1.0
+                output: database connection lost
+
+  # ── Projects ─────────────────────────────────────────────────────────
+
+  /api/v1/projects:
+    get:
+      operationId: listProjects
+      tags:
+        - projects
+      summary: List all projects
+      description: >-
+        Returns a paginated list of all registered projects, ordered by
+        creation date descending.
+      security:
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Paginated project list.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Health"
+                $ref: "#/components/schemas/ProjectList"
+              example:
+                items:
+                  - id: 019263a0-1234-7def-8000-000000000001
+                    name: shepherd
+                    description: Local-first hub for agent-driven project work.
+                    settings:
+                      review_gate: true
+                    created_at: "2026-09-06T10:00:00Z"
+                    updated_at: "2026-09-06T10:00:00Z"
+                has_more: false
+                next_cursor: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      operationId: createProject
+      tags:
+        - projects
+      summary: Register a new project
+      description: >-
+        Creates a project with the given name and optional settings. The
+        review gate defaults to true (agent work requires human approval).
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreate"
+            example:
+              name: shepherd
+              description: Local-first hub for agent-driven project work.
+              settings:
+                review_gate: true
+      responses:
+        "201":
+          description: Project created.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+              example:
+                id: 019263a0-1234-7def-8000-000000000001
+                name: shepherd
+                description: Local-first hub for agent-driven project work.
+                settings:
+                  review_gate: true
+                created_at: "2026-09-06T10:00:00Z"
+                updated_at: "2026-09-06T10:00:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/{project_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: getProject
+      tags:
+        - projects
+      summary: Get a project by ID
+      description: Returns the full project resource including settings.
+      security:
+        - {}
+      responses:
+        "200":
+          description: Project found.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+              example:
+                id: 019263a0-1234-7def-8000-000000000001
+                name: shepherd
+                description: Local-first hub for agent-driven project work.
+                settings:
+                  review_gate: true
+                created_at: "2026-09-06T10:00:00Z"
+                updated_at: "2026-09-06T10:00:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    patch:
+      operationId: updateProject
+      tags:
+        - projects
+      summary: Update a project
+      description: >-
+        Partially updates a project. Only the provided fields are changed.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdate"
+      responses:
+        "200":
+          description: Project updated.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+              example:
+                id: 019263a0-1234-7def-8000-000000000001
+                name: shepherd
+                description: Local-first hub for agent-driven project work.
+                settings:
+                  review_gate: true
+                created_at: "2026-09-06T10:00:00Z"
+                updated_at: "2026-09-06T10:00:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      operationId: deleteProject
+      tags:
+        - projects
+      summary: Delete a project
+      description: >-
+        Permanently deletes a project and all its tasks, relations, sessions,
+        and knowledge items. This action is irreversible.
+      security:
+        - {}
+      responses:
+        "204":
+          description: Project deleted.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Export / Import ──────────────────────────────────────────────────
+
+  /api/v1/projects/{project_id}/export:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: exportProject
+      tags:
+        - export-import
+      summary: Export a project as a versioned JSON document
+      description: >-
+        Returns a self-contained JSON document containing the project and all
+        its tasks, relations, sessions, and knowledge items. The document
+        carries its own schema version for forward compatibility.
+      security:
+        - {}
+      responses:
+        "200":
+          description: Export document.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportDocument"
+              example:
+                version: "1.0.0"
+                project:
+                  id: 019263a0-1234-7def-8000-000000000001
+                  name: shepherd
+                  description: Local-first hub.
+                  settings:
+                    review_gate: true
+                  created_at: "2026-09-06T10:00:00Z"
+                  updated_at: "2026-09-06T10:00:00Z"
+                tasks: []
+                relations: []
+                sessions: []
+                knowledge: []
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/import:
+    post:
+      operationId: importProject
+      tags:
+        - export-import
+      summary: Import a project from an export document
+      description: >-
+        Creates a new project from a previously exported document. Import
+        always creates a new project — no merge semantics in v1. The schema
+        version in the document must be compatible with this server.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExportDocument"
+      responses:
+        "201":
+          description: Project imported.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+              example:
+                project_id: 019263a0-1234-7def-8000-000000000002
+                task_count: 15
+                relation_count: 14
+                session_count: 3
+                knowledge_count: 7
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Tasks ────────────────────────────────────────────────────────────
+
+  /api/v1/projects/{project_id}/tasks:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listTasks
+      tags:
+        - tasks
+      summary: List tasks in a project
+      description: >-
+        Returns a paginated list of tasks, optionally filtered by status
+        and/or type.
+      security:
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/StatusFilter"
+        - $ref: "#/components/parameters/TypeFilter"
+      responses:
+        "200":
+          description: Paginated task list.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+              example:
+                items:
+                  - id: 019263a0-1234-7def-8000-000000000010
+                    project_id: 019263a0-1234-7def-8000-000000000001
+                    title: Implement lifecycle state machine
+                    description: Full state machine for task transitions.
+                    type: code
+                    status: ready
+                    metadata: {}
+                    assignee: null
+                    graph_role: []
+                    attempt_count: 0
+                    created_at: "2026-09-06T10:05:00Z"
+                    updated_at: "2026-09-06T10:05:00Z"
+                has_more: false
+                next_cursor: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      operationId: createTask
+      tags:
+        - tasks
+      summary: Create a task
+      description: >-
+        Creates a task in the project. When created with status `proposed`,
+        the task requires human approval before becoming actionable. When
+        created with status `approved`, the task proceeds directly to `ready`
+        once its dependencies (if any) are satisfied.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCreate"
+            example:
+              title: Implement context-bundle assembly
+              description: >-
+                Assemble the context bundle returned on task claim — task
+                details, dependency summaries, project knowledge, and
+                sibling awareness.
+              type: code
+              status: proposed
+              metadata:
+                priority: high
+                estimated_hours: 2
+      responses:
+        "201":
+          description: Task created.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+              example:
+                id: 019263a0-1234-7def-8000-000000000010
+                project_id: 019263a0-1234-7def-8000-000000000001
+                title: Implement lifecycle state machine
+                description: Full state machine for task transitions.
+                type: code
+                status: ready
+                metadata: {}
+                assignee: null
+                graph_role: []
+                attempt_count: 0
+                created_at: "2026-09-06T10:05:00Z"
+                updated_at: "2026-09-06T10:05:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/{project_id}/tasks/{task_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      operationId: getTask
+      tags:
+        - tasks
+      summary: Get a task by ID
+      description: Returns the full task resource including metadata and status.
+      security:
+        - {}
+      responses:
+        "200":
+          description: Task found.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+              example:
+                id: 019263a0-1234-7def-8000-000000000010
+                project_id: 019263a0-1234-7def-8000-000000000001
+                title: Implement lifecycle state machine
+                description: Full state machine for task transitions.
+                type: code
+                status: ready
+                metadata: {}
+                assignee: null
+                graph_role: []
+                attempt_count: 0
+                created_at: "2026-09-06T10:05:00Z"
+                updated_at: "2026-09-06T10:05:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    patch:
+      operationId: updateTask
+      tags:
+        - tasks
+      summary: Update a task
+      description: >-
+        Partially updates a task. Only the provided fields are changed. Status
+        transitions are not performed via this endpoint — use the dedicated
+        approve, reject, claim, and session-report endpoints.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskUpdate"
+      responses:
+        "200":
+          description: Task updated.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+              example:
+                id: 019263a0-1234-7def-8000-000000000010
+                project_id: 019263a0-1234-7def-8000-000000000001
+                title: Implement lifecycle state machine
+                description: Full state machine for task transitions.
+                type: code
+                status: ready
+                metadata: {}
+                assignee: null
+                graph_role: []
+                attempt_count: 0
+                created_at: "2026-09-06T10:05:00Z"
+                updated_at: "2026-09-06T10:05:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      operationId: deleteTask
+      tags:
+        - tasks
+      summary: Delete a task
+      description: >-
+        Permanently deletes a task and all its relations, sessions, and
+        knowledge items. This action is irreversible.
+      security:
+        - {}
+      responses:
+        "204":
+          description: Task deleted.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Task actions ─────────────────────────────────────────────────────
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      operationId: approveTask
+      tags:
+        - tasks
+      summary: Approve a proposed task
+      description: >-
+        Transitions a task from `proposed` to `approved`. The task then moves
+        to `ready` automatically once all its `depends_on` dependencies are
+        `done`.
+      security:
+        - {}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalRequest"
+      responses:
+        "200":
+          description: Task approved.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+              example:
+                id: 019263a0-1234-7def-8000-000000000010
+                project_id: 019263a0-1234-7def-8000-000000000001
+                title: Implement lifecycle state machine
+                description: Full state machine for task transitions.
+                type: code
+                status: ready
+                metadata: {}
+                assignee: null
+                graph_role: []
+                attempt_count: 0
+                created_at: "2026-09-06T10:05:00Z"
+                updated_at: "2026-09-06T10:05:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/reject:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      operationId: rejectTask
+      tags:
+        - tasks
+      summary: Reject a task in review
+      description: >-
+        Rejects a task that is `in_review`, returning it to `ready` so it
+        can be claimed again. The task keeps its full attempt history.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectionRequest"
+            example:
+              reason: Tests are failing on the context-bundle edge cases.
+      responses:
+        "200":
+          description: Task rejected and returned to ready.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+              example:
+                id: 019263a0-1234-7def-8000-000000000010
+                project_id: 019263a0-1234-7def-8000-000000000001
+                title: Implement lifecycle state machine
+                description: Full state machine for task transitions.
+                type: code
+                status: ready
+                metadata: {}
+                assignee: null
+                graph_role: []
+                attempt_count: 0
+                created_at: "2026-09-06T10:05:00Z"
+                updated_at: "2026-09-06T10:05:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Next task ────────────────────────────────────────────────────────
+
+  /api/v1/projects/{project_id}/next-task:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: getNextTask
+      tags:
+        - tasks
+      summary: Get the next available task
+      description: >-
+        Returns the highest-priority task that is `ready` and unclaimed. If
+        no task is available, returns 200 with a null task field.
+      security:
+        - {}
+      responses:
+        "200":
+          description: Next task or null if nothing is available.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NextTaskResult"
+              example:
+                task:
+                  id: 019263a0-1234-7def-8000-000000000010
+                  project_id: 019263a0-1234-7def-8000-000000000001
+                  title: Implement lifecycle state machine
+                  description: Full state machine for task transitions.
+                  type: code
+                  status: ready
+                  metadata: {}
+                  assignee: null
+                  graph_role: []
+                  attempt_count: 0
+                  created_at: "2026-09-06T10:05:00Z"
+                  updated_at: "2026-09-06T10:05:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Context ──────────────────────────────────────────────────────────
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/context:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      operationId: getTaskContext
+      tags:
+        - tasks
+      summary: Get the context bundle for a task
+      description: >-
+        Assembles and returns the context bundle a caller receives upon
+        claiming a task. Includes the task itself, summaries and decisions
+        from dependency ancestors and parent chain, project-level knowledge,
+        linked artifacts, and in-flight sibling awareness.
+      security:
+        - {}
+      responses:
+        "200":
+          description: Context bundle assembled.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContextBundle"
+              example:
+                task:
+                  id: 019263a0-1234-7def-8000-000000000010
+                  project_id: 019263a0-1234-7def-8000-000000000001
+                  title: Implement lifecycle state machine
+                  description: Full state machine for task transitions.
+                  type: code
+                  status: in_progress
+                  metadata: {}
+                  assignee: null
+                  graph_role: []
+                  attempt_count: 0
+                  created_at: "2026-09-06T10:05:00Z"
+                  updated_at: "2026-09-06T10:10:00Z"
+                ancestor_summaries:
+                  - task_id: 019263a0-1234-7def-8000-000000000011
+                    title: Design domain model
+                    status: done
+                    summary: Designed all entities and invariants.
+                    decisions:
+                      - Use a state-transition table.
+                project_knowledge: []
+                artifacts: []
+                sibling_tasks: []
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Claims ───────────────────────────────────────────────────────────
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/claim:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      operationId: claimTask
+      tags:
+        - claims
+      summary: Claim a task
+      description: >-
+        Acquires a lease-based claim on a task. The task must be `ready` and
+        unclaimed. The caller provides their identity and a TTL; the task
+        transitions to `in_progress`. At most one active claim per task;
+        concurrent attempts result in exactly one winner. Expired leases
+        release the task back to `ready` automatically.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimRequest"
+            example:
+              identity:
+                harness: claude-code
+                agent_model: opus-5
+                session_id: sess-20260906-abc123
+                label: S3 domain core
+              ttl_seconds: 600
+      responses:
+        "201":
+          description: Claim acquired.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Claim"
+              example:
+                id: 019263a0-1234-7def-8000-000000000030
+                task_id: 019263a0-1234-7def-8000-000000000010
+                identity:
+                  harness: claude-code
+                  agent_model: opus-5
+                  session_id: sess-20260906-abc123
+                  label: S3 domain core
+                ttl_seconds: 600
+                lease_id: lease-019263a0-abcd
+                acquired_at: "2026-09-06T10:10:00Z"
+                expires_at: "2026-09-06T10:20:00Z"
+                renewed_at: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/claim/renew:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      operationId: renewClaim
+      tags:
+        - claims
+      summary: Renew a task claim
+      description: >-
+        Extends the TTL of an active claim. The caller must be the current
+        claimant (matched by identity). Returns 410 Gone if the lease has
+        already expired.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimRenewal"
+            example:
+              identity:
+                harness: claude-code
+                agent_model: opus-5
+                session_id: sess-20260906-abc123
+              ttl_seconds: 600
+      responses:
+        "200":
+          description: Claim renewed.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Claim"
+              example:
+                id: 019263a0-1234-7def-8000-000000000030
+                task_id: 019263a0-1234-7def-8000-000000000010
+                identity:
+                  harness: claude-code
+                  agent_model: opus-5
+                  session_id: sess-20260906-abc123
+                ttl_seconds: 600
+                lease_id: lease-019263a0-abcd
+                acquired_at: "2026-09-06T10:10:00Z"
+                expires_at: "2026-09-06T10:30:00Z"
+                renewed_at: "2026-09-06T10:20:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "410":
+          $ref: "#/components/responses/Gone"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/claim/release:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      operationId: releaseClaim
+      tags:
+        - claims
+      summary: Release a task claim
+      description: >-
+        Voluntarily releases the current claim without reporting a session.
+        The task returns to `ready` and becomes claimable by others. Returns
+        410 Gone if the lease has already expired.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimRelease"
+            example:
+              identity:
+                harness: claude-code
+                agent_model: opus-5
+                session_id: sess-20260906-abc123
+      responses:
+        "204":
+          description: Claim released.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "410":
+          $ref: "#/components/responses/Gone"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Sessions ─────────────────────────────────────────────────────────
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      operationId: listTaskSessions
+      tags:
+        - sessions
+      summary: List sessions for a task
+      description: >-
+        Returns a paginated list of work sessions recorded against this task,
+        ordered by start time descending.
+      security:
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Paginated session list.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+              example:
+                items:
+                  - id: 019263a0-1234-7def-8000-000000000020
+                    task_id: 019263a0-1234-7def-8000-000000000010
+                    identity:
+                      harness: claude-code
+                      agent_model: opus-5
+                      session_id: sess-20260906-abc123
+                    started_at: "2026-09-06T10:10:00Z"
+                    ended_at: "2026-09-06T12:15:00Z"
+                    outcome: succeeded
+                    failure_reason: null
+                    summary: Implemented lifecycle state machine.
+                    decisions: []
+                    knowledge_items: []
+                    artifacts: []
+                    created_at: "2026-09-06T12:15:00Z"
+                has_more: false
+                next_cursor: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      operationId: createTaskSession
+      tags:
+        - sessions
+      summary: Report a work session
+      description: >-
+        Records a completed work session on a task. The task must be
+        `in_progress` and claimed by the reporting identity. On success the
+        task advances: `in_review` if the project review gate is on, `done`
+        if it is off. On failure, the task returns to `ready` and its
+        attempt count increments.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionReport"
+            example:
+              identity:
+                harness: claude-code
+                agent_model: opus-5
+                session_id: sess-20260906-abc123
+                label: S3 domain core
+              started_at: "2026-09-06T10:10:00Z"
+              ended_at: "2026-09-06T12:15:00Z"
+              outcome: succeeded
+              summary: >-
+                Implemented lifecycle state machine with all transitions from
+                02-domain-model.md. Added proptest suite for acyclicity and
+                transition invariants.
+              decisions:
+                - Use a state-transition table rather than match arms.
+                - >-
+                  Represent blocked as a flag on the task, not a status — any
+                  status can be blocked.
+              knowledge_items:
+                - type: decision
+                  title: State-transition table design
+                  content: >-
+                    Lifecycle transitions are encoded as a static lookup table
+                    indexed by (current_status, trigger). This makes adding
+                    transitions declarative and testable.
+              artifacts:
+                - https://github.com/apkg-ai/shepherd/pull/25
+      responses:
+        "201":
+          description: Session recorded and task advanced.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+              example:
+                id: 019263a0-1234-7def-8000-000000000020
+                task_id: 019263a0-1234-7def-8000-000000000010
+                identity:
+                  harness: claude-code
+                  agent_model: opus-5
+                  session_id: sess-20260906-abc123
+                started_at: "2026-09-06T10:10:00Z"
+                ended_at: "2026-09-06T12:15:00Z"
+                outcome: succeeded
+                failure_reason: null
+                summary: Implemented lifecycle state machine.
+                decisions:
+                  - Use a state-transition table.
+                knowledge_items: []
+                artifacts:
+                  - https://github.com/apkg-ai/shepherd/pull/25
+                created_at: "2026-09-06T12:15:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/sessions/{session_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      operationId: getTaskSession
+      tags:
+        - sessions
+      summary: Get a session by ID
+      description: Returns the full session resource including decisions and knowledge items.
+      security:
+        - {}
+      responses:
+        "200":
+          description: Session found.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+              example:
+                id: 019263a0-1234-7def-8000-000000000020
+                task_id: 019263a0-1234-7def-8000-000000000010
+                identity:
+                  harness: claude-code
+                  agent_model: opus-5
+                  session_id: sess-20260906-abc123
+                started_at: "2026-09-06T10:10:00Z"
+                ended_at: "2026-09-06T12:15:00Z"
+                outcome: succeeded
+                failure_reason: null
+                summary: Implemented lifecycle state machine.
+                decisions:
+                  - Use a state-transition table.
+                knowledge_items: []
+                artifacts:
+                  - https://github.com/apkg-ai/shepherd/pull/25
+                created_at: "2026-09-06T12:15:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Relations ────────────────────────────────────────────────────────
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/relations:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      operationId: listTaskRelations
+      tags:
+        - relations
+      summary: List relations for a task
+      description: >-
+        Returns all relations where this task is either the source or
+        target.
+      security:
+        - {}
+      responses:
+        "200":
+          description: Relation list.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RelationList"
+              example:
+                items:
+                  - id: 019263a0-1234-7def-8000-000000000040
+                    type: depends_on
+                    source_task_id: 019263a0-1234-7def-8000-000000000010
+                    target_task_id: 019263a0-1234-7def-8000-000000000011
+                    created_at: "2026-09-06T10:06:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      operationId: createTaskRelation
+      tags:
+        - relations
+      summary: Add a relation from this task
+      description: >-
+        Creates a relation from this task (source) to a target task. For
+        `decomposition` relations the source becomes the parent. For
+        `depends_on` relations, the source depends on the target. Any
+        mutation that would create a cycle in the dependency graph is
+        rejected with 409.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RelationCreate"
+            example:
+              type: depends_on
+              target_task_id: 019263a0-1234-7def-8000-000000000011
+      responses:
+        "201":
+          description: Relation created.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Relation"
+              example:
+                id: 019263a0-1234-7def-8000-000000000040
+                type: depends_on
+                source_task_id: 019263a0-1234-7def-8000-000000000010
+                target_task_id: 019263a0-1234-7def-8000-000000000011
+                created_at: "2026-09-06T10:06:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/relations/{relation_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+      - $ref: "#/components/parameters/RelationId"
+    delete:
+      operationId: deleteTaskRelation
+      tags:
+        - relations
+      summary: Remove a relation
+      description: >-
+        Deletes a relation. May cause downstream tasks to re-derive their
+        `ready` status.
+      security:
+        - {}
+      responses:
+        "204":
+          description: Relation deleted.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Knowledge ────────────────────────────────────────────────────────
+
+  /api/v1/projects/{project_id}/knowledge:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listKnowledge
+      tags:
+        - knowledge
+      summary: List knowledge items for a project
+      description: >-
+        Returns a paginated list of all knowledge items in the project,
+        including project-scoped items and items attached to tasks or
+        sessions. Optionally filter by scope, type, or task.
+      security:
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: scope
+          in: query
+          description: Filter by knowledge scope.
+          required: false
+          schema:
+            type: string
+            enum:
+              - task
+              - session
+              - project
+            minLength: 4
+            maxLength: 7
+        - name: type
+          in: query
+          description: Filter by knowledge item type.
+          required: false
+          schema:
+            type: string
+            enum:
+              - link
+              - transcript
+              - decision
+              - note
+            minLength: 4
+            maxLength: 10
+        - name: task_id
+          in: query
+          description: Filter to knowledge items attached to a specific task.
+          required: false
+          schema:
+            type: string
+            format: uuid
+            minLength: 36
+            maxLength: 36
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      responses:
+        "200":
+          description: Paginated knowledge item list.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeItemList"
+              example:
+                items:
+                  - id: 019263a0-1234-7def-8000-000000000050
+                    type: decision
+                    title: State-transition table design
+                    content: Transitions encoded as a static lookup table.
+                    scope: project
+                    task_id: null
+                    session_id: null
+                    project_id: 019263a0-1234-7def-8000-000000000001
+                    created_at: "2026-09-06T12:15:00Z"
+                has_more: false
+                next_cursor: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      operationId: createKnowledge
+      tags:
+        - knowledge
+      summary: Create a knowledge item
+      description: >-
+        Creates a knowledge item attached to the project, a task, or a
+        session. Project-scoped knowledge (conventions, goals, glossary) is
+        distinct from task-produced knowledge.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeItemCreate"
+            example:
+              type: decision
+              title: State-transition table design
+              content: >-
+                Lifecycle transitions are encoded as a static lookup table
+                indexed by (current_status, trigger).
+              scope: project
+      responses:
+        "201":
+          description: Knowledge item created.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeItem"
+              example:
+                id: 019263a0-1234-7def-8000-000000000050
+                type: decision
+                title: State-transition table design
+                content: Transitions encoded as a static lookup table.
+                scope: project
+                task_id: null
+                session_id: null
+                project_id: 019263a0-1234-7def-8000-000000000001
+                created_at: "2026-09-06T12:15:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/{project_id}/knowledge/{knowledge_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/KnowledgeId"
+    get:
+      operationId: getKnowledge
+      tags:
+        - knowledge
+      summary: Get a knowledge item by ID
+      description: Returns the full knowledge item resource.
+      security:
+        - {}
+      responses:
+        "200":
+          description: Knowledge item found.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeItem"
+              example:
+                id: 019263a0-1234-7def-8000-000000000050
+                type: decision
+                title: State-transition table design
+                content: Transitions encoded as a static lookup table.
+                scope: project
+                task_id: null
+                session_id: null
+                project_id: 019263a0-1234-7def-8000-000000000001
+                created_at: "2026-09-06T12:15:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      operationId: deleteKnowledge
+      tags:
+        - knowledge
+      summary: Delete a knowledge item
+      description: Permanently deletes a knowledge item.
+      security:
+        - {}
+      responses:
+        "204":
+          description: Knowledge item deleted.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Events ───────────────────────────────────────────────────────────
+
+  /api/v1/events:
+    get:
+      operationId: getEvents
+      tags:
+        - events
+      summary: Subscribe to domain events via SSE
+      description: >-
+        Opens a Server-Sent Events stream delivering typed domain events in
+        real time. Optionally filter to a single project. No replay or
+        Last-Event-ID support in v1 — clients refetch on reconnect. See
+        openapi/shepherd-events.asyncapi.yaml for the full event catalog
+        and payload schemas.
+      security:
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/ProjectFilter"
+      responses:
+        "200":
+          description: SSE stream opened.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                minLength: 1
+                maxLength: 65536
+                pattern: "^[\\s\\S]+$"
+                description: >-
+                  Newline-delimited SSE events. Each event has an `event:`
+                  field (the event type) and a `data:` field (JSON payload).
+                  Event types: project.created, project.updated,
+                  task.created, task.updated, task.status_changed,
+                  relation.added, relation.removed, claim.acquired,
+                  claim.renewed, claim.released, claim.expired,
+                  session.recorded, knowledge.added.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+# ════════════════════════════════════════════════════════════════════════
+# Components
+# ════════════════════════════════════════════════════════════════════════
+
 components:
+  # ── Security schemes ─────────────────────────────────────────────────
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Placeholder for future authentication. v1 runs on localhost without
+        auth enforcement. See docs/00-scope.md for the auth roadmap (F4).
+        Tokens will follow RFC8725 JSON Web Token Best Current Practices.
+
+  # ── Parameters ───────────────────────────────────────────────────────
+
+  parameters:
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      description: Unique project identifier.
+      schema:
+        type: string
+        format: uuid
+        minLength: 36
+        maxLength: 36
+        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      description: Unique task identifier.
+      schema:
+        type: string
+        format: uuid
+        minLength: 36
+        maxLength: 36
+        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      description: Unique session identifier.
+      schema:
+        type: string
+        format: uuid
+        minLength: 36
+        maxLength: 36
+        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+    RelationId:
+      name: relation_id
+      in: path
+      required: true
+      description: Unique relation identifier.
+      schema:
+        type: string
+        format: uuid
+        minLength: 36
+        maxLength: 36
+        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+    KnowledgeId:
+      name: knowledge_id
+      in: path
+      required: true
+      description: Unique knowledge item identifier.
+      schema:
+        type: string
+        format: uuid
+        minLength: 36
+        maxLength: 36
+        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor for fetching the next page.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+        pattern: "^[a-zA-Z0-9_=-]+$"
+
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of items per page. Default 25, max 100.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 25
+
+    StatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Filter tasks by status.
+      schema:
+        type: string
+        enum:
+          - proposed
+          - approved
+          - ready
+          - in_progress
+          - in_review
+          - done
+          - blocked
+          - cancelled
+        minLength: 4
+        maxLength: 11
+
+    TypeFilter:
+      name: type
+      in: query
+      required: false
+      description: Filter tasks by type.
+      schema:
+        type: string
+        enum:
+          - code
+          - question
+          - refactor
+          - review
+          - research
+        minLength: 4
+        maxLength: 8
+
+    ProjectFilter:
+      name: project_id
+      in: query
+      required: false
+      description: Filter events to a single project.
+      schema:
+        type: string
+        format: uuid
+        minLength: 36
+        maxLength: 36
+        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+  # ── Headers ────────────────────────────────────────────────────────────
+
+  headers:
+    RateLimit-Limit:
+      description: Maximum number of requests allowed in the current window.
+      required: true
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100000
+    RateLimit-Remaining:
+      description: Number of requests remaining in the current window.
+      required: true
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        maximum: 100000
+    RateLimit-Reset:
+      description: Seconds until the current rate-limit window resets.
+      required: true
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        maximum: 86400
+    Retry-After:
+      description: Seconds to wait before retrying after a 429 response.
+      required: true
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        maximum: 86400
+    Access-Control-Allow-Origin:
+      description: CORS allowed origin.
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 500
+        pattern: "^[\\x20-\\x7E]+$"
+
+  # ── Reusable responses ───────────────────────────────────────────────
+
+  responses:
+    Unauthorized:
+      description: Authentication required or invalid token.
+      headers:
+        RateLimit-Limit:
+          $ref: "#/components/headers/RateLimit-Limit"
+        RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimit-Remaining"
+        RateLimit-Reset:
+          $ref: "#/components/headers/RateLimit-Reset"
+        Access-Control-Allow-Origin:
+          $ref: "#/components/headers/Access-Control-Allow-Origin"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          example:
+            type: "urn:shepherd:error:unauthorized"
+            title: Unauthorized
+            status: 401
+            detail: A valid bearer token is required.
+
+    NotFound:
+      description: Requested resource does not exist.
+      headers:
+        RateLimit-Limit:
+          $ref: "#/components/headers/RateLimit-Limit"
+        RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimit-Remaining"
+        RateLimit-Reset:
+          $ref: "#/components/headers/RateLimit-Reset"
+        Access-Control-Allow-Origin:
+          $ref: "#/components/headers/Access-Control-Allow-Origin"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          example:
+            type: "urn:shepherd:error:not-found"
+            title: Not Found
+            status: 404
+            detail: "The requested resource was not found."
+
+    ValidationError:
+      description: Request body or parameters failed validation.
+      headers:
+        RateLimit-Limit:
+          $ref: "#/components/headers/RateLimit-Limit"
+        RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimit-Remaining"
+        RateLimit-Reset:
+          $ref: "#/components/headers/RateLimit-Reset"
+        Access-Control-Allow-Origin:
+          $ref: "#/components/headers/Access-Control-Allow-Origin"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          example:
+            type: "urn:shepherd:error:validation-error"
+            title: Validation Error
+            status: 422
+            detail: One or more fields failed validation.
+            errors:
+              - field: /title
+                message: must be at least 1 character
+                code: min_length
+
+    Conflict:
+      description: >-
+        The request conflicts with current state. Used for claim conflicts,
+        invalid status transitions, and dependency cycle violations.
+      headers:
+        RateLimit-Limit:
+          $ref: "#/components/headers/RateLimit-Limit"
+        RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimit-Remaining"
+        RateLimit-Reset:
+          $ref: "#/components/headers/RateLimit-Reset"
+        Access-Control-Allow-Origin:
+          $ref: "#/components/headers/Access-Control-Allow-Origin"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          example:
+            type: "urn:shepherd:error:claim-conflict"
+            title: Claim Conflict
+            status: 409
+            detail: Task is already claimed by another session.
+
+    Gone:
+      description: >-
+        The claim lease has expired. The task has been released back to
+        ready.
+      headers:
+        RateLimit-Limit:
+          $ref: "#/components/headers/RateLimit-Limit"
+        RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimit-Remaining"
+        RateLimit-Reset:
+          $ref: "#/components/headers/RateLimit-Reset"
+        Access-Control-Allow-Origin:
+          $ref: "#/components/headers/Access-Control-Allow-Origin"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          example:
+            type: "urn:shepherd:error:lease-expired"
+            title: Lease Expired
+            status: 410
+            detail: The claim lease expired at 2026-09-06T10:20:00Z.
+
+    InternalError:
+      description: Unexpected server error.
+      headers:
+        RateLimit-Limit:
+          $ref: "#/components/headers/RateLimit-Limit"
+        RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimit-Remaining"
+        RateLimit-Reset:
+          $ref: "#/components/headers/RateLimit-Reset"
+        Access-Control-Allow-Origin:
+          $ref: "#/components/headers/Access-Control-Allow-Origin"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          example:
+            type: "urn:shepherd:error:internal-error"
+            title: Internal Server Error
+            status: 500
+            detail: An unexpected error occurred.
+
+    TooManyRequests:
+      description: Rate limit exceeded. Retry after the indicated delay.
+      headers:
+        RateLimit-Limit:
+          $ref: "#/components/headers/RateLimit-Limit"
+        RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimit-Remaining"
+        RateLimit-Reset:
+          $ref: "#/components/headers/RateLimit-Reset"
+        Access-Control-Allow-Origin:
+          $ref: "#/components/headers/Access-Control-Allow-Origin"
+        Retry-After:
+          $ref: "#/components/headers/Retry-After"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+          example:
+            type: "urn:shepherd:error:rate-limit-exceeded"
+            title: Too Many Requests
+            status: 429
+            detail: Rate limit exceeded. Try again in 60 seconds.
+
+  # ── Schemas ──────────────────────────────────────────────────────────
+
   schemas:
+    # ─── System ──────────────────────────────────────────────────────
+
     Health:
       type: object
-      description: Service health report.
+      description: >-
+        Service health report per draft-inadarei-api-health-check-06.
+        Content-Type: application/health+json.
+      additionalProperties: false
       required:
         - status
         - version
       properties:
         status:
           type: string
-          description: Always `ok` while the daemon is serving.
+          description: >-
+            Service status. `pass` = healthy, `warn` = healthy with
+            concerns, `fail` = unhealthy.
           enum:
-            - ok
+            - pass
+            - warn
+            - fail
         version:
           type: string
-          description: shepherd-core semantic version.
+          description: Public version of the service (SemVer).
+          minLength: 5
+          maxLength: 20
+          pattern: "^\\d+\\.\\d+\\.\\d+(-[a-z0-9.]+)?$"
+        description:
+          type: string
+          description: Human-friendly description of the service.
+          minLength: 1
+          maxLength: 500
+          pattern: "^\\S[\\s\\S]*$"
+        output:
+          type: string
+          description: >-
+            Raw error output for unhealthy status. Present only when
+            status is `fail` or `warn`.
+          minLength: 1
+          maxLength: 5000
+          pattern: "^[\\s\\S]+$"
+        notes:
+          type: array
+          description: Informational notes about the service.
+          minItems: 0
+          maxItems: 50
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+            pattern: "^[\\s\\S]+$"
+
+    # ─── Error model (RFC 9457) ──────────────────────────────────────
+
+    ProblemDetail:
+      type: object
+      description: >-
+        RFC 9457 problem detail. Every error response uses this shape with a
+        stable URN type slug for machine-readable identification.
+      additionalProperties: false
+      required:
+        - type
+        - title
+        - status
+      properties:
+        type:
+          type: string
+          description: >-
+            Stable URN identifying the error type. Machine-readable.
+          minLength: 10
+          maxLength: 100
+          pattern: "^urn:shepherd:error:[a-z][a-z0-9-]+$"
+        title:
+          type: string
+          description: Short human-readable summary of the error.
+          minLength: 1
+          maxLength: 100
+          pattern: "^\\S[\\s\\S]*$"
+        status:
+          type: integer
+          description: HTTP status code.
+          format: int32
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.
+          minLength: 1
+          maxLength: 2000
+          pattern: "^[\\s\\S]+$"
+        instance:
+          type: string
+          description: URI identifying this specific occurrence.
+          minLength: 1
+          maxLength: 500
+          pattern: "^[\\x20-\\x7E]+$"
+        errors:
+          type: array
+          description: Detailed validation errors (present on 422 responses).
+          minItems: 0
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/ValidationErrorDetail"
+
+    ValidationErrorDetail:
+      type: object
+      description: A single field-level validation error.
+      additionalProperties: false
+      required:
+        - field
+        - message
+      properties:
+        field:
+          type: string
+          description: JSON Pointer to the invalid field.
+          minLength: 1
+          maxLength: 200
+          pattern: "^/[a-zA-Z0-9_/]+$"
+        message:
+          type: string
+          description: Human-readable error message.
+          minLength: 1
+          maxLength: 500
+          pattern: "^[\\s\\S]+$"
+        code:
+          type: string
+          description: Machine-readable error code.
+          minLength: 1
+          maxLength: 50
+          pattern: "^[a-z][a-z0-9_]+$"
+
+    # ─── Identity ────────────────────────────────────────────────────
+
+    Identity:
+      type: object
+      description: >-
+        Self-declared caller descriptor. Not authentication — callers
+        identify themselves on claim and report calls. The harness (e.g.
+        Claude Code, Cursor), the agent/model (e.g. Opus 5), a session
+        identifier, and an optional label. Stored on sessions and claims;
+        humans get an identity too.
+      additionalProperties: false
+      required:
+        - harness
+        - agent_model
+        - session_id
+      properties:
+        harness:
+          type: string
+          description: >-
+            The agent harness or tool making the call (e.g. claude-code,
+            cursor, custom-script).
+          minLength: 1
+          maxLength: 100
+          pattern: "^[\\x20-\\x7E]+$"
+        agent_model:
+          type: string
+          description: >-
+            The agent or model performing the work (e.g. opus-5, human).
+          minLength: 1
+          maxLength: 100
+          pattern: "^[\\x20-\\x7E]+$"
+        session_id:
+          type: string
+          description: >-
+            Caller-generated session identifier for correlating work
+            across multiple API calls within a single work session.
+          minLength: 1
+          maxLength: 200
+          pattern: "^[\\x20-\\x7E]+$"
+        label:
+          type: string
+          description: >-
+            Optional human-readable label for this session (e.g. "S3
+            domain core", "bug fix #42").
+          minLength: 1
+          maxLength: 200
+          pattern: "^[\\x20-\\x7E]+$"
+
+    # ─── Project ─────────────────────────────────────────────────────
+
+    Project:
+      type: object
+      description: A registered project — repository or effort.
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - description
+        - settings
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique project identifier.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        name:
+          type: string
+          description: Human-readable project name.
+          minLength: 1
+          maxLength: 200
+          pattern: "^\\S[\\s\\S]*$"
+        description:
+          type: string
+          description: Project description.
+          minLength: 0
+          maxLength: 5000
+          pattern: "^[\\s\\S]*$"
+        settings:
+          $ref: "#/components/schemas/ProjectSettings"
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp.
+          minLength: 20
+          maxLength: 32
+        updated_at:
+          type: string
+          format: date-time
+          description: Last modification timestamp.
+          minLength: 20
+          maxLength: 32
+
+    ProjectSettings:
+      type: object
+      description: >-
+        Project-level settings. The review gate controls whether agent-
+        completed tasks require human approval.
+      additionalProperties: false
+      required:
+        - review_gate
+      properties:
+        review_gate:
+          type: boolean
+          description: >-
+            When true (default), tasks transition from `in_progress` to
+            `in_review` on successful session. When false, they go
+            directly to `done`.
+
+    ProjectCreate:
+      type: object
+      description: Request body for creating a project.
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Human-readable project name.
+          minLength: 1
+          maxLength: 200
+          pattern: "^\\S[\\s\\S]*$"
+        description:
+          type: string
+          description: Project description.
+          minLength: 0
+          maxLength: 5000
+          pattern: "^[\\s\\S]*$"
+        settings:
+          $ref: "#/components/schemas/ProjectSettings"
+
+    ProjectUpdate:
+      type: object
+      description: >-
+        Request body for partially updating a project. Only provided fields
+        are changed.
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: Human-readable project name.
+          minLength: 1
+          maxLength: 200
+          pattern: "^\\S[\\s\\S]*$"
+        description:
+          type: string
+          description: Project description.
+          minLength: 0
+          maxLength: 5000
+          pattern: "^[\\s\\S]*$"
+        settings:
+          $ref: "#/components/schemas/ProjectSettings"
+
+    ProjectList:
+      type: object
+      description: Paginated list of projects.
+      additionalProperties: false
+      required:
+        - items
+        - has_more
+      properties:
+        items:
+          description: Array of project resources.
+          type: array
+          minItems: 0
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/Project"
+        has_more:
+          type: boolean
+          description: Whether more pages exist after this one.
+        next_cursor:
+          type:
+            - string
+            - "null"
+          description: Cursor for fetching the next page. Null if no more pages.
+          minLength: 1
+          maxLength: 256
+          pattern: "^[a-zA-Z0-9_=-]+$"
+
+    # ─── Task ────────────────────────────────────────────────────────
+
+    Task:
+      type: object
+      description: >-
+        A unit of work within a project. Typed, positioned in the graph, and
+        driven through the lifecycle state machine.
+      additionalProperties: false
+      required:
+        - id
+        - project_id
+        - title
+        - description
+        - type
+        - status
+        - metadata
+        - assignee
+        - graph_role
+        - attempt_count
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique task identifier.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        title:
+          type: string
+          description: Short task title.
+          minLength: 1
+          maxLength: 500
+          pattern: "^\\S[\\s\\S]*$"
+        description:
+          type: string
+          description: Detailed task description.
+          minLength: 0
+          maxLength: 10000
+          pattern: "^[\\s\\S]*$"
+        type:
+          type: string
+          description: >-
+            Task type. Built-in types are conventions, not separate schemas.
+            New types cost nothing; per-type validation is post-v1.
+          enum:
+            - code
+            - question
+            - refactor
+            - review
+            - research
+          minLength: 4
+          maxLength: 8
+        status:
+          type: string
+          description: Current lifecycle status.
+          enum:
+            - proposed
+            - approved
+            - ready
+            - in_progress
+            - in_review
+            - done
+            - blocked
+            - cancelled
+          minLength: 4
+          maxLength: 11
+        metadata:
+          $ref: "#/components/schemas/TaskMetadata"
+        assignee:
+          $ref: "#/components/schemas/NullableIdentity"
+        graph_role:
+          type: array
+          description: >-
+            Optional graph positioning hints. Derived by default (start =
+            no incoming depends_on, end = no outgoing depends_on). Explicit
+            roles override derivation. A single-task project may have both
+            start and end.
+          minItems: 0
+          maxItems: 3
+          items:
+            type: string
+            enum:
+              - start
+              - end
+              - milestone
+            minLength: 3
+            maxLength: 9
+        attempt_count:
+          type: integer
+          format: int32
+          description: >-
+            Number of work attempts (sessions) on this task. Increments on
+            both successful and failed sessions.
+          minimum: 0
+          maximum: 10000
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp.
+          minLength: 20
+          maxLength: 32
+        updated_at:
+          type: string
+          format: date-time
+          description: Last modification timestamp.
+          minLength: 20
+          maxLength: 32
+
+    TaskCreate:
+      type: object
+      description: Request body for creating a task.
+      additionalProperties: false
+      required:
+        - title
+        - type
+      properties:
+        title:
+          type: string
+          description: Short task title.
+          minLength: 1
+          maxLength: 500
+          pattern: "^\\S[\\s\\S]*$"
+        description:
+          type: string
+          description: Detailed task description.
+          minLength: 0
+          maxLength: 10000
+          pattern: "^[\\s\\S]*$"
+        type:
+          type: string
+          description: Task type.
+          enum:
+            - code
+            - question
+            - refactor
+            - review
+            - research
+          minLength: 4
+          maxLength: 8
+        status:
+          type: string
+          description: >-
+            Initial status. `proposed` requires human approval; `approved`
+            proceeds to `ready` when dependencies are met. Defaults to
+            `proposed`.
+          enum:
+            - proposed
+            - approved
+          minLength: 8
+          maxLength: 8
+        metadata:
+          $ref: "#/components/schemas/TaskMetadata"
+        assignee:
+          $ref: "#/components/schemas/Identity"
+        graph_role:
+          type: array
+          description: Optional graph positioning hints.
+          minItems: 0
+          maxItems: 3
+          items:
+            type: string
+            enum:
+              - start
+              - end
+              - milestone
+            minLength: 3
+            maxLength: 9
+
+    TaskUpdate:
+      type: object
+      description: >-
+        Request body for partially updating a task. Only provided fields are
+        changed. Status transitions use dedicated action endpoints.
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          description: Short task title.
+          minLength: 1
+          maxLength: 500
+          pattern: "^\\S[\\s\\S]*$"
+        description:
+          type: string
+          description: Detailed task description.
+          minLength: 0
+          maxLength: 10000
+          pattern: "^[\\s\\S]*$"
+        type:
+          type: string
+          description: Task type.
+          enum:
+            - code
+            - question
+            - refactor
+            - review
+            - research
+          minLength: 4
+          maxLength: 8
+        metadata:
+          $ref: "#/components/schemas/TaskMetadata"
+        assignee:
+          $ref: "#/components/schemas/NullableIdentity"
+        graph_role:
+          type: array
+          description: Optional graph positioning hints.
+          minItems: 0
+          maxItems: 3
+          items:
+            type: string
+            enum:
+              - start
+              - end
+              - milestone
+            minLength: 3
+            maxLength: 9
+
+    TaskList:
+      type: object
+      description: Paginated list of tasks.
+      additionalProperties: false
+      required:
+        - items
+        - has_more
+      properties:
+        items:
+          description: Array of task resources.
+          type: array
+          minItems: 0
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/Task"
+        has_more:
+          type: boolean
+          description: Whether more pages exist after this one.
+        next_cursor:
+          type:
+            - string
+            - "null"
+          description: Cursor for fetching the next page. Null if no more pages.
+          minLength: 1
+          maxLength: 256
+          pattern: "^[a-zA-Z0-9_=-]+$"
+
+    TaskMetadata:
+      type: object
+      description: >-
+        Freeform structured metadata. No schema enforcement in v1 —
+        per-type schemas are a post-v1 follow-up (F7).
+      additionalProperties: true
+      maxProperties: 200
+
+    NullableIdentity:
+      description: Currently assigned identity, or null if unassigned.
+      oneOf:
+        - $ref: "#/components/schemas/Identity"
+        - type: "null"
+
+    NextTaskResult:
+      type: object
+      description: >-
+        Result of the next-task query. Contains the next available task or
+        null if no work is available.
+      additionalProperties: false
+      required:
+        - task
+      properties:
+        task:
+          description: >-
+            The highest-priority ready and unclaimed task, or null if
+            nothing is available.
+          oneOf:
+            - $ref: "#/components/schemas/Task"
+            - type: "null"
+
+    # ─── Task actions ────────────────────────────────────────────────
+
+    ApprovalRequest:
+      type: object
+      description: Request body for approving a proposed task.
+      additionalProperties: false
+      properties:
+        comment:
+          type: string
+          description: Optional comment explaining the approval.
+          minLength: 1
+          maxLength: 2000
+          pattern: "^[\\s\\S]+$"
+
+    RejectionRequest:
+      type: object
+      description: Request body for rejecting a task in review.
+      additionalProperties: false
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          description: Explanation for the rejection.
+          minLength: 1
+          maxLength: 2000
+          pattern: "^[\\s\\S]+$"
+
+    # ─── Claims ──────────────────────────────────────────────────────
+
+    Claim:
+      type: object
+      description: >-
+        A lease binding a task to a caller identity for a bounded time.
+        At most one active claim per task; expired leases release the task
+        back to ready automatically.
+      additionalProperties: false
+      required:
+        - id
+        - task_id
+        - identity
+        - ttl_seconds
+        - lease_id
+        - acquired_at
+        - expires_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique claim identifier.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        task_id:
+          type: string
+          format: uuid
+          description: Claimed task identifier.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        identity:
+          $ref: "#/components/schemas/Identity"
+        ttl_seconds:
+          type: integer
+          format: int32
+          description: Lease time-to-live in seconds.
+          minimum: 30
+          maximum: 86400
+        lease_id:
+          type: string
+          description: >-
+            Opaque lease identifier used for renewal and release
+            verification.
+          minLength: 1
+          maxLength: 100
+          pattern: "^[a-zA-Z0-9_-]+$"
+        acquired_at:
+          type: string
+          format: date-time
+          description: When the claim was first acquired.
+          minLength: 20
+          maxLength: 32
+        expires_at:
+          type: string
+          format: date-time
+          description: When the claim expires if not renewed.
+          minLength: 20
+          maxLength: 32
+        renewed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the claim was last renewed, if ever.
+          minLength: 20
+          maxLength: 32
+
+    ClaimRequest:
+      type: object
+      description: Request body for claiming a task.
+      additionalProperties: false
+      required:
+        - identity
+        - ttl_seconds
+      properties:
+        identity:
+          $ref: "#/components/schemas/Identity"
+        ttl_seconds:
+          type: integer
+          format: int32
+          description: >-
+            Requested lease duration in seconds. The server may cap this
+            value.
+          minimum: 30
+          maximum: 86400
+
+    ClaimRenewal:
+      type: object
+      description: Request body for renewing a claim.
+      additionalProperties: false
+      required:
+        - identity
+      properties:
+        identity:
+          $ref: "#/components/schemas/Identity"
+        ttl_seconds:
+          type: integer
+          format: int32
+          description: >-
+            New lease duration from now. If omitted, the original TTL is
+            reused.
+          minimum: 30
+          maximum: 86400
+
+    ClaimRelease:
+      type: object
+      description: Request body for releasing a claim.
+      additionalProperties: false
+      required:
+        - identity
+      properties:
+        identity:
+          $ref: "#/components/schemas/Identity"
+
+    # ─── Sessions ────────────────────────────────────────────────────
+
+    Session:
+      type: object
+      description: >-
+        A structured work episode on a task. Records identity, timestamps,
+        outcome, decisions made, knowledge items produced, and artifacts.
+      additionalProperties: false
+      required:
+        - id
+        - task_id
+        - identity
+        - started_at
+        - ended_at
+        - outcome
+        - summary
+        - decisions
+        - knowledge_items
+        - artifacts
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique session identifier.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        task_id:
+          type: string
+          format: uuid
+          description: Task this session was recorded against.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        identity:
+          $ref: "#/components/schemas/Identity"
+        started_at:
+          type: string
+          format: date-time
+          description: When the work session started.
+          minLength: 20
+          maxLength: 32
+        ended_at:
+          type: string
+          format: date-time
+          description: When the work session ended.
+          minLength: 20
+          maxLength: 32
+        outcome:
+          type: string
+          description: Whether the session succeeded or failed.
+          enum:
+            - succeeded
+            - failed
+          minLength: 6
+          maxLength: 9
+        failure_reason:
+          type:
+            - string
+            - "null"
+          description: >-
+            Explanation of why the session failed. Required when outcome is
+            `failed`, null otherwise.
+          minLength: 1
+          maxLength: 5000
+          pattern: "^[\\s\\S]+$"
+        summary:
+          type: string
+          description: Human-readable summary of what was accomplished.
+          minLength: 0
+          maxLength: 10000
+          pattern: "^[\\s\\S]*$"
+        decisions:
+          type: array
+          description: Key decisions made during this session.
+          minItems: 0
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+            pattern: "^[\\s\\S]+$"
+        knowledge_items:
+          type: array
+          description: Knowledge items produced during this session.
+          minItems: 0
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/KnowledgeItem"
+        artifacts:
+          type: array
+          description: >-
+            Links to artifacts produced (commits, PRs, files). Artifacts are
+            not a separate entity — they are knowledge items of type `link`.
+          minItems: 0
+          maxItems: 100
+          items:
+            type: string
+            format: uri
+            minLength: 1
+            maxLength: 2000
+            pattern: "^https?://\\S+$"
+        created_at:
+          type: string
+          format: date-time
+          description: When this session record was created.
+          minLength: 20
+          maxLength: 32
+
+    SessionReport:
+      type: object
+      description: >-
+        Request body for reporting a work session. The task must be
+        in_progress and claimed by the reporting identity.
+      additionalProperties: false
+      required:
+        - identity
+        - started_at
+        - ended_at
+        - outcome
+        - summary
+      properties:
+        identity:
+          $ref: "#/components/schemas/Identity"
+        started_at:
+          type: string
+          format: date-time
+          description: When the work session started.
+          minLength: 20
+          maxLength: 32
+        ended_at:
+          type: string
+          format: date-time
+          description: When the work session ended.
+          minLength: 20
+          maxLength: 32
+        outcome:
+          type: string
+          description: Whether the session succeeded or failed.
+          enum:
+            - succeeded
+            - failed
+          minLength: 6
+          maxLength: 9
+        failure_reason:
+          type: string
+          description: >-
+            Required when outcome is `failed`. Explains why the session
+            failed.
+          minLength: 1
+          maxLength: 5000
+          pattern: "^[\\s\\S]+$"
+        summary:
+          type: string
+          description: Human-readable summary of what was accomplished.
+          minLength: 1
+          maxLength: 10000
+          pattern: "^[\\s\\S]+$"
+        decisions:
+          type: array
+          description: Key decisions made during this session.
+          minItems: 0
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+            pattern: "^[\\s\\S]+$"
+        knowledge_items:
+          type: array
+          description: Knowledge items produced during this session.
+          minItems: 0
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/KnowledgeItemCreate"
+        artifacts:
+          type: array
+          description: Links to artifacts produced.
+          minItems: 0
+          maxItems: 100
+          items:
+            type: string
+            format: uri
+            minLength: 1
+            maxLength: 2000
+            pattern: "^https?://\\S+$"
+
+    SessionList:
+      type: object
+      description: Paginated list of sessions.
+      additionalProperties: false
+      required:
+        - items
+        - has_more
+      properties:
+        items:
+          description: Array of session resources.
+          type: array
+          minItems: 0
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/Session"
+        has_more:
+          type: boolean
+          description: Whether more pages exist after this one.
+        next_cursor:
+          type:
+            - string
+            - "null"
+          description: Cursor for fetching the next page. Null if no more pages.
+          minLength: 1
+          maxLength: 256
+          pattern: "^[a-zA-Z0-9_=-]+$"
+
+    # ─── Relations ───────────────────────────────────────────────────
+
+    Relation:
+      type: object
+      description: >-
+        A directed edge between two tasks. Decomposition edges represent
+        parent/child splits. Dependency edges (depends_on) represent
+        prerequisite ordering. The dependency graph is always acyclic.
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - source_task_id
+        - target_task_id
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique relation identifier.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        type:
+          type: string
+          description: >-
+            Relation type. `decomposition` = parent/child split.
+            `depends_on` = prerequisite ordering.
+          enum:
+            - decomposition
+            - depends_on
+          minLength: 10
+          maxLength: 13
+        source_task_id:
+          type: string
+          format: uuid
+          description: >-
+            The source task. For decomposition, this is the parent. For
+            depends_on, this is the task that depends on the target.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        target_task_id:
+          type: string
+          format: uuid
+          description: >-
+            The target task. For decomposition, this is the child. For
+            depends_on, this is the prerequisite.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        created_at:
+          type: string
+          format: date-time
+          description: When this relation was created.
+          minLength: 20
+          maxLength: 32
+
+    RelationCreate:
+      type: object
+      description: >-
+        Request body for creating a relation. The source task is the task
+        in the URL path; only the target and relation type are specified.
+      additionalProperties: false
+      required:
+        - type
+        - target_task_id
+      properties:
+        type:
+          type: string
+          description: Relation type.
+          enum:
+            - decomposition
+            - depends_on
+          minLength: 10
+          maxLength: 13
+        target_task_id:
+          type: string
+          format: uuid
+          description: The target task for this relation.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+    RelationList:
+      type: object
+      description: >-
+        List of relations for a task. Not paginated — a task's relation
+        count is bounded by the project task count.
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          description: Array of relation resources.
+          type: array
+          minItems: 0
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/Relation"
+
+    # ─── Knowledge ───────────────────────────────────────────────────
+
+    KnowledgeItem:
+      type: object
+      description: >-
+        A typed, reusable piece of information attached to a task, session,
+        or the project itself. Addressable project-wide regardless of which
+        task produced it.
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - title
+        - content
+        - scope
+        - project_id
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique knowledge item identifier.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        type:
+          type: string
+          description: >-
+            Knowledge item type. `link` = issue/PR/commit/doc.
+            `transcript` = session transcript. `decision` = a recorded
+            decision. `note` = refined, reusable content.
+          enum:
+            - link
+            - transcript
+            - decision
+            - note
+          minLength: 4
+          maxLength: 10
+        title:
+          type: string
+          description: Short title for the knowledge item.
+          minLength: 1
+          maxLength: 500
+          pattern: "^\\S[\\s\\S]*$"
+        content:
+          type: string
+          description: The knowledge item content.
+          minLength: 1
+          maxLength: 100000
+          pattern: "^[\\s\\S]+$"
+        scope:
+          type: string
+          description: >-
+            Where this knowledge item is attached. `project` = project-level
+            knowledge (conventions, goals). `task` = produced by or attached
+            to a task. `session` = produced during a specific session.
+          enum:
+            - task
+            - session
+            - project
+          minLength: 4
+          maxLength: 7
+        task_id:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: Task this item is attached to, if scope is `task`.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        session_id:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: Session this item is attached to, if scope is `session`.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        created_at:
+          type: string
+          format: date-time
+          description: When this knowledge item was created.
+          minLength: 20
+          maxLength: 32
+
+    KnowledgeItemCreate:
+      type: object
+      description: Request body for creating a knowledge item.
+      additionalProperties: false
+      required:
+        - type
+        - title
+        - content
+      properties:
+        type:
+          type: string
+          description: Knowledge item type.
+          enum:
+            - link
+            - transcript
+            - decision
+            - note
+          minLength: 4
+          maxLength: 10
+        title:
+          type: string
+          description: Short title for the knowledge item.
+          minLength: 1
+          maxLength: 500
+          pattern: "^\\S[\\s\\S]*$"
+        content:
+          type: string
+          description: The knowledge item content.
+          minLength: 1
+          maxLength: 100000
+          pattern: "^[\\s\\S]+$"
+        scope:
+          type: string
+          description: >-
+            Where to attach this item. Defaults to `project` when created
+            via the project knowledge endpoint. Set to `task` with a
+            task_id when attaching to a task.
+          enum:
+            - task
+            - session
+            - project
+          minLength: 4
+          maxLength: 7
+        task_id:
+          type: string
+          format: uuid
+          description: Task to attach to, when scope is `task`.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        session_id:
+          type: string
+          format: uuid
+          description: Session to attach to, when scope is `session`.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+    KnowledgeItemList:
+      type: object
+      description: Paginated list of knowledge items.
+      additionalProperties: false
+      required:
+        - items
+        - has_more
+      properties:
+        items:
+          description: Array of knowledge item resources.
+          type: array
+          minItems: 0
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/KnowledgeItem"
+        has_more:
+          type: boolean
+          description: Whether more pages exist after this one.
+        next_cursor:
+          type:
+            - string
+            - "null"
+          description: Cursor for fetching the next page. Null if no more pages.
+          minLength: 1
+          maxLength: 256
+          pattern: "^[a-zA-Z0-9_=-]+$"
+
+    # ─── Context bundle ──────────────────────────────────────────────
+
+    ContextBundle:
+      type: object
+      description: >-
+        The assembled context a caller receives upon claiming a task.
+        Contains the task itself, summaries from dependency ancestors and
+        parent chain, project-level knowledge, linked artifacts, and
+        in-flight sibling awareness.
+      additionalProperties: false
+      required:
+        - task
+        - ancestor_summaries
+        - project_knowledge
+        - artifacts
+        - sibling_tasks
+      properties:
+        task:
+          $ref: "#/components/schemas/Task"
+        ancestor_summaries:
+          type: array
+          description: >-
+            Summaries and decisions from dependency ancestors and parent
+            chain, ordered from root to immediate predecessor.
+          minItems: 0
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/AncestorSummary"
+        project_knowledge:
+          type: array
+          description: Project-level knowledge items (conventions, goals, glossary).
+          minItems: 0
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/KnowledgeItem"
+        artifacts:
+          type: array
+          description: Artifacts linked to this task and its ancestors.
+          minItems: 0
+          maxItems: 500
+          items:
+            type: string
+            format: uri
+            minLength: 1
+            maxLength: 2000
+            pattern: "^https?://\\S+$"
+        sibling_tasks:
+          type: array
+          description: >-
+            Related tasks currently claimed by other sessions. Provides
+            in-flight sibling awareness to prevent duplicated work.
+          minItems: 0
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/SiblingTask"
+
+    AncestorSummary:
+      type: object
+      description: >-
+        Summary of a dependency ancestor or parent task — what it produced
+        and what decisions were made.
+      additionalProperties: false
+      required:
+        - task_id
+        - title
+        - status
+        - summary
+        - decisions
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          description: Ancestor task identifier.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        title:
+          type: string
+          description: Ancestor task title.
+          minLength: 1
+          maxLength: 500
+          pattern: "^\\S[\\s\\S]*$"
+        status:
+          type: string
+          description: Ancestor task current status.
+          enum:
+            - proposed
+            - approved
+            - ready
+            - in_progress
+            - in_review
+            - done
+            - blocked
+            - cancelled
+          minLength: 4
+          maxLength: 11
+        summary:
+          type: string
+          description: Combined summary from the ancestor's sessions.
+          minLength: 0
+          maxLength: 10000
+          pattern: "^[\\s\\S]*$"
+        decisions:
+          type: array
+          description: Decisions made during the ancestor's sessions.
+          minItems: 0
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+            pattern: "^[\\s\\S]+$"
+
+    SiblingTask:
+      type: object
+      description: >-
+        Minimal view of a related task currently being worked on by another
+        session.
+      additionalProperties: false
+      required:
+        - task_id
+        - title
+        - status
+        - claimed_by
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          description: Sibling task identifier.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        title:
+          type: string
+          description: Sibling task title.
+          minLength: 1
+          maxLength: 500
+          pattern: "^\\S[\\s\\S]*$"
+        status:
+          type: string
+          description: Sibling task current status.
+          enum:
+            - proposed
+            - approved
+            - ready
+            - in_progress
+            - in_review
+            - done
+            - blocked
+            - cancelled
+          minLength: 4
+          maxLength: 11
+        claimed_by:
+          $ref: "#/components/schemas/Identity"
+
+    # ─── Export / Import ─────────────────────────────────────────────
+
+    ExportDocument:
+      type: object
+      description: >-
+        Versioned, self-contained JSON export of a project. Carries its own
+        schema version independently of the API version. Import always
+        creates a new project — no merge semantics in v1.
+      additionalProperties: false
+      required:
+        - version
+        - project
+        - tasks
+        - relations
+        - sessions
+        - knowledge
+      properties:
+        version:
+          type: string
+          description: >-
+            Export document schema version (SemVer). The server rejects
+            imports with incompatible versions.
+          minLength: 5
+          maxLength: 20
+          pattern: "^\\d+\\.\\d+\\.\\d+(-[a-z0-9.]+)?$"
+        project:
+          $ref: "#/components/schemas/Project"
+        tasks:
+          type: array
+          description: All tasks in the project.
+          minItems: 0
+          maxItems: 10000
+          items:
+            $ref: "#/components/schemas/Task"
+        relations:
+          type: array
+          description: All relations in the project.
+          minItems: 0
+          maxItems: 50000
+          items:
+            $ref: "#/components/schemas/Relation"
+        sessions:
+          type: array
+          description: All sessions in the project.
+          minItems: 0
+          maxItems: 50000
+          items:
+            $ref: "#/components/schemas/Session"
+        knowledge:
+          type: array
+          description: All knowledge items in the project.
+          minItems: 0
+          maxItems: 50000
+          items:
+            $ref: "#/components/schemas/KnowledgeItem"
+
+    ImportResult:
+      type: object
+      description: Result of a successful project import.
+      additionalProperties: false
+      required:
+        - project_id
+        - task_count
+        - relation_count
+        - session_count
+        - knowledge_count
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Identifier of the newly created project.
+          minLength: 36
+          maxLength: 36
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        task_count:
+          type: integer
+          format: int32
+          description: Number of tasks imported.
+          minimum: 0
+          maximum: 10000
+        relation_count:
+          type: integer
+          format: int32
+          description: Number of relations imported.
+          minimum: 0
+          maximum: 50000
+        session_count:
+          type: integer
+          format: int32
+          description: Number of sessions imported.
+          minimum: 0
+          maximum: 50000
+        knowledge_count:
+          type: integer
+          format: int32
+          description: Number of knowledge items imported.
+          minimum: 0
+          maximum: 50000

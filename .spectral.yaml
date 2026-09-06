@@ -1,2 +1,106 @@
+# Shepherd — Spectral config
+#
+# Four-ruleset stack, matching the apkg-ai/oas org standard.
+# Each override is documented; unlisted rules run at their default severity.
+#
+# Usage:  npm run lint:spec
+# CI:     .github/workflows/quality-gates.yaml → Spec / Lint
+
 extends:
-  - spectral:oas
+  - "spectral:oas"
+  - "@stoplight/spectral-owasp-ruleset"
+  - "@ibm-cloud/openapi-ruleset"
+  - "@apisyouwonthate/style-guide"
+
+rules:
+  # ──────────────────────────────────────────────────────────────────────
+  # Core OAS
+  # ──────────────────────────────────────────────────────────────────────
+
+  # OpenAPI 3.1 uses SPDX `identifier`, not `url`. The rule predates 3.1.
+  license-url: off
+
+  # ──────────────────────────────────────────────────────────────────────
+  # OWASP 2023 — all at default (error) severity.
+  # ──────────────────────────────────────────────────────────────────────
+
+  # ──────────────────────────────────────────────────────────────────────
+  # IBM Cloud OpenAPI — disable rules that conflict with shepherd's
+  # REST conventions. Rules not listed here run at default severity.
+  # ──────────────────────────────────────────────────────────────────────
+
+  # shepherd uses camelCase operationIds (getHealth, listProjects).
+  ibm-operationid-casing-convention: off
+
+  # Action endpoints (claimTask, approveTask) don't follow IBM's
+  # verb_resource_noun naming convention.
+  ibm-operationid-naming-convention: off
+
+  # IBM naming conventions (ProjectPrototype, ProjectCollection) conflict
+  # with our conventions (ProjectCreate, ProjectList). Ours are clearer.
+  ibm-schema-naming-convention: off
+
+  # /api/v1/projects/import vs /api/v1/projects/{project_id} is
+  # structurally ambiguous — project IDs are UUIDs and never collide.
+  ibm-no-ambiguous-paths: off
+
+  # /health is at root (infrastructure, not versioned API) and our API
+  # prefix is /api/v1 (IBM expects bare /v1 as first segment).
+  ibm-major-version-in-path: off
+
+  # `next-task` uses kebab-case (AYWH convention); IBM expects snake_case.
+  ibm-path-segment-casing-convention: off
+
+  # shepherd uses cursor-based pagination with `cursor`/`limit` naming,
+  # not IBM's `start`/`limit` with `limit` echoed in the response body.
+  ibm-pagination-style: off
+
+  # shepherd uses application/json for PATCH, not merge-patch+json.
+  ibm-patch-request-content-type: off
+
+  # shepherd uses RFC 9457 application/problem+json for errors.
+  ibm-error-content-type-is-json: off
+  ibm-error-response-schemas: off
+
+  # IBM prefers 400 over 422 for validation errors.
+  ibm-response-status-codes: off
+
+  # IBM format list doesn't include OpenAPI 3.1 `type: "null"` or
+  # `format: uri`. These are valid in OAS 3.1.
+  ibm-schema-type-format: off
+
+  # OpenAPI 3.1 nullable pattern (oneOf with type: "null") is inherently
+  # inline — you cannot $ref a null type.
+  ibm-avoid-inline-schemas: off
+
+  # next_cursor, failure_reason, and other fields are nullable by design.
+  ibm-no-nullable-properties: off
+
+  # Health.notes and ProblemDetail.errors are legitimately optional arrays.
+  ibm-required-array-properties-in-response: off
+
+  # Task `metadata` is intentionally freeform JSON (validated post-v1).
+  ibm-well-defined-dictionaries: off
+
+  # Fields like `id` and `status` appear on multiple schemas with different
+  # semantics (project id ≠ task id; task status ≠ health status).
+  ibm-property-consistent-name-and-type: off
+
+  # IBM expects list arrays named after the resource (projects, tasks);
+  # we use `items` for consistency across all list responses.
+  ibm-collection-array-property: off
+
+  # ──────────────────────────────────────────────────────────────────────
+  # APIs You Won't Hate — disable rules that conflict with shepherd's
+  # deliberate design choices.
+  # ──────────────────────────────────────────────────────────────────────
+
+  # shepherd serves the UI at /, not an API home resource. The path is a
+  # fallback in the server, not declared in the spec.
+  api-home: off
+
+  # The 200 health response conforms to the RFC draft (application/health+json),
+  # but this rule also fires on $ref'd error responses (401, 422, 429, 500)
+  # which correctly use application/problem+json. False positive.
+  api-health-format: off
+

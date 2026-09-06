@@ -1,0 +1,9 @@
+# Shepherd — AsyncAPI Spectral config
+#
+# Separate from .spectral.yaml because the OAS-specific rulesets (IBM,
+# OWASP, AYWH) produce irrelevant errors against AsyncAPI documents.
+#
+# Usage:  npm run lint:events
+
+extends:
+  - "spectral:asyncapi"

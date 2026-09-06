@@ -311,9 +311,13 @@ jobs:
         run: |
           npm ci --prefer-offline
 
-      - name: Spectral
+      - name: Spectral (OpenAPI)
         run: |
           npm run lint:spec
+
+      - name: Spectral (AsyncAPI)
+        run: |
+          npm run lint:events
 
   coverage-report:
     name: Coverage Report

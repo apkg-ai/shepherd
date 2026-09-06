@@ -1,0 +1,556 @@
+asyncapi: 3.0.0
+info:
+  title: shepherd Events
+  version: 0.1.0
+  description: >-
+    SSE event catalog for shepherd. Events are delivered as Server-Sent Events
+    on GET /api/v1/events. This document defines the message schemas; the REST
+    endpoint itself is described in openapi/shepherd.yaml.
+  contact:
+    name: apkg
+    url: https://github.com/apkg-ai/shepherd
+    email: contact@apkg.dev
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  tags:
+    - name: events
+      description: Real-time domain events delivered via Server-Sent Events
+
+servers:
+  local:
+    host: 127.0.0.1:7437
+    pathname: /api/v1/events
+    protocol: http
+    description: Local daemon SSE endpoint
+
+channels:
+  events:
+    address: /api/v1/events
+    description: >-
+      Single SSE stream for all domain events. Clients may filter by project_id
+      query parameter. No replay or Last-Event-ID in v1 — clients refetch on
+      reconnect.
+    parameters:
+      project_id:
+        description: Filter events to a single project (UUID).
+    messages:
+      projectCreated:
+        $ref: "#/components/messages/ProjectCreated"
+      projectUpdated:
+        $ref: "#/components/messages/ProjectUpdated"
+      taskCreated:
+        $ref: "#/components/messages/TaskCreated"
+      taskUpdated:
+        $ref: "#/components/messages/TaskUpdated"
+      taskStatusChanged:
+        $ref: "#/components/messages/TaskStatusChanged"
+      relationAdded:
+        $ref: "#/components/messages/RelationAdded"
+      relationRemoved:
+        $ref: "#/components/messages/RelationRemoved"
+      claimAcquired:
+        $ref: "#/components/messages/ClaimAcquired"
+      claimRenewed:
+        $ref: "#/components/messages/ClaimRenewed"
+      claimReleased:
+        $ref: "#/components/messages/ClaimReleased"
+      claimExpired:
+        $ref: "#/components/messages/ClaimExpired"
+      sessionRecorded:
+        $ref: "#/components/messages/SessionRecorded"
+      knowledgeAdded:
+        $ref: "#/components/messages/KnowledgeAdded"
+
+operations:
+  receiveEvents:
+    action: receive
+    channel:
+      $ref: "#/channels/events"
+    summary: Receive domain events via SSE
+    description: >-
+      Clients connect to this SSE stream to receive real-time domain events.
+      Each event arrives as an SSE frame with an `event:` field (the event type
+      string) and a `data:` field (JSON payload). No replay / Last-Event-ID in
+      v1 — clients refetch on reconnect.
+    messages:
+      - $ref: "#/channels/events/messages/projectCreated"
+      - $ref: "#/channels/events/messages/projectUpdated"
+      - $ref: "#/channels/events/messages/taskCreated"
+      - $ref: "#/channels/events/messages/taskUpdated"
+      - $ref: "#/channels/events/messages/taskStatusChanged"
+      - $ref: "#/channels/events/messages/relationAdded"
+      - $ref: "#/channels/events/messages/relationRemoved"
+      - $ref: "#/channels/events/messages/claimAcquired"
+      - $ref: "#/channels/events/messages/claimRenewed"
+      - $ref: "#/channels/events/messages/claimReleased"
+      - $ref: "#/channels/events/messages/claimExpired"
+      - $ref: "#/channels/events/messages/sessionRecorded"
+      - $ref: "#/channels/events/messages/knowledgeAdded"
+
+components:
+  messages:
+    # ── Project events ─────────────────────────────────────────────────
+
+    ProjectCreated:
+      name: project.created
+      title: Project created
+      summary: Emitted when a project is registered
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/ProjectEvent"
+
+    ProjectUpdated:
+      name: project.updated
+      title: Project updated
+      summary: Emitted when a project's name, description, or settings change
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/ProjectUpdatedEvent"
+
+    # ── Task events ────────────────────────────────────────────────────
+
+    TaskCreated:
+      name: task.created
+      title: Task created
+      summary: Emitted when a task is created (proposed or approved)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/TaskEvent"
+
+    TaskUpdated:
+      name: task.updated
+      title: Task updated
+      summary: Emitted when a task's fields are modified (not status changes)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/TaskUpdatedEvent"
+
+    TaskStatusChanged:
+      name: task.status_changed
+      title: Task status changed
+      summary: >-
+        Emitted on every lifecycle transition (approve, claim, session
+        report, reject, block, cancel)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/TaskStatusChangedEvent"
+
+    # ── Relation events ────────────────────────────────────────────────
+
+    RelationAdded:
+      name: relation.added
+      title: Relation added
+      summary: Emitted when a decomposition or dependency relation is created
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/RelationEvent"
+
+    RelationRemoved:
+      name: relation.removed
+      title: Relation removed
+      summary: Emitted when a relation is deleted
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/RelationRemovedEvent"
+
+    # ── Claim events ───────────────────────────────────────────────────
+
+    ClaimAcquired:
+      name: claim.acquired
+      title: Claim acquired
+      summary: Emitted when a task is claimed
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/ClaimEvent"
+
+    ClaimRenewed:
+      name: claim.renewed
+      title: Claim renewed
+      summary: Emitted when a claim's TTL is extended
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/ClaimRenewedEvent"
+
+    ClaimReleased:
+      name: claim.released
+      title: Claim released
+      summary: Emitted when a claim is voluntarily released
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/ClaimReleasedEvent"
+
+    ClaimExpired:
+      name: claim.expired
+      title: Claim expired
+      summary: Emitted when a claim's TTL elapses without renewal
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/ClaimReleasedEvent"
+
+    # ── Session events ─────────────────────────────────────────────────
+
+    SessionRecorded:
+      name: session.recorded
+      title: Session recorded
+      summary: Emitted when a work session is reported against a task
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/SessionEvent"
+
+    # ── Knowledge events ───────────────────────────────────────────────
+
+    KnowledgeAdded:
+      name: knowledge.added
+      title: Knowledge added
+      summary: Emitted when a knowledge item is created
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/KnowledgeEvent"
+
+  schemas:
+    # ── Shared fields ──────────────────────────────────────────────────
+
+    Identity:
+      type: object
+      description: >-
+        Self-declared caller descriptor. Duplicated from the OpenAPI spec
+        to keep the AsyncAPI document self-contained.
+      required:
+        - harness
+        - agent_model
+        - session_id
+      properties:
+        harness:
+          type: string
+          description: Agent harness making the call.
+        agent_model:
+          type: string
+          description: Agent or model performing the work.
+        session_id:
+          type: string
+          description: Caller-generated session identifier.
+        label:
+          type: string
+          description: Optional human-readable session label.
+
+    # ── Event payloads ─────────────────────────────────────────────────
+
+    ProjectEvent:
+      type: object
+      description: Payload for project.created events.
+      required:
+        - project_id
+        - name
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Project identifier.
+        name:
+          type: string
+          description: Project name.
+
+    ProjectUpdatedEvent:
+      type: object
+      description: Payload for project.updated events.
+      required:
+        - project_id
+        - updated_fields
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Project identifier.
+        updated_fields:
+          type: array
+          description: List of field names that changed.
+          items:
+            type: string
+
+    TaskEvent:
+      type: object
+      description: Payload for task.created events.
+      required:
+        - project_id
+        - task_id
+        - title
+        - type
+        - status
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+        task_id:
+          type: string
+          format: uuid
+          description: Task identifier.
+        title:
+          type: string
+          description: Task title.
+        type:
+          type: string
+          description: Task type.
+          enum:
+            - code
+            - question
+            - refactor
+            - review
+            - research
+        status:
+          type: string
+          description: Initial task status.
+          enum:
+            - proposed
+            - approved
+
+    TaskUpdatedEvent:
+      type: object
+      description: Payload for task.updated events (field changes, not status).
+      required:
+        - project_id
+        - task_id
+        - updated_fields
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+        task_id:
+          type: string
+          format: uuid
+          description: Task identifier.
+        updated_fields:
+          type: array
+          description: List of field names that changed.
+          items:
+            type: string
+
+    TaskStatusChangedEvent:
+      type: object
+      description: Payload for task.status_changed events.
+      required:
+        - project_id
+        - task_id
+        - old_status
+        - new_status
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+        task_id:
+          type: string
+          format: uuid
+          description: Task identifier.
+        old_status:
+          type: string
+          description: Previous lifecycle status.
+          enum:
+            - proposed
+            - approved
+            - ready
+            - in_progress
+            - in_review
+            - done
+            - blocked
+            - cancelled
+        new_status:
+          type: string
+          description: New lifecycle status.
+          enum:
+            - proposed
+            - approved
+            - ready
+            - in_progress
+            - in_review
+            - done
+            - blocked
+            - cancelled
+
+    RelationEvent:
+      type: object
+      description: Payload for relation.added events.
+      required:
+        - project_id
+        - relation_id
+        - type
+        - source_task_id
+        - target_task_id
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+        relation_id:
+          type: string
+          format: uuid
+          description: Relation identifier.
+        type:
+          type: string
+          description: Relation type.
+          enum:
+            - decomposition
+            - depends_on
+        source_task_id:
+          type: string
+          format: uuid
+          description: Source task identifier.
+        target_task_id:
+          type: string
+          format: uuid
+          description: Target task identifier.
+
+    RelationRemovedEvent:
+      type: object
+      description: Payload for relation.removed events.
+      required:
+        - project_id
+        - relation_id
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+        relation_id:
+          type: string
+          format: uuid
+          description: Removed relation identifier.
+
+    ClaimEvent:
+      type: object
+      description: Payload for claim.acquired events.
+      required:
+        - project_id
+        - task_id
+        - claim_id
+        - identity
+        - expires_at
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+        task_id:
+          type: string
+          format: uuid
+          description: Claimed task identifier.
+        claim_id:
+          type: string
+          format: uuid
+          description: Claim identifier.
+        identity:
+          $ref: "#/components/schemas/Identity"
+        expires_at:
+          type: string
+          format: date-time
+          description: When the claim expires.
+
+    ClaimRenewedEvent:
+      type: object
+      description: Payload for claim.renewed events.
+      required:
+        - project_id
+        - task_id
+        - claim_id
+        - expires_at
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+        task_id:
+          type: string
+          format: uuid
+          description: Claimed task identifier.
+        claim_id:
+          type: string
+          format: uuid
+          description: Claim identifier.
+        expires_at:
+          type: string
+          format: date-time
+          description: New expiration time after renewal.
+
+    ClaimReleasedEvent:
+      type: object
+      description: Payload for claim.released and claim.expired events.
+      required:
+        - project_id
+        - task_id
+        - claim_id
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+        task_id:
+          type: string
+          format: uuid
+          description: Previously claimed task identifier.
+        claim_id:
+          type: string
+          format: uuid
+          description: Released or expired claim identifier.
+
+    SessionEvent:
+      type: object
+      description: Payload for session.recorded events.
+      required:
+        - project_id
+        - task_id
+        - session_id
+        - outcome
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+        task_id:
+          type: string
+          format: uuid
+          description: Task the session was recorded against.
+        session_id:
+          type: string
+          format: uuid
+          description: Session identifier.
+        outcome:
+          type: string
+          description: Session outcome.
+          enum:
+            - succeeded
+            - failed
+
+    KnowledgeEvent:
+      type: object
+      description: Payload for knowledge.added events.
+      required:
+        - project_id
+        - knowledge_id
+        - type
+        - scope
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          description: Parent project identifier.
+        knowledge_id:
+          type: string
+          format: uuid
+          description: Knowledge item identifier.
+        type:
+          type: string
+          description: Knowledge item type.
+          enum:
+            - link
+            - transcript
+            - decision
+            - note
+        scope:
+          type: string
+          description: Knowledge item scope.
+          enum:
+            - task
+            - session
+            - project

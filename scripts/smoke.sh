@@ -33,10 +33,11 @@ done
 [ "$booted" = true ] || fail "server did not answer /health within 5s"
 
 health="$(curl -fsS "$BASE/health")" || fail "/health unreachable"
-echo "$health" | grep -q '"status":"ok"' || fail "/health did not report ok: $health"
+echo "$health" | grep -q '"status":"pass"' || fail "/health did not report pass: $health"
 
 spec="$(curl -fsS "$BASE/api/v1/openapi.yaml")" || fail "spec unreachable"
-echo "$spec" | grep -q '^openapi:' || fail "served spec is not an OpenAPI document"
+# Use head to avoid SIGPIPE on large specs (grep -q exits early, echo keeps writing).
+head -1 <<< "$spec" | grep -q '^openapi:' || fail "served spec is not an OpenAPI document"
 
 index="$(curl -fsS "$BASE/")" || fail "UI index unreachable"
 echo "$index" | grep -q '<div id="root">' || fail "UI index is not the app shell"
