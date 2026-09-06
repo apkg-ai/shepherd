@@ -1,0 +1,52 @@
+openapi: 3.1.0
+info:
+  title: shepherd API
+  description: >-
+    Local-first hub for agent-driven work. This is the S1 placeholder contract;
+    the complete v1 surface is written in session S2 following the design rules
+    in docs/03-api.md.
+  version: 0.1.0
+  contact:
+    name: apkg
+    url: https://github.com/apkg-ai/shepherd
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://127.0.0.1:7437
+    description: Local daemon (default port)
+tags:
+  - name: system
+    description: Health and service metadata.
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags:
+        - system
+      summary: Service health
+      description: Liveness probe. Returns service status and the core version.
+      responses:
+        "200":
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+components:
+  schemas:
+    Health:
+      type: object
+      description: Service health report.
+      required:
+        - status
+        - version
+      properties:
+        status:
+          type: string
+          description: Always `ok` while the daemon is serving.
+          enum:
+            - ok
+        version:
+          type: string
+          description: shepherd-core semantic version.

@@ -1,0 +1,469 @@
+name: Quality Gates
+
+on:
+  pull_request:
+    branches:
+      - main
+  # Also gate the squash-merge result: that exact commit never existed on
+  # the PR, and direct pushes would otherwise bypass every quality gate.
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  core-lint:
+    name: Core / Lint
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: core
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # rust-toolchain.toml is the single source of truth for the toolchain;
+      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
+
+      - name: Format
+        run: |
+          cargo fmt --check
+
+      - name: Clippy
+        run: |
+          cargo clippy --all-targets -- -D warnings
+
+  # Test jobs are split per category (05-testing.md taxonomy). S1 ships unit,
+  # integration, and smoke; the remaining categories run as echo placeholders
+  # (end of file) until their session lands the suites:
+  # property + migration (S3), contract (S4), e2e + fuzz (S9).
+  core-test-unit:
+    name: Core / Test (Unit)
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: core
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # rust-toolchain.toml is the single source of truth for the toolchain;
+      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy, llvm-tools
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
+
+      - name: Install cargo-llvm-cov
+        env:
+          LLVM_COV_VERSION: 0.9.0
+          LLVM_COV_SHA256: 9af53b273e50d01d8bde8785de8541f6738cc4375248cd7683aec8b5768b9d21
+        run: |
+          set -euo pipefail
+          curl -sSLo cargo-llvm-cov.tar.gz "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz"
+          echo "${LLVM_COV_SHA256}  cargo-llvm-cov.tar.gz" | sha256sum -c -
+          tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
+          rm cargo-llvm-cov.tar.gz
+
+      # Unit coverage is scoped to shepherd-core: the thin server is the
+      # integration suite's responsibility (main.rs is smoke-covered).
+      - name: Unit Tests (Coverage)
+        run: |
+          mkdir -p coverage
+          cargo llvm-cov --workspace --lib --bins \
+            --ignore-filename-regex 'shepherd-server/' \
+            --lcov --output-path coverage/core-unit.lcov
+
+      - name: Doc Tests
+        run: |
+          cargo test --workspace --doc
+
+      - name: Upload Coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-core-unit
+          path: core/coverage/core-unit.lcov
+
+  core-test-integration:
+    name: Core / Test (Integration)
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: core
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy, llvm-tools
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
+
+      - name: Install cargo-llvm-cov
+        env:
+          LLVM_COV_VERSION: 0.9.0
+          LLVM_COV_SHA256: 9af53b273e50d01d8bde8785de8541f6738cc4375248cd7683aec8b5768b9d21
+        run: |
+          set -euo pipefail
+          curl -sSLo cargo-llvm-cov.tar.gz "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz"
+          echo "${LLVM_COV_SHA256}  cargo-llvm-cov.tar.gz" | sha256sum -c -
+          tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
+          rm cargo-llvm-cov.tar.gz
+
+      # Integration coverage is scoped to the server lib it exercises;
+      # main.rs is excluded (entry point, covered by smoke).
+      - name: Integration Tests (Coverage)
+        run: |
+          mkdir -p coverage
+          cargo llvm-cov --workspace --test '*' \
+            --ignore-filename-regex 'shepherd-core/|main\.rs' \
+            --lcov --output-path coverage/core-integration.lcov
+
+      - name: Upload Coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-core-integration
+          path: core/coverage/core-integration.lcov
+
+  ui-lint:
+    name: UI / Lint
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+
+      - name: Lint
+        run: |
+          npm run lint
+
+      - name: Format
+        run: |
+          npm run fmt:check
+
+  ui-typecheck:
+    name: UI / Typecheck
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+
+      - name: Typecheck
+        run: |
+          npm run typecheck
+
+  ui-test-unit:
+    name: UI / Test (Unit)
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+
+      - name: Unit Tests (Coverage)
+        run: |
+          npm run test:unit:cov
+
+      - name: Upload Coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-ui-unit
+          path: ui/coverage/ui-unit.lcov
+
+  ui-build:
+    name: UI / Build
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+
+      - name: Build
+        run: |
+          npm run build
+
+  spec-lint:
+    name: Spec / Lint
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+
+      - name: Spectral
+        run: |
+          npm run lint:spec
+
+  coverage-report:
+    name: Coverage Report
+    runs-on: ubuntu-24.04-arm
+    needs:
+      - core-test-unit
+      - core-test-integration
+      - ui-test-unit
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download Coverage Artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+          path: coverage
+
+      # The report script is dependency-free (node:fs only) — the runner's
+      # system Node is enough, no setup-node/npm ci needed.
+      - name: Generate Reports
+        run: |
+          node scripts/coverage-report.mjs --dir coverage --report core --out coverage/report-core.md
+          node scripts/coverage-report.mjs --dir coverage --report ui --out coverage/report-ui.md
+          cat coverage/report-core.md coverage/report-ui.md
+
+      - name: Post Sticky Comments
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for pair in "shepherd-coverage-core:coverage/report-core.md" \
+                      "shepherd-coverage-ui:coverage/report-ui.md"; do
+            MARKER="<!-- ${pair%%:*} -->"
+            FILE="${pair#*:}"
+            # No error suppression on the lookup: a transient gh api failure
+            # must skip this update (continue-on-error) rather than fall
+            # through to POST and duplicate the sticky comment.
+            COMMENT_ID=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+              --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | head -n 1)
+            if [ -n "${COMMENT_ID}" ]; then
+              gh api --method PATCH "repos/${REPO}/issues/comments/${COMMENT_ID}" \
+                -F body=@"${FILE}"
+            else
+              gh api --method POST "repos/${REPO}/issues/${PR}/comments" \
+                -F body=@"${FILE}"
+            fi
+          done
+
+      # Runs after the comments so the numbers always land on the PR,
+      # then fails the job if any threshold is not met.
+      - name: Enforce Thresholds
+        run: |
+          node scripts/coverage-report.mjs --dir coverage --check
+
+  test-smoke:
+    name: Test (Smoke)
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # rust-toolchain.toml is the single source of truth for the toolchain;
+      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build UI
+        run: |
+          npm ci --prefer-offline --prefix ui
+          npm run build --prefix ui
+
+      # Boot → /health → spec → UI index (builds shepherd-server itself)
+      - name: Smoke
+        run: |
+          scripts/smoke.sh
+
+  # ── Declared test categories, placeholder runs until their session lands ──
+  # Each runs a plain echo so the full 05-testing.md taxonomy shows green on
+  # every PR from day one. Wire the real steps in the noted session (mirror an
+  # existing test job: toolchain, cache, coverage artifact, and a `needs:`
+  # entry on coverage-report).
+
+  core-test-property:
+    name: Core / Test (Property)
+    runs-on: ubuntu-24.04-arm
+    # S3: proptest suites over the 02-domain-model invariants.
+    steps:
+      - name: Placeholder
+        run: echo "no property suite yet — proptest lands in S3"
+
+  core-test-migration:
+    name: Core / Test (Migration)
+    runs-on: ubuntu-24.04-arm
+    # S3: sqlx migrations against seeded fixture DBs.
+    steps:
+      - name: Placeholder
+        run: echo "no migration suite yet — sqlx migrations land in S3"
+
+  core-test-contract:
+    name: Core / Test (Contract)
+    runs-on: ubuntu-24.04-arm
+    # S4: dynamic conformance of live responses against openapi/shepherd.yaml.
+    steps:
+      - name: Placeholder
+        run: echo "no contract suite yet — spec conformance lands in S4"
+
+  core-test-fuzz:
+    name: Core / Test (Fuzz)
+    runs-on: ubuntu-24.04-arm
+    # S9: cargo-fuzz targets (metadata, mutation payloads, params, imports) —
+    # short runs per PR; deep runs move to a nightly workflow.
+    steps:
+      - name: Placeholder
+        run: echo "no fuzz targets yet — cargo-fuzz lands in S9"
+
+  test-e2e:
+    name: Test (E2E)
+    runs-on: ubuntu-24.04-arm
+    # S9: Playwright driving the real UI against a real server.
+    steps:
+      - name: Placeholder
+        run: echo "no e2e suite yet — Playwright lands in S9"

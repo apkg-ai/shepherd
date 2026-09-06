@@ -30,7 +30,10 @@ lifecycle invariants are where logic bugs live; fuzz earns its keep on the parse
 | **Fuzz (short)** | every PR | ~2–3 min per target |
 | **Fuzz (deep)** | nightly | extended runs, all targets |
 
-Coverage reported (`cargo-llvm-cov`, vitest coverage) — measured, not %-gated initially.
+Coverage is gated in CI (`cargo-llvm-cov`, vitest coverage), scoped so each suite measures the code it
+owns (unit → `shepherd-core` + `ui/src`, integration → server lib; `main.rs` is smoke-covered). Two
+sticky PR reports — Core (Rust) and UI (TypeScript) — each union-merged. Thresholds on lines:
+unit ≥ 95%, integration ≥ 70%, e2e ≥ 50% (enforced from S9), per-report total ≥ 92%.
 
 The CI skeleton lands in **S1** and every subsequent session ends green — no session merges red
 ([06-roadmap.md](06-roadmap.md)).
