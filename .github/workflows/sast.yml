@@ -47,6 +47,9 @@ jobs:
           # upload-sarif action requires GitHub Advanced Security, which is
           # a paid feature for private repos. The artifact is the audit
           # trail; pull it from the run page when triaging.
+          # Security packs (rust/js/ts/owasp) plus code-quality packs
+          # (best-practices). The jsx-not-internationalized rule is excluded:
+          # shepherd's v1 UI is a local, English-only tool — no i18n planned.
           docker run --rm \
             -v "$PWD:/src" \
             -w /src \
@@ -56,7 +59,10 @@ jobs:
               --config p/rust \
               --config p/javascript \
               --config p/typescript \
-              --config p/owasp-top-ten
+              --config p/owasp-top-ten \
+              --config p/r2c-best-practices \
+              --config p/react-best-practices \
+              --exclude-rule typescript.react.portability.i18next.jsx-not-internationalized.jsx-not-internationalized
 
       - name: Upload SARIF artifact
         if: always()
