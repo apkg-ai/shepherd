@@ -164,10 +164,28 @@ What an agent receives when it claims a task:
 
 - **Monorepo layout:** `core/` (Rust cargo workspace: lib crate + server bin), `ui/` (Vite + React + TS),
   `openapi/` (the contract).
-- **Testing:** `cargo test` for the core; `vitest` for the UI.
-- **CI (GitHub Actions):** `cargo fmt` / `clippy` / `cargo test`; `oxlint` / `tsc` / `vitest`; Spectral on
-  the OpenAPI spec.
 - **Branching:** trunk-based; PRs to `main`; squash merge.
+
+### Testing strategy
+
+Strong testing is a stated expectation, split into explicit layers:
+
+| Layer | Scope | Tooling |
+|---|---|---|
+| **Unit** | Domain lib: lifecycle state machine, DAG operations, lease logic, context-bundle assembly. UI: components and utilities. | `cargo test`; `vitest` + Testing Library |
+| **Property-based** | Graph invariants under arbitrary operations: acyclicity of `depends_on`, legal-only lifecycle transitions, claim/lease invariants. | `proptest` |
+| **Integration** | axum handlers against a real temp SQLite — full request → handler → DB → response, including SSE event emission and concurrency (N parallel claims on one task → exactly one winner). | `cargo test` (spawned test server) |
+| **Contract** | Running server validated against `openapi/shepherd.yaml`: every response conforms to the spec. Spec drift fails CI. The spec is the coupling point for bbq/CLI/MCP, so this layer is critical. | Spectral (static) + dynamic conformance in integration tests |
+| **Migration** | Every `sqlx` migration applies cleanly on seeded fixture DBs; existing data survives. A long-lived local hub makes data loss the worst failure mode. | `sqlx` test harness |
+| **E2E** | Browser driving the real UI against a real server: register project → create/approve tasks → both graph lenses render → live SSE update → review queue. | Playwright |
+| **Smoke** | Seconds-fast boot sanity: server starts on a fresh DB, healthcheck OK, spec served, UI index loads. Gates every PR and release artifact. | Minimal script in CI |
+| **Fuzz** | Untrusted input boundaries: task `metadata` JSON, graph mutation payloads, query params. | `cargo-fuzz` — short run per PR, deep run nightly |
+
+- **CI (GitHub Actions):** per PR — `cargo fmt` / `clippy`, unit + property + integration + migration +
+  contract, `oxlint` / `tsc` / `vitest`, Spectral, smoke, E2E, short fuzz (~2–3 min per target). Nightly —
+  extended fuzz. Coverage reported (`cargo-llvm-cov`, vitest coverage); no hard gate initially.
+- **Deferred (post-v1):** load/envelope test (seed low-thousands of tasks, endpoints stay responsive),
+  visual regression, accessibility checks (axe in Playwright).
 
 ## 9. Open questions & risks
 
