@@ -20,14 +20,17 @@ fail() {
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
-# Boot: poll /health until the server answers.
+# Boot: poll /health until the server answers, up to 5 seconds.
+booted=false
 for _ in $(seq 1 50); do
   if curl -fsS "$BASE/health" >/dev/null 2>&1; then
+    booted=true
     break
   fi
   kill -0 "$SERVER_PID" 2>/dev/null || fail "server exited during boot"
   sleep 0.1
 done
+[ "$booted" = true ] || fail "server did not answer /health within 5s"
 
 health="$(curl -fsS "$BASE/health")" || fail "/health unreachable"
 echo "$health" | grep -q '"status":"ok"' || fail "/health did not report ok: $health"
