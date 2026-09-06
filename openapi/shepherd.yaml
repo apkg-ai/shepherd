@@ -108,13 +108,14 @@ paths:
             Access-Control-Allow-Origin:
               $ref: "#/components/headers/Access-Control-Allow-Origin"
           content:
-            application/health+json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/Health"
+                $ref: "#/components/schemas/ProblemDetail"
               example:
-                status: fail
-                version: 0.1.0
-                output: database connection lost
+                type: "urn:shepherd:error:service-unavailable"
+                title: Service Unavailable
+                status: 503
+                detail: Health check failed.
 
   # ── Projects ─────────────────────────────────────────────────────────
 
