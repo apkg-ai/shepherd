@@ -1,0 +1,10 @@
+[package]
+name = "shepherd-core"
+description = "shepherd domain core: entities, lifecycle, DAG operations, storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror = "2"

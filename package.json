@@ -1,0 +1,11 @@
+{
+  "name": "shepherd-repo",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "lint:spec": "spectral lint openapi/shepherd.yaml --fail-severity=warn"
+  },
+  "devDependencies": {
+    "@stoplight/spectral-cli": "^6.16.3"
+  }
+}

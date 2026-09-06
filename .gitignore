@@ -88,3 +88,6 @@ aider.conf.yml
 .mcp/
 *.mcp.json
 
+
+# Node
+node_modules/
