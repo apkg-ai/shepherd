@@ -50,8 +50,11 @@ jobs:
         run: |
           cargo clippy --all-targets -- -D warnings
 
-  core-test:
-    name: Core / Test
+  # Test jobs are split per category (05-testing.md taxonomy). S1 ships unit
+  # and smoke; later sessions add their categories as sibling jobs:
+  # property + migration (S3), integration + contract (S4), e2e + fuzz (S9).
+  core-test-unit:
+    name: Core / Test (Unit)
     runs-on: ubuntu-24.04-arm
 
     defaults:
@@ -79,9 +82,13 @@ jobs:
         with:
           workspaces: core
 
-      - name: Test
+      - name: Unit Tests
         run: |
-          cargo test --workspace
+          cargo test --workspace --lib --bins
+
+      - name: Doc Tests
+        run: |
+          cargo test --workspace --doc
 
   ui-lint:
     name: UI / Lint
@@ -141,8 +148,8 @@ jobs:
         run: |
           npm run typecheck
 
-  ui-test:
-    name: UI / Test
+  ui-test-unit:
+    name: UI / Test (Unit)
     runs-on: ubuntu-24.04-arm
 
     defaults:
@@ -164,9 +171,9 @@ jobs:
         run: |
           npm ci --prefer-offline
 
-      - name: Test
+      - name: Unit Tests
         run: |
-          npm run test
+          npm run test:unit
 
   ui-build:
     name: UI / Build
@@ -218,8 +225,8 @@ jobs:
         run: |
           npm run lint:spec
 
-  smoke:
-    name: Smoke
+  test-smoke:
+    name: Test (Smoke)
     runs-on: ubuntu-24.04-arm
 
     steps:
