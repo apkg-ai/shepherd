@@ -1,0 +1,294 @@
+name: Quality Gates
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  osv-scan:
+    name: OSV Scan
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: OSV Scan
+        env:
+          OSV_VERSION: 2.5.1
+          OSV_SHA256: 3d0f5aa5a6baa8eb32bcef247388e149ef6030a6634ccae6fa0d62681fb27a6d
+        run: |
+          set -euo pipefail
+          curl -sSLo osv-scanner "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_arm64"
+          echo "${OSV_SHA256}  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+          ./osv-scanner \
+            --lockfile=package-lock.json \
+            --lockfile=ui/package-lock.json \
+            --lockfile=core/Cargo.lock
+
+  audit-npm:
+    name: Audit (npm)
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+          npm ci --prefer-offline --prefix ui
+
+      - name: Audit
+        run: |
+          npm audit --audit-level=low
+          npm audit --audit-level=low --prefix ui
+
+  audit-cargo:
+    name: Audit (cargo)
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Audit
+        env:
+          CARGO_AUDIT_VERSION: 0.22.2
+          CARGO_AUDIT_SHA256: c6603814ddaa45e51263dafd31c0ac98808f688d26f7395804f9670b0fd599dd
+        run: |
+          set -euo pipefail
+          curl -sSLo cargo-audit.tgz "https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv${CARGO_AUDIT_VERSION}/cargo-audit-aarch64-unknown-linux-gnu-v${CARGO_AUDIT_VERSION}.tgz"
+          echo "${CARGO_AUDIT_SHA256}  cargo-audit.tgz" | sha256sum -c -
+          tar -xzf cargo-audit.tgz --strip-components=1 "cargo-audit-aarch64-unknown-linux-gnu-v${CARGO_AUDIT_VERSION}/cargo-audit"
+          ./cargo-audit audit --file core/Cargo.lock
+
+  core-lint:
+    name: Core / Lint
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: core
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Installs the toolchain pinned in rust-toolchain.toml (1.98.0 + rustfmt + clippy)
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          cache-workspaces: core
+
+      - name: Format
+        run: |
+          cargo fmt --check
+
+      - name: Clippy
+        run: |
+          cargo clippy --all-targets -- -D warnings
+
+  core-test:
+    name: Core / Test
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: core
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          cache-workspaces: core
+
+      - name: Test
+        run: |
+          cargo test --workspace
+
+  ui-lint:
+    name: UI / Lint
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+
+      - name: Lint
+        run: |
+          npm run lint
+
+      - name: Format
+        run: |
+          npm run fmt:check
+
+  ui-typecheck:
+    name: UI / Typecheck
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+
+      - name: Typecheck
+        run: |
+          npm run typecheck
+
+  ui-test:
+    name: UI / Test
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+
+      - name: Test
+        run: |
+          npm run test
+
+  ui-build:
+    name: UI / Build
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+
+      - name: Build
+        run: |
+          npm run build
+
+  spec-lint:
+    name: Spec / Lint
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+
+      - name: Spectral
+        run: |
+          npm run lint:spec
+
+  smoke:
+    name: Smoke
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          cache-workspaces: core
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build UI
+        run: |
+          npm ci --prefer-offline --prefix ui
+          npm run build --prefix ui
+
+      # Boot → /health → spec → UI index (builds shepherd-server itself)
+      - name: Smoke
+        run: |
+          scripts/smoke.sh
