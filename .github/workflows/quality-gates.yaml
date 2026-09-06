@@ -94,10 +94,14 @@ jobs:
           tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
           rm cargo-llvm-cov.tar.gz
 
+      # Unit coverage is scoped to shepherd-core: the thin server is the
+      # integration suite's responsibility (main.rs is smoke-covered).
       - name: Unit Tests (Coverage)
         run: |
           mkdir -p coverage
-          cargo llvm-cov --workspace --lib --bins --lcov --output-path coverage/core-unit.lcov
+          cargo llvm-cov --workspace --lib --bins \
+            --ignore-filename-regex 'shepherd-server/' \
+            --lcov --output-path coverage/core-unit.lcov
 
       - name: Doc Tests
         run: |
@@ -148,10 +152,14 @@ jobs:
           tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
           rm cargo-llvm-cov.tar.gz
 
+      # Integration coverage is scoped to the server lib it exercises;
+      # main.rs is excluded (entry point, covered by smoke).
       - name: Integration Tests (Coverage)
         run: |
           mkdir -p coverage
-          cargo llvm-cov --workspace --test '*' --lcov --output-path coverage/core-integration.lcov
+          cargo llvm-cov --workspace --test '*' \
+            --ignore-filename-regex 'shepherd-core/|main\.rs' \
+            --lcov --output-path coverage/core-integration.lcov
 
       - name: Upload Coverage
         if: ${{ !cancelled() }}
@@ -327,12 +335,13 @@ jobs:
 
       # The report script is dependency-free (node:fs only) — the runner's
       # system Node is enough, no setup-node/npm ci needed.
-      - name: Generate Report
+      - name: Generate Reports
         run: |
-          node scripts/coverage-report.mjs --dir coverage --out coverage/report.md
-          cat coverage/report.md
+          node scripts/coverage-report.mjs --dir coverage --report core --out coverage/report-core.md
+          node scripts/coverage-report.mjs --dir coverage --report ui --out coverage/report-ui.md
+          cat coverage/report-core.md coverage/report-ui.md
 
-      - name: Post Sticky Comment
+      - name: Post Sticky Comments
         if: ${{ !cancelled() }}
         continue-on-error: true
         env:
@@ -341,16 +350,26 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          MARKER='<!-- shepherd-coverage-report -->'
-          COMMENT_ID=$( (gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-            --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" || true) | head -n 1)
-          if [ -n "${COMMENT_ID}" ]; then
-            gh api --method PATCH "repos/${REPO}/issues/comments/${COMMENT_ID}" \
-              -F body=@coverage/report.md
-          else
-            gh api --method POST "repos/${REPO}/issues/${PR}/comments" \
-              -F body=@coverage/report.md
-          fi
+          for pair in "shepherd-coverage-core:coverage/report-core.md" \
+                      "shepherd-coverage-ui:coverage/report-ui.md"; do
+            MARKER="<!-- ${pair%%:*} -->"
+            FILE="${pair#*:}"
+            COMMENT_ID=$( (gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+              --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" || true) | head -n 1)
+            if [ -n "${COMMENT_ID}" ]; then
+              gh api --method PATCH "repos/${REPO}/issues/comments/${COMMENT_ID}" \
+                -F body=@"${FILE}"
+            else
+              gh api --method POST "repos/${REPO}/issues/${PR}/comments" \
+                -F body=@"${FILE}"
+            fi
+          done
+
+      # Runs after the comments so the numbers always land on the PR,
+      # then fails the job if any threshold is not met.
+      - name: Enforce Thresholds
+        run: |
+          node scripts/coverage-report.mjs --dir coverage --check
 
   test-smoke:
     name: Test (Smoke)
