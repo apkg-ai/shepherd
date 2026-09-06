@@ -21,11 +21,16 @@ pub fn router(ui_dir: impl AsRef<Path>) -> Router {
         .fallback_service(ServeDir::new(ui_dir.as_ref()))
 }
 
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "status": "ok",
-        "version": shepherd_core::version(),
-    }))
+/// Health check per draft-inadarei-api-health-check-06.
+async fn health() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/health+json")],
+        Json(serde_json::json!({
+            "status": "pass",
+            "version": shepherd_core::version(),
+            "description": "shepherd local daemon",
+        })),
+    )
 }
 
 async fn openapi_spec() -> impl IntoResponse {

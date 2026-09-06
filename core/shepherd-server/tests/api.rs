@@ -13,17 +13,22 @@ fn router() -> axum::Router {
 }
 
 #[tokio::test]
-async fn health_reports_ok_and_core_version() {
+async fn health_reports_pass_and_core_version() {
     let response = router()
         .oneshot(Request::get("/health").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "application/health+json"
+    );
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["status"], "ok");
+    assert_eq!(json["status"], "pass");
     assert_eq!(json["version"], shepherd_core::version());
+    assert_eq!(json["description"], "shepherd local daemon");
 }
 
 #[tokio::test]
