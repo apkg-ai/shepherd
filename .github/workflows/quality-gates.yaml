@@ -359,8 +359,11 @@ jobs:
                       "shepherd-coverage-ui:coverage/report-ui.md"; do
             MARKER="<!-- ${pair%%:*} -->"
             FILE="${pair#*:}"
-            COMMENT_ID=$( (gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-              --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" || true) | head -n 1)
+            # No error suppression on the lookup: a transient gh api failure
+            # must skip this update (continue-on-error) rather than fall
+            # through to POST and duplicate the sticky comment.
+            COMMENT_ID=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+              --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | head -n 1)
             if [ -n "${COMMENT_ID}" ]; then
               gh api --method PATCH "repos/${REPO}/issues/comments/${COMMENT_ID}" \
                 -F body=@"${FILE}"
