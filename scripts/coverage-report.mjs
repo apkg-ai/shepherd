@@ -10,6 +10,7 @@ import { basename, dirname, join } from "node:path";
 const MARKER = "<!-- shepherd-coverage-report -->";
 const LABELS = {
   "core-unit": "Core (Unit)",
+  "core-integration": "Core (Integration)",
   "ui-unit": "UI (Unit)",
 };
 

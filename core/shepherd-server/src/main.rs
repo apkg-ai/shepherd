@@ -1,20 +1,11 @@
-//! shepherd daemon — deliberately thin: route definitions, request/response
-//! mapping, SSE fan-out (from S6), and serving the built UI. Logic lives in
-//! `shepherd-core`.
+//! shepherd daemon entry point — config parsing and serving. Routes live in
+//! the lib target ([`shepherd_server::router`]); logic in `shepherd-core`.
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
 use anyhow::Context;
-use axum::http::header;
-use axum::response::IntoResponse;
-use axum::routing::get;
-use axum::{Json, Router};
 use clap::Parser;
-use tower_http::services::ServeDir;
-
-/// The served contract. Embedded so the binary is self-contained.
-const OPENAPI_SPEC: &str = include_str!("../../../openapi/shepherd.yaml");
 
 /// Local-first hub for agent-driven work.
 #[derive(Parser, Debug)]
@@ -29,24 +20,6 @@ struct Config {
     ui_dir: PathBuf,
 }
 
-fn router(config: &Config) -> Router {
-    Router::new()
-        .route("/health", get(health))
-        .route("/api/v1/openapi.yaml", get(openapi_spec))
-        .fallback_service(ServeDir::new(&config.ui_dir))
-}
-
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "status": "ok",
-        "version": shepherd_core::version(),
-    }))
-}
-
-async fn openapi_spec() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "application/yaml")], OPENAPI_SPEC)
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = Config::parse();
@@ -55,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("failed to bind {addr}"))?;
     println!("shepherd-server listening on http://{addr}");
-    axum::serve(listener, router(&config))
+    axum::serve(listener, shepherd_server::router(&config.ui_dir))
         .await
         .context("server error")?;
     Ok(())

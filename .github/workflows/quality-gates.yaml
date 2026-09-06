@@ -50,9 +50,10 @@ jobs:
         run: |
           cargo clippy --all-targets -- -D warnings
 
-  # Test jobs are split per category (05-testing.md taxonomy). S1 ships unit
-  # and smoke; later sessions add their categories as sibling jobs:
-  # property + migration (S3), integration + contract (S4), e2e + fuzz (S9).
+  # Test jobs are split per category (05-testing.md taxonomy). S1 ships unit,
+  # integration, and smoke; the remaining categories are declared below as
+  # skipped placeholders until their session lands the suites:
+  # property + migration (S3), contract (S4), e2e + fuzz (S9).
   core-test-unit:
     name: Core / Test (Unit)
     runs-on: ubuntu-24.04-arm
@@ -108,6 +109,56 @@ jobs:
         with:
           name: coverage-core-unit
           path: core/coverage/core-unit.lcov
+
+  core-test-integration:
+    name: Core / Test (Integration)
+    runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: core
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy, llvm-tools
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
+
+      - name: Install cargo-llvm-cov
+        env:
+          LLVM_COV_VERSION: 0.9.0
+          LLVM_COV_SHA256: 9af53b273e50d01d8bde8785de8541f6738cc4375248cd7683aec8b5768b9d21
+        run: |
+          set -euo pipefail
+          curl -sSLo cargo-llvm-cov.tar.gz "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz"
+          echo "${LLVM_COV_SHA256}  cargo-llvm-cov.tar.gz" | sha256sum -c -
+          tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
+          rm cargo-llvm-cov.tar.gz
+
+      - name: Integration Tests (Coverage)
+        run: |
+          mkdir -p coverage
+          cargo llvm-cov --workspace --test '*' --lcov --output-path coverage/core-integration.lcov
+
+      - name: Upload Coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-core-integration
+          path: core/coverage/core-integration.lcov
 
   ui-lint:
     name: UI / Lint
@@ -256,6 +307,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     needs:
       - core-test-unit
+      - core-test-integration
       - ui-test-unit
     if: ${{ !cancelled() }}
     permissions:
@@ -341,3 +393,50 @@ jobs:
       - name: Smoke
         run: |
           scripts/smoke.sh
+
+  # ── Declared test categories, skipped until their session lands the suite ──
+  # They show as "skipped" on every PR so the full 05-testing.md taxonomy is
+  # visible from day one. Activate by removing `if: false` and wiring the
+  # real steps (mirror an existing test job: toolchain, cache, coverage
+  # artifact, and a `needs:` entry on coverage-report).
+
+  core-test-property:
+    name: Core / Test (Property)
+    runs-on: ubuntu-24.04-arm
+    # S3: proptest suites over the 02-domain-model invariants.
+    if: false
+    steps:
+      - run: echo "activated in S3"
+
+  core-test-migration:
+    name: Core / Test (Migration)
+    runs-on: ubuntu-24.04-arm
+    # S3: sqlx migrations against seeded fixture DBs.
+    if: false
+    steps:
+      - run: echo "activated in S3"
+
+  core-test-contract:
+    name: Core / Test (Contract)
+    runs-on: ubuntu-24.04-arm
+    # S4: dynamic conformance of live responses against openapi/shepherd.yaml.
+    if: false
+    steps:
+      - run: echo "activated in S4"
+
+  core-test-fuzz:
+    name: Core / Test (Fuzz)
+    runs-on: ubuntu-24.04-arm
+    # S9: cargo-fuzz targets (metadata, mutation payloads, params, imports) —
+    # short runs per PR; deep runs move to a nightly workflow.
+    if: false
+    steps:
+      - run: echo "activated in S9"
+
+  test-e2e:
+    name: Test (E2E)
+    runs-on: ubuntu-24.04-arm
+    # S9: Playwright driving the real UI against a real server.
+    if: false
+    steps:
+      - run: echo "activated in S9"
