@@ -2,8 +2,22 @@
 //!
 //! Owns entities, the lifecycle state machine, DAG operations, lease logic,
 //! context-bundle assembly, and storage. No HTTP types leak into this crate.
-//! The domain lands in S3 ([06-roadmap](../../docs/06-roadmap.md)); S1 ships
-//! the crate skeleton.
+
+pub mod bundle;
+pub mod dag;
+pub mod error;
+pub mod export;
+pub mod lease;
+pub mod lifecycle;
+pub mod model;
+pub mod store;
+
+pub use error::Error;
+pub use model::*;
+pub use store::Store;
+
+/// Convenience alias for domain results.
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// The shepherd-core version, embedded at compile time.
 pub fn version() -> &'static str {

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc dca2d1d231146767c3f0a8ff3fbc367c15593aad09e089355a9eb05e1f39e3e1 # shrinks to ops = [CreateProject, CreateTask { project_idx: 0, status_approved: false }, CreateTask { project_idx: 0, status_approved: false }, ApproveTask { task_idx: 859593342730742929 }, ClaimTask { task_idx: 24052311008824735 }, AddDependsOn { source_idx: 1166639058397906087, target_idx: 1616878987379911626 }, ReportSession { task_idx: 17363701558595954501, succeed: false }]
+cc a2b07080552f8d59147ede9b268fa033393fe88c8fcdb850ddadd89e4dfc5f29 # shrinks to ops = [CreateProject, CreateTask { project_idx: 0, status_approved: false }, CreateTask { project_idx: 0, status_approved: true }, CreateTask { project_idx: 0, status_approved: false }, CreateTask { project_idx: 0, status_approved: false }, BlockTask { task_idx: 7928909196598612961 }, AddDependsOn { source_idx: 13198284256987864881, target_idx: 586554141154837966 }, UnblockTask { task_idx: 9343406903529933857 }]
