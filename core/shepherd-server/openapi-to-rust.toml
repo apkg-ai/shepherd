@@ -1,0 +1,46 @@
+[generator]
+spec_path = "../../openapi/shepherd.yaml"
+output_dir = "src/generated"
+module_name = "shepherd"
+
+[features]
+enable_async_client = false
+
+[generator.types]
+date_time = "chrono"
+uuid = "uuid"
+
+[server]
+framework = "axum"
+operations = [
+    # System
+    "getHealth",
+    # Projects
+    "listProjects",
+    "createProject",
+    "getProject",
+    "updateProject",
+    "deleteProject",
+    # Tasks
+    "listTasks",
+    "createTask",
+    "getTask",
+    "updateTask",
+    "deleteTask",
+    "approveTask",
+    "rejectTask",
+    "blockTask",
+    "unblockTask",
+    "cancelTask",
+    "getNextTask",
+    # Relations
+    "listTaskRelations",
+    "createTaskRelation",
+    "deleteTaskRelation",
+]
+prune_models = true
+
+[server.validation]
+enabled = true
+max_body_bytes = 2097152
+max_errors = 16

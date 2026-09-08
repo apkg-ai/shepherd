@@ -5,6 +5,7 @@
 //! pure-logic modules and enforced within transactions here.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use chrono::{DateTime, Utc};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
@@ -35,6 +36,25 @@ impl Store {
     /// Access the underlying connection pool (useful for raw SQL in tests).
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    /// Open a file-backed store at the given path. Creates the file and
+    /// runs migrations if it does not yet exist.
+    pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let opts = SqliteConnectOptions::new()
+            .filename(path)
+            .journal_mode(SqliteJournalMode::Wal)
+            .foreign_keys(true)
+            .create_if_missing(true);
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(4)
+            .connect_with(opts)
+            .await?;
+
+        let store = Self::new(pool);
+        store.migrate().await?;
+        Ok(store)
     }
 
     /// Create an in-memory store (for tests). Runs migrations automatically.

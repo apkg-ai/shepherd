@@ -870,6 +870,185 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/projects/{project_id}/tasks/{task_id}/block:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      operationId: blockTask
+      tags:
+        - tasks
+      summary: Block a task
+      description: >-
+        Explicitly blocks a task with a reason. The task can be in any
+        non-terminal status. The previous status is preserved so the task
+        can be restored on unblock.
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BlockRequest"
+            example:
+              reason: Waiting for design review feedback.
+      responses:
+        "200":
+          description: Task blocked.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+              example:
+                id: 019263a0-1234-7def-8000-000000000010
+                project_id: 019263a0-1234-7def-8000-000000000001
+                title: Implement lifecycle state machine
+                description: Full state machine for task transitions.
+                type: code
+                status: blocked
+                metadata: {}
+                assignee: null
+                graph_role: []
+                attempt_count: 0
+                created_at: "2026-09-06T10:05:00Z"
+                updated_at: "2026-09-06T10:05:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/unblock:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      operationId: unblockTask
+      tags:
+        - tasks
+      summary: Unblock a task
+      description: >-
+        Restores a blocked task to its previous status. If the task was
+        ready before being blocked but now has unmet dependencies, it
+        is demoted to approved instead.
+      security:
+        - {}
+      responses:
+        "200":
+          description: Task unblocked.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+              example:
+                id: 019263a0-1234-7def-8000-000000000010
+                project_id: 019263a0-1234-7def-8000-000000000001
+                title: Implement lifecycle state machine
+                description: Full state machine for task transitions.
+                type: code
+                status: ready
+                metadata: {}
+                assignee: null
+                graph_role: []
+                attempt_count: 0
+                created_at: "2026-09-06T10:05:00Z"
+                updated_at: "2026-09-06T10:05:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/{project_id}/tasks/{task_id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      operationId: cancelTask
+      tags:
+        - tasks
+      summary: Cancel a task
+      description: >-
+        Permanently cancels a task. This is a terminal transition — the
+        task cannot be reactivated. Can be applied to any non-terminal
+        status.
+      security:
+        - {}
+      responses:
+        "200":
+          description: Task cancelled.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+              example:
+                id: 019263a0-1234-7def-8000-000000000010
+                project_id: 019263a0-1234-7def-8000-000000000001
+                title: Implement lifecycle state machine
+                description: Full state machine for task transitions.
+                type: code
+                status: cancelled
+                metadata: {}
+                assignee: null
+                graph_role: []
+                attempt_count: 0
+                created_at: "2026-09-06T10:05:00Z"
+                updated_at: "2026-09-06T10:05:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   # ── Next task ────────────────────────────────────────────────────────
 
   /api/v1/projects/{project_id}/next-task:
@@ -2829,6 +3008,20 @@ components:
         reason:
           type: string
           description: Explanation for the rejection.
+          minLength: 1
+          maxLength: 2000
+          pattern: "^[\\s\\S]+$"
+
+    BlockRequest:
+      type: object
+      description: Request body for blocking a task.
+      additionalProperties: false
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          description: Explanation for why the task is blocked.
           minLength: 1
           maxLength: 2000
           pattern: "^[\\s\\S]+$"

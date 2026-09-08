@@ -496,10 +496,32 @@ jobs:
   core-test-contract:
     name: Core / Test (Contract)
     runs-on: ubuntu-24.04-arm
-    # S4: dynamic conformance of live responses against openapi/shepherd.yaml.
+
+    defaults:
+      run:
+        working-directory: core
+
     steps:
-      - name: Placeholder
-        run: echo "no contract suite yet — spec conformance lands in S4"
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
+
+      - name: Contract conformance tests
+        run: |
+          cargo test --package shepherd-server --test api -- contract
 
   core-test-fuzz:
     name: Core / Test (Fuzz)
