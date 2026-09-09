@@ -79,4 +79,4 @@ jobs:
           curl -sSLo cargo-audit.tgz "https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv${CARGO_AUDIT_VERSION}/cargo-audit-aarch64-unknown-linux-gnu-v${CARGO_AUDIT_VERSION}.tgz"
           echo "${CARGO_AUDIT_SHA256}  cargo-audit.tgz" | sha256sum -c -
           tar -xzf cargo-audit.tgz --strip-components=1 "cargo-audit-aarch64-unknown-linux-gnu-v${CARGO_AUDIT_VERSION}/cargo-audit"
-          ./cargo-audit audit --file core/Cargo.lock --config audit.toml
+          ./cargo-audit audit --file core/Cargo.lock
