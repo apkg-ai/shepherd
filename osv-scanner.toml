@@ -1,0 +1,10 @@
+# OSV Scanner ignore list.
+# https://google.github.io/osv-scanner/configuration/
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2023-0071"
+# Marvin Attack on rsa 0.9.x (medium severity).
+# rsa is pulled in by sqlx-mysql, which is resolved in Cargo.lock because sqlx
+# ships all database drivers. shepherd only uses sqlite — the crate is never
+# compiled. No fix available upstream.
+reason = "phantom transitive dep via sqlx-mysql; sqlite-only project"

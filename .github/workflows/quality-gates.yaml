@@ -163,7 +163,7 @@ jobs:
         run: |
           mkdir -p coverage
           cargo llvm-cov --workspace --test '*' \
-            --ignore-filename-regex 'shepherd-core/|main\.rs' \
+            --ignore-filename-regex 'shepherd-core/|main\.rs|src/generated/' \
             --lcov --output-path coverage/core-integration.lcov
 
       - name: Upload Coverage

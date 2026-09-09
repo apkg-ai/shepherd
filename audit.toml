@@ -1,0 +1,11 @@
+# cargo-audit configuration.
+# https://github.com/rustsec/rustsec/tree/main/cargo-audit
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071: Marvin Attack on rsa 0.9.x (medium severity).
+    # rsa is pulled in by sqlx-mysql, which is resolved in Cargo.lock because
+    # sqlx ships all database drivers. shepherd only uses sqlite — the rsa
+    # crate is never compiled into our binary. No fix is available upstream.
+    "RUSTSEC-2023-0071",
+]
