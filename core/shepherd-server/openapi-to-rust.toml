@@ -33,10 +33,27 @@ operations = [
     "unblockTask",
     "cancelTask",
     "getNextTask",
+    "getTaskContext",
     # Relations
     "listTaskRelations",
     "createTaskRelation",
     "deleteTaskRelation",
+    # Claims
+    "claimTask",
+    "renewClaim",
+    "releaseClaim",
+    # Sessions
+    "listTaskSessions",
+    "createTaskSession",
+    "getTaskSession",
+    # Knowledge
+    "listKnowledge",
+    "createKnowledge",
+    "getKnowledge",
+    "deleteKnowledge",
+    # Export / import
+    "exportProject",
+    "importProject",
 ]
 prune_models = true
 

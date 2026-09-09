@@ -21,7 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.151"
 serde_urlencoded = "0.7"
 shepherd-core = { path = "../shepherd-core" }
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "time"] }
 tower = "0.5.3"
 tower-http = { version = "0.7.1", features = ["cors", "fs"] }
 url = "2"
@@ -33,4 +33,7 @@ uuid = { version = "1", features = ["serde"] }
 # stays on 0.49, hence the alias to have both in the same build.
 jsonschema_055 = { package = "jsonschema", version = "0.55" }
 serde_yaml = "0.9"
+# Concurrency tests need a file-backed store: the in-memory pool is a single
+# connection, which serializes writes and hides claim races.
+tempfile = "3"
 tower = { version = "0.5.3", features = ["util"] }

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 
@@ -487,6 +487,10 @@ impl Store {
     pub async fn next_task(&self, project_id: ProjectId) -> Result<Option<Task>> {
         let now = Utc::now();
 
+        // Lazy sweep: return expired-lease tasks to `ready` before selecting,
+        // so a crashed agent's task is offered again immediately.
+        self.sweep_expired_claims(now).await?;
+
         // Find all ready tasks with no active claim.
         let rows = sqlx::query(
             "SELECT t.id, t.project_id, t.title, t.description, t.type, t.status,
@@ -542,12 +546,24 @@ impl Store {
 
     pub async fn approve_task(&self, project_id: ProjectId, id: TaskId) -> Result<Task> {
         let task = self.get_task(project_id, id).await?;
-        let new_status = lifecycle::transition(task.status, &Trigger::Approve)?;
+        // One endpoint, two review moments (03-api.md): approving a proposal
+        // and approving work in review.
+        let trigger = if task.status == TaskStatus::InReview {
+            Trigger::HumanApproval
+        } else {
+            Trigger::Approve
+        };
+        let new_status = lifecycle::transition(task.status, &trigger)?;
 
         self.set_task_status(project_id, id, new_status).await?;
 
-        // Auto-ready cascade: check if all deps are done.
-        self.try_auto_ready(project_id, id).await?;
+        match new_status {
+            // Auto-ready: check if all deps are done.
+            TaskStatus::Approved => self.try_auto_ready(project_id, id).await?,
+            // Review approval completed the task — ready its dependents.
+            TaskStatus::Done => self.auto_ready_cascade(project_id, id).await?,
+            _ => {}
+        }
 
         self.get_task(project_id, id).await
     }
@@ -559,7 +575,13 @@ impl Store {
         _reason: &str,
     ) -> Result<Task> {
         let task = self.get_task(project_id, id).await?;
-        let new_status = lifecycle::transition(task.status, &Trigger::HumanRejection)?;
+        let mut new_status = lifecycle::transition(task.status, &Trigger::HumanRejection)?;
+
+        // Dependencies may have been added while in review; a rejected task
+        // only returns to ready when they are all done (invariant 4).
+        if new_status == TaskStatus::Ready && !self.all_deps_done(project_id, id).await? {
+            new_status = TaskStatus::Approved;
+        }
 
         self.set_task_status(project_id, id, new_status).await?;
 
@@ -605,10 +627,26 @@ impl Store {
         let mut new_status =
             lifecycle::transition(task.status, &Trigger::Unblock { blocked_from })?;
 
+        // The lease may have expired while blocked. Restoring to InProgress
+        // without an active claim would strand the task (session reports
+        // require the claim), so demote to Ready and let it be re-claimed.
+        if new_status == TaskStatus::InProgress
+            && self.get_active_claim(id, Utc::now()).await?.is_none()
+        {
+            new_status = TaskStatus::Ready;
+        }
+
         // Dependencies may have been added while blocked. If restoring to
         // Ready but deps aren't all done, demote to Approved instead.
         if new_status == TaskStatus::Ready && !self.all_deps_done(project_id, id).await? {
             new_status = TaskStatus::Approved;
+        }
+
+        // Dependencies may also have *completed* while blocked — the
+        // auto-ready cascade skips blocked tasks. Promote so the task does
+        // not sit approved-with-deps-done forever (invariant 4).
+        if new_status == TaskStatus::Approved && self.all_deps_done(project_id, id).await? {
+            new_status = TaskStatus::Ready;
         }
 
         let now = Utc::now();
@@ -775,29 +813,85 @@ impl Store {
 
         let task = self.get_task(project_id, task_id).await?;
 
+        // Claim conflict outranks status: a claimed task is also not ready,
+        // but the caller should learn someone else holds the lease.
+        if let Some(existing) = self.get_active_claim(task_id, now).await? {
+            return Err(Error::ClaimConflict {
+                detail: format!(
+                    "task {} is already claimed (claim {}, expires {})",
+                    task_id, existing.id, existing.expires_at
+                ),
+            });
+        }
+
         if task.status != TaskStatus::Ready {
             return Err(Error::TaskNotReady {
                 detail: format!("task {} is in {} status, not ready", task_id, task.status),
             });
         }
 
-        // Check for active claim (lazy expiry check).
-        if let Some(claim) = self.get_active_claim(task_id, now).await? {
+        let claim_id = ClaimId::new();
+        let lease_id = lease::generate_lease_id();
+        let expires_at = lease::compute_expiry(now, input.ttl_seconds);
+        let new_status = lifecycle::transition(task.status, &Trigger::Claim)?;
+
+        // All claim-path writes run in one transaction so concurrent attempts
+        // serialize on SQLite's write lock; the partial unique index on
+        // claims(task_id) WHERE released_at IS NULL is the final arbiter.
+        let mut tx = self.pool.begin().await?;
+
+        // Release expired-unswept claims for this task — they still occupy
+        // the unique-index slot. This first write also takes the write lock,
+        // serializing concurrent claim attempts.
+        sqlx::query(
+            "UPDATE claims SET released_at = ?, release_reason = 'expired'
+             WHERE task_id = ? AND released_at IS NULL AND expires_at <= ?",
+        )
+        .bind(now.to_rfc3339())
+        .bind(task_id.to_string())
+        .bind(now.to_rfc3339())
+        .execute(&mut *tx)
+        .await?;
+
+        // Friendly conflict check (the unique index catches any race).
+        let existing = sqlx::query(
+            "SELECT id, expires_at FROM claims
+             WHERE task_id = ? AND released_at IS NULL",
+        )
+        .bind(task_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(row) = existing {
             return Err(Error::ClaimConflict {
                 detail: format!(
                     "task {} is already claimed (claim {}, expires {})",
-                    task_id, claim.id, claim.expires_at
+                    task_id,
+                    row.get::<String, _>("id"),
+                    row.get::<String, _>("expires_at")
                 ),
             });
         }
 
-        let claim_id = ClaimId::new();
-        let lease_id = lease::generate_lease_id();
-        let expires_at = lease::compute_expiry(now, input.ttl_seconds);
+        // Guarded status flip: re-verifies `ready` under the write lock.
+        let flipped = sqlx::query(
+            "UPDATE tasks SET status = ?, assignee = ?, updated_at = ?
+             WHERE id = ? AND project_id = ? AND status = 'ready'
+               AND deleted_at IS NULL",
+        )
+        .bind(new_status.to_string())
+        .bind(serde_json::to_string(&input.identity).unwrap())
+        .bind(now.to_rfc3339())
+        .bind(task_id.to_string())
+        .bind(project_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+        if flipped.rows_affected() != 1 {
+            return Err(Error::TaskNotReady {
+                detail: format!("task {task_id} is no longer ready"),
+            });
+        }
 
-        // Insert claim and transition task to in_progress within a
-        // conceptual transaction (SQLite serializes writes).
-        sqlx::query(
+        let inserted = sqlx::query(
             "INSERT INTO claims (id, task_id, identity, ttl_seconds, lease_id,
                                  acquired_at, expires_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -809,20 +903,22 @@ impl Store {
         .bind(&lease_id)
         .bind(now.to_rfc3339())
         .bind(expires_at.to_rfc3339())
-        .execute(&self.pool)
-        .await?;
+        .execute(&mut *tx)
+        .await;
+        match inserted {
+            Ok(_) => {}
+            Err(e)
+                if e.as_database_error()
+                    .is_some_and(|d| d.is_unique_violation()) =>
+            {
+                return Err(Error::ClaimConflict {
+                    detail: format!("task {task_id} is already claimed"),
+                });
+            }
+            Err(e) => return Err(e.into()),
+        }
 
-        // Transition task to in_progress.
-        let new_status = lifecycle::transition(task.status, &Trigger::Claim)?;
-        self.set_task_status(project_id, task_id, new_status)
-            .await?;
-
-        // Set assignee.
-        sqlx::query("UPDATE tasks SET assignee = ? WHERE id = ?")
-            .bind(serde_json::to_string(&input.identity).unwrap())
-            .bind(task_id.to_string())
-            .execute(&self.pool)
-            .await?;
+        tx.commit().await?;
 
         self.get_claim(claim_id).await
     }
@@ -956,6 +1052,48 @@ impl Store {
             released.push(task_id);
         }
 
+        // Crash recovery: an `in_progress` task with no unreleased claim row
+        // is unreachable (claiming needs `ready`, reporting needs the claim).
+        // The state can only arise from a crash between a claim release and
+        // its status update; rescue it back to ready/approved. The grace
+        // period keeps the rescue from racing a healthy release→status
+        // window in release_claim/create_session.
+        let cutoff = now - TimeDelta::seconds(30);
+        let orphans = sqlx::query(
+            "SELECT t.id, t.project_id FROM tasks t
+             WHERE t.status = 'in_progress'
+               AND t.deleted_at IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM claims c
+                   WHERE c.task_id = t.id
+                     AND (c.released_at IS NULL OR c.released_at > ?)
+               )",
+        )
+        .bind(cutoff.to_rfc3339())
+        .fetch_all(&self.pool)
+        .await?;
+
+        for row in &orphans {
+            let task_id: TaskId = row
+                .get::<String, _>("id")
+                .parse()
+                .map(TaskId::from_uuid)
+                .map_err(|e| Error::Internal(format!("bad UUID: {e}")))?;
+            let project_id: ProjectId = row
+                .get::<String, _>("project_id")
+                .parse()
+                .map(ProjectId::from_uuid)
+                .map_err(|e| Error::Internal(format!("bad UUID: {e}")))?;
+
+            let target = if self.all_deps_done(project_id, task_id).await? {
+                TaskStatus::Ready
+            } else {
+                TaskStatus::Approved
+            };
+            self.set_task_status(project_id, task_id, target).await?;
+            released.push(task_id);
+        }
+
         Ok(released)
     }
 
@@ -979,11 +1117,25 @@ impl Store {
 
         let now = Utc::now();
 
-        // Release the active claim.
-        if let Some(claim) = self.get_active_claim(task_id, now).await? {
-            self.release_claim_internal(claim.id, now, "session_reported")
-                .await?;
+        // Strict claim guard: the reporter must hold the active claim.
+        // Prevents a stale claimant (expired lease, task since re-claimed)
+        // from releasing someone else's claim and advancing the task.
+        let claim =
+            self.get_active_claim(task_id, now)
+                .await?
+                .ok_or_else(|| Error::LeaseExpired {
+                    detail: format!(
+                        "no active claim on task {task_id}; the lease may have expired — \
+                         re-claim the task before reporting"
+                    ),
+                })?;
+        if !claim.identity.matches(&input.identity) {
+            return Err(Error::ClaimConflict {
+                detail: "session identity does not match the active claim".into(),
+            });
         }
+        self.release_claim_internal(claim.id, now, "session_reported")
+            .await?;
 
         let session_id = SessionId::new();
         let decisions = input.decisions.as_deref().unwrap_or(&[]);
@@ -1084,7 +1236,9 @@ impl Store {
         .await?
         .ok_or_else(|| Error::not_found("session", id))?;
 
-        row_to_session(&row)
+        let mut session = row_to_session(&row)?;
+        session.knowledge_items = self.load_session_knowledge(session.id).await?;
+        Ok(session)
     }
 
     pub async fn list_sessions(
@@ -1128,12 +1282,31 @@ impl Store {
             .await?
         };
 
-        let items: Vec<Session> = rows.iter().map(row_to_session).collect::<Result<_>>()?;
+        let mut items: Vec<Session> = rows.iter().map(row_to_session).collect::<Result<_>>()?;
+        for session in &mut items {
+            session.knowledge_items = self.load_session_knowledge(session.id).await?;
+        }
 
         Ok(Page::from_rows(items, limit as usize, |s| Cursor {
             created_at: s.created_at,
             id: s.id.0,
         }))
+    }
+
+    /// Load the knowledge items produced during a session.
+    async fn load_session_knowledge(&self, session_id: SessionId) -> Result<Vec<KnowledgeItem>> {
+        let rows = sqlx::query(
+            "SELECT id, type, title, content, scope, task_id, session_id,
+                    project_id, created_at
+             FROM knowledge_items
+             WHERE session_id = ?
+             ORDER BY created_at ASC, id ASC",
+        )
+        .bind(session_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.iter().map(row_to_knowledge).collect()
     }
 
     // ── Knowledge ────────────────────────────────────────────────────────
@@ -1342,6 +1515,33 @@ impl Store {
         let mut task_map: HashMap<TaskId, TaskId> = HashMap::new();
         let mut session_map: HashMap<SessionId, SessionId> = HashMap::new();
 
+        // Claims are runtime state and are not exported, so an imported
+        // `in_progress` task could never advance (reports require an active
+        // claim). Normalize: `in_progress` → `ready` when all its deps in
+        // the document are `done`, else `approved`. `approved` with all deps
+        // `done` also normalizes to `ready` — nothing re-runs the auto-ready
+        // check after import, and invariant 4 (`ready` ⇔ `approved` + deps
+        // done) must hold in the new project.
+        let doc_status: HashMap<TaskId, TaskStatus> =
+            doc.tasks.iter().map(|t| (t.id, t.status)).collect();
+        let normalized_status = |task: &Task| -> TaskStatus {
+            if task.status != TaskStatus::InProgress && task.status != TaskStatus::Approved {
+                return task.status;
+            }
+            let deps_done = doc
+                .relations
+                .iter()
+                .filter(|r| {
+                    r.relation_type == RelationType::DependsOn && r.source_task_id == task.id
+                })
+                .all(|r| doc_status.get(&r.target_task_id) == Some(&TaskStatus::Done));
+            if deps_done {
+                TaskStatus::Ready
+            } else {
+                TaskStatus::Approved
+            }
+        };
+
         // Import tasks.
         for task in &doc.tasks {
             let new_id = TaskId::new();
@@ -1352,6 +1552,15 @@ impl Store {
                 .as_ref()
                 .map(|a| serde_json::to_string(a).unwrap());
             let graph_role_json = serde_json::to_string(&task.graph_role).unwrap();
+
+            // The wire schema does not carry blocked_from_status, so REST
+            // imports of blocked tasks arrive without it — and unblock would
+            // reject them forever. Fall back to `ready`: unblock re-checks
+            // deps and claims and demotes as needed.
+            let blocked_from = match (task.status, task.blocked_from_status) {
+                (TaskStatus::Blocked, None) => Some(TaskStatus::Ready),
+                (_, bf) => bf,
+            };
 
             sqlx::query(
                 "INSERT INTO tasks (id, project_id, title, description, type, status,
@@ -1365,13 +1574,13 @@ impl Store {
             .bind(&task.title)
             .bind(&task.description)
             .bind(task.task_type.to_string())
-            .bind(task.status.to_string())
+            .bind(normalized_status(task).to_string())
             .bind(serde_json::to_string(&task.metadata).unwrap())
             .bind(assignee_json.as_deref())
             .bind(&graph_role_json)
             .bind(true) // preserve explicit roles from export
             .bind(task.attempt_count)
-            .bind(task.blocked_from_status.map(|s| s.to_string()))
+            .bind(blocked_from.map(|s| s.to_string()))
             .bind(task.block_reason.as_deref())
             .bind(now.to_rfc3339())
             .bind(now.to_rfc3339())
@@ -1671,18 +1880,11 @@ impl Store {
         Ok(undone == 0)
     }
 
+    /// Read-only: an expired claim is simply not active. Expired rows are
+    /// released only by the claim path (in-transaction) and the sweep — the
+    /// two places that also restore the task status. Releasing here would
+    /// orphan the task in `in_progress` with no row left for the sweep.
     async fn get_active_claim(&self, task_id: TaskId, now: DateTime<Utc>) -> Result<Option<Claim>> {
-        // Lazy expiry: release any expired claims first.
-        sqlx::query(
-            "UPDATE claims SET released_at = ?, release_reason = 'expired'
-             WHERE task_id = ? AND released_at IS NULL AND expires_at <= ?",
-        )
-        .bind(now.to_rfc3339())
-        .bind(task_id.to_string())
-        .bind(now.to_rfc3339())
-        .execute(&self.pool)
-        .await?;
-
         let row = sqlx::query(
             "SELECT id, task_id, identity, ttl_seconds, lease_id,
                     acquired_at, expires_at, renewed_at
@@ -3881,7 +4083,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Can't claim again (task is now in_progress, not ready).
+        // Can't claim again — someone else holds the lease.
         let err = store
             .claim_task(
                 p.id,
@@ -3895,7 +4097,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert_eq!(err.urn(), "urn:shepherd:error:task-not-ready");
+        assert_eq!(err.urn(), "urn:shepherd:error:claim-conflict");
     }
 
     // ── self-relation rejected ──────────────────────────────────────────
@@ -4424,5 +4626,441 @@ mod tests {
         // Nothing left to purge.
         let result2 = store.purge_all_deleted(future).await.unwrap();
         assert_eq!(result2.projects_purged, 0);
+    }
+
+    // ── S5: claim guard, expiry, import normalization ────────────────────
+
+    /// Force a task's active claim to look expired (simulates a crashed agent).
+    async fn force_expire_claim(store: &Store, task_id: TaskId) {
+        let past = (Utc::now() - chrono::TimeDelta::hours(1)).to_rfc3339();
+        sqlx::query("UPDATE claims SET expires_at = ? WHERE task_id = ? AND released_at IS NULL")
+            .bind(past)
+            .bind(task_id.to_string())
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+
+    fn session_report(identity: Identity, outcome: SessionOutcome) -> SessionReport {
+        let now = Utc::now();
+        SessionReport {
+            identity,
+            started_at: now,
+            ended_at: now,
+            outcome,
+            failure_reason: None,
+            summary: Some("report".into()),
+            decisions: None,
+            knowledge_items: None,
+            artifacts: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn session_report_rejects_identity_mismatch() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let (t, claim) = in_progress_task(&store, p.id, "guarded").await;
+
+        let err = store
+            .create_session(
+                p.id,
+                t.id,
+                &session_report(other_identity(), SessionOutcome::Succeeded),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.status_code(), 409);
+        assert_eq!(err.urn(), "urn:shepherd:error:claim-conflict");
+
+        // The rightful claim is untouched and the task still in progress.
+        let t = store.get_task(p.id, t.id).await.unwrap();
+        assert_eq!(t.status, TaskStatus::InProgress);
+        let active = store.get_active_claim(t.id, Utc::now()).await.unwrap();
+        assert_eq!(active.unwrap().id, claim.id);
+    }
+
+    #[tokio::test]
+    async fn session_report_rejects_expired_claim() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let (t, _claim) = in_progress_task(&store, p.id, "expired").await;
+        force_expire_claim(&store, t.id).await;
+
+        let err = store
+            .create_session(
+                p.id,
+                t.id,
+                &session_report(test_identity(), SessionOutcome::Succeeded),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.status_code(), 410);
+        assert_eq!(err.urn(), "urn:shepherd:error:lease-expired");
+    }
+
+    #[tokio::test]
+    async fn next_task_sweeps_expired_leases() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let (t, _claim) = in_progress_task(&store, p.id, "crashed").await;
+        force_expire_claim(&store, t.id).await;
+
+        // The lazy sweep returns the task to ready and offers it again.
+        let next = store.next_task(p.id).await.unwrap().unwrap();
+        assert_eq!(next.id, t.id);
+        assert_eq!(next.status, TaskStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn claim_succeeds_over_expired_unswept_claim() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let (t, _claim) = in_progress_task(&store, p.id, "reclaim").await;
+        force_expire_claim(&store, t.id).await;
+        // Sweep returns the task to ready.
+        store.sweep_expired_claims(Utc::now()).await.unwrap();
+
+        let claim2 = store
+            .claim_task(
+                p.id,
+                t.id,
+                &ClaimRequest {
+                    identity: other_identity(),
+                    ttl_seconds: 300,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        assert!(claim2.identity.matches(&other_identity()));
+    }
+
+    #[tokio::test]
+    async fn stale_claimant_cannot_hijack_reclaimed_task() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        // Agent A claims, then its lease expires.
+        let (t, _claim_a) = in_progress_task(&store, p.id, "hijack").await;
+        force_expire_claim(&store, t.id).await;
+        store.sweep_expired_claims(Utc::now()).await.unwrap();
+
+        // Agent B re-claims.
+        let claim_b = store
+            .claim_task(
+                p.id,
+                t.id,
+                &ClaimRequest {
+                    identity: other_identity(),
+                    ttl_seconds: 300,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+
+        // A's late report must not release B's claim or advance the task.
+        let err = store
+            .create_session(
+                p.id,
+                t.id,
+                &session_report(test_identity(), SessionOutcome::Succeeded),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.status_code(), 409);
+
+        let active = store.get_active_claim(t.id, Utc::now()).await.unwrap();
+        assert_eq!(active.unwrap().id, claim_b.id);
+        let t = store.get_task(p.id, t.id).await.unwrap();
+        assert_eq!(t.status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    async fn import_normalizes_in_progress_tasks() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+
+        // a: done. b: in_progress, depends on a (deps satisfied).
+        let a = done_task(&store, p.id, "a done").await;
+        let (b, _claim) = in_progress_task(&store, p.id, "b in progress").await;
+        store
+            .create_relation(
+                p.id,
+                b.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: a.id,
+                },
+            )
+            .await
+            .unwrap();
+        // c: in_progress with an unfinished dep (added while claimed).
+        let (c, _claim) = in_progress_task(&store, p.id, "c in progress").await;
+        let d = ready_task(&store, p.id, "d not done").await;
+        store
+            .create_relation(
+                p.id,
+                c.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: d.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        let doc = store.export_project(p.id).await.unwrap();
+        let result = store.import_project(&doc).await.unwrap();
+
+        let imported = store
+            .list_tasks(result.project_id, None, 100, None, None)
+            .await
+            .unwrap();
+        let status_of = |title: &str| {
+            imported
+                .items
+                .iter()
+                .find(|t| t.title == title)
+                .unwrap()
+                .status
+        };
+        assert_eq!(status_of("a done"), TaskStatus::Done);
+        assert_eq!(status_of("b in progress"), TaskStatus::Ready);
+        assert_eq!(status_of("c in progress"), TaskStatus::Approved);
+        assert_eq!(status_of("d not done"), TaskStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn sweep_rescues_stale_orphaned_in_progress() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let (t, claim) = in_progress_task(&store, p.id, "orphaned").await;
+
+        // Simulate a crash between claim release and the status update: the
+        // row is released (beyond the 30s grace) but the task stays
+        // in_progress.
+        let stale = (Utc::now() - chrono::TimeDelta::seconds(60)).to_rfc3339();
+        sqlx::query("UPDATE claims SET released_at = ?, release_reason = 'voluntary' WHERE id = ?")
+            .bind(&stale)
+            .bind(claim.id.to_string())
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        let released = store.sweep_expired_claims(Utc::now()).await.unwrap();
+        assert!(released.contains(&t.id));
+        let t = store.get_task(p.id, t.id).await.unwrap();
+        assert_eq!(t.status, TaskStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn sweep_leaves_fresh_releases_alone() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let (t, claim) = in_progress_task(&store, p.id, "mid-release").await;
+
+        // A release within the grace window (a healthy release→status update
+        // in flight) must not be rescued.
+        sqlx::query("UPDATE claims SET released_at = ?, release_reason = 'voluntary' WHERE id = ?")
+            .bind(Utc::now().to_rfc3339())
+            .bind(claim.id.to_string())
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        let released = store.sweep_expired_claims(Utc::now()).await.unwrap();
+        assert!(!released.contains(&t.id));
+        let t = store.get_task(p.id, t.id).await.unwrap();
+        assert_eq!(t.status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    async fn import_falls_back_blocked_from_status() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let t = ready_task(&store, p.id, "blocked export").await;
+        store.block_task(p.id, t.id, "waiting").await.unwrap();
+
+        // Simulate the wire round-trip: the spec's Task schema does not
+        // carry blocked_from_status, so REST imports arrive without it.
+        let mut doc = store.export_project(p.id).await.unwrap();
+        for task in &mut doc.tasks {
+            task.blocked_from_status = None;
+        }
+
+        let result = store.import_project(&doc).await.unwrap();
+        let imported = store
+            .list_tasks(result.project_id, None, 100, None, None)
+            .await
+            .unwrap();
+        let blocked = &imported.items[0];
+        assert_eq!(blocked.status, TaskStatus::Blocked);
+
+        // The fallback keeps unblock working; deps are re-checked on the way.
+        let unblocked = store
+            .unblock_task(result.project_id, blocked.id)
+            .await
+            .unwrap();
+        assert_eq!(unblocked.status, TaskStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn import_normalizes_approved_with_done_deps() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let a = done_task(&store, p.id, "dep done").await;
+        let (b, _claim) = in_progress_task(&store, p.id, "was approved").await;
+        store
+            .create_relation(
+                p.id,
+                b.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: a.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Hand-crafted docs can carry approved + all-deps-done, a state the
+        // live system auto-readies immediately. Nothing re-runs that check
+        // after import, so normalization must (invariant 4).
+        let mut doc = store.export_project(p.id).await.unwrap();
+        for task in &mut doc.tasks {
+            if task.id == b.id {
+                task.status = TaskStatus::Approved;
+            }
+        }
+
+        let result = store.import_project(&doc).await.unwrap();
+        let imported = store
+            .list_tasks(result.project_id, None, 100, None, None)
+            .await
+            .unwrap();
+        let status_of = |title: &str| {
+            imported
+                .items
+                .iter()
+                .find(|t| t.title == title)
+                .unwrap()
+                .status
+        };
+        assert_eq!(status_of("was approved"), TaskStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn reject_demotes_when_dep_added_during_review() {
+        let store = Store::new_in_memory().await.unwrap();
+        // Review gate on: success sends the task to in_review.
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "gated".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: true }),
+            })
+            .await
+            .unwrap();
+
+        let (t, _claim) = in_progress_task(&store, p.id, "reviewed").await;
+        store
+            .create_session(
+                p.id,
+                t.id,
+                &session_report(test_identity(), SessionOutcome::Succeeded),
+            )
+            .await
+            .unwrap();
+        let t = store.get_task(p.id, t.id).await.unwrap();
+        assert_eq!(t.status, TaskStatus::InReview);
+
+        // A new unfinished dependency lands while the task is in review.
+        let dep = ready_task(&store, p.id, "late dep").await;
+        store
+            .create_relation(
+                p.id,
+                t.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: dep.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Rejection must not produce ready-with-undone-deps.
+        let t = store.reject_task(p.id, t.id, "needs rework").await.unwrap();
+        assert_eq!(t.status, TaskStatus::Approved);
+    }
+
+    #[tokio::test]
+    async fn unblock_promotes_approved_when_deps_completed_while_blocked() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+
+        // A approved with an unfinished dep on B, then blocked.
+        let b = ready_task(&store, p.id, "dep").await;
+        let a = ready_task(&store, p.id, "blocked while waiting").await;
+        store
+            .create_relation(
+                p.id,
+                a.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: b.id,
+                },
+            )
+            .await
+            .unwrap();
+        let a = store.get_task(p.id, a.id).await.unwrap();
+        assert_eq!(a.status, TaskStatus::Approved);
+        store.block_task(p.id, a.id, "paused").await.unwrap();
+
+        // B completes while A is blocked — the cascade skips blocked tasks.
+        let now = Utc::now();
+        store
+            .claim_task(
+                p.id,
+                b.id,
+                &ClaimRequest {
+                    identity: test_identity(),
+                    ttl_seconds: 300,
+                },
+                now,
+            )
+            .await
+            .unwrap();
+        store
+            .create_session(
+                p.id,
+                b.id,
+                &session_report(test_identity(), SessionOutcome::Succeeded),
+            )
+            .await
+            .unwrap();
+
+        // Unblock must promote A to ready, not strand it approved.
+        let a = store.unblock_task(p.id, a.id).await.unwrap();
+        assert_eq!(a.status, TaskStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn unblock_demotes_claimless_in_progress() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let (t, _claim) = in_progress_task(&store, p.id, "blocked while claimed").await;
+
+        store
+            .block_task(p.id, t.id, "waiting on input")
+            .await
+            .unwrap();
+        // The lease expires while blocked; the sweep releases the claim row
+        // but leaves the blocked status alone.
+        force_expire_claim(&store, t.id).await;
+        store.sweep_expired_claims(Utc::now()).await.unwrap();
+
+        // Unblock must not restore a claim-less in_progress.
+        let t = store.unblock_task(p.id, t.id).await.unwrap();
+        assert_eq!(t.status, TaskStatus::Ready);
     }
 }

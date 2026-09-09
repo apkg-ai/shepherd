@@ -751,9 +751,10 @@ paths:
         - tasks
       summary: Approve a proposed task
       description: >-
-        Transitions a task from `proposed` to `approved`. The task then moves
-        to `ready` automatically once all its `depends_on` dependencies are
-        `done`.
+        Approves a proposal or work in review. A `proposed` task transitions
+        to `approved` (then to `ready` automatically once all its
+        `depends_on` dependencies are `done`). An `in_review` task
+        transitions to `done`, readying its dependents.
       security:
         - {}
       requestBody:
@@ -1262,8 +1263,9 @@ paths:
       summary: Renew a task claim
       description: >-
         Extends the TTL of an active claim. The caller must be the current
-        claimant (matched by identity). Returns 410 Gone if the lease has
-        already expired.
+        claimant (matched by identity) — a mismatched identity is rejected
+        with 409 Conflict. Returns 410 Gone if the lease has already
+        expired.
       security:
         - {}
       requestBody:
@@ -1310,6 +1312,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "410":
           $ref: "#/components/responses/Gone"
         "422":
@@ -1331,8 +1335,10 @@ paths:
       summary: Release a task claim
       description: >-
         Voluntarily releases the current claim without reporting a session.
-        The task returns to `ready` and becomes claimable by others. Returns
-        410 Gone if the lease has already expired.
+        The caller must be the current claimant (matched by identity) — a
+        mismatched identity is rejected with 409 Conflict. The task returns
+        to `ready` and becomes claimable by others. Returns 410 Gone if the
+        lease has already expired.
       security:
         - {}
       requestBody:
@@ -1362,6 +1368,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "410":
           $ref: "#/components/responses/Gone"
         "422":
@@ -1445,10 +1453,11 @@ paths:
       summary: Report a work session
       description: >-
         Records a completed work session on a task. The task must be
-        `in_progress` and claimed by the reporting identity. On success the
-        task advances: `in_review` if the project review gate is on, `done`
-        if it is off. On failure, the task returns to `ready` and its
-        attempt count increments.
+        `in_progress` and claimed by the reporting identity — a mismatched
+        identity is rejected with 409 Conflict; a missing or expired claim
+        with 410 Gone. On success the task advances: `in_review` if the
+        project review gate is on, `done` if it is off. On failure, the
+        task returns to `ready` and its attempt count increments.
       security:
         - {}
       requestBody:
@@ -1524,6 +1533,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "410":
+          $ref: "#/components/responses/Gone"
         "422":
           $ref: "#/components/responses/ValidationError"
         "429":

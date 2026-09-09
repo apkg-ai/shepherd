@@ -7,10 +7,15 @@
 //! implements the generated traits by delegating to `shepherd_core::Store`.
 
 mod convert;
-// The generated module triggers two clippy style lints by design (collapsed
+// The generated module triggers three clippy style lints by design (collapsed
 // `if` chains from the emission template, `must_use` on types already marked
-// `must_use`). Everything else stays lint-clean.
-#[allow(clippy::collapsible_if, clippy::double_must_use)]
+// `must_use`, and `build_router` taking one state per API tag). Everything
+// else stays lint-clean.
+#[allow(
+    clippy::collapsible_if,
+    clippy::double_must_use,
+    clippy::too_many_arguments
+)]
 pub mod generated;
 mod middleware;
 
@@ -23,7 +28,10 @@ use axum::routing::get;
 use shepherd_core::Store;
 use tower_http::services::ServeDir;
 
-use crate::convert::{parse_project_id, parse_relation_id, parse_task_id, problem_detail};
+use crate::convert::{
+    parse_knowledge_id, parse_project_id, parse_relation_id, parse_session_id, parse_task_id,
+    problem_detail,
+};
 use crate::generated::server::api::*;
 use crate::generated::server::errors::*;
 use crate::generated::types as wire;
@@ -45,6 +53,10 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
         state.clone(),
         state.clone(),
         state.clone(),
+        state.clone(),
+        state.clone(),
+        state.clone(),
+        state.clone(),
     );
 
     generated
@@ -59,19 +71,55 @@ async fn openapi_spec() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "application/yaml")], OPENAPI_SPEC)
 }
 
+/// Spawn the background claim sweeper: every `period`, expired leases are
+/// released and their tasks returned to `ready`, so a crashed agent's task
+/// is freed without waiting for API traffic (the lazy sweep in `next-task`).
+/// Returns the task handle; abort it to stop sweeping.
+pub fn spawn_claim_sweeper(
+    store: Store,
+    period: std::time::Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(period);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            match store.sweep_expired_claims(chrono::Utc::now()).await {
+                Ok(released) => {
+                    for task_id in released {
+                        println!("sweep: expired lease released task {task_id}");
+                    }
+                }
+                Err(e) => eprintln!("sweep: error releasing expired claims: {e}"),
+            }
+        }
+    })
+}
+
 // ── Macro to reduce error-mapping boilerplate ───────────────────────────
 
 /// Map a `shepherd_core::Error` to the matching response enum variant.
-/// Response enums with NotFound + Conflict variants.
-///
-/// Note: 410 (`Error::LeaseExpired`) currently folds into Conflict. No S4
-/// endpoint can produce it; when S5 adds claim endpoints, the spec (and the
-/// generated enums) should gain a 410 Gone response so leases map correctly.
+/// Response enums with NotFound + Conflict variants (no Gone — 410 cannot
+/// arise on these endpoints; folding it into Conflict is defensive only).
 macro_rules! map_err {
     ($resp:ident, $err:expr) => {
         match $err.status_code() {
             404 => $resp::NotFound(problem_detail(&$err)),
             409 | 410 => $resp::Conflict(problem_detail(&$err)),
+            422 => $resp::UnprocessableEntity(problem_detail(&$err)),
+            _ => $resp::InternalServerError(problem_detail(&$err)),
+        }
+    };
+}
+
+/// For response enums with NotFound + Conflict + Gone variants (claim renew/
+/// release, session report — the lease endpoints).
+macro_rules! map_err_gone {
+    ($resp:ident, $err:expr) => {
+        match $err.status_code() {
+            404 => $resp::NotFound(problem_detail(&$err)),
+            409 => $resp::Conflict(problem_detail(&$err)),
+            410 => $resp::Gone(problem_detail(&$err)),
             422 => $resp::UnprocessableEntity(problem_detail(&$err)),
             _ => $resp::InternalServerError(problem_detail(&$err)),
         }
@@ -384,6 +432,303 @@ impl TasksApi for AppState {
                 task: task.map(wire::Task::from),
             }),
             Err(e) => map_err_no_conflict!(GetNextTaskResponse, e),
+        }
+    }
+
+    async fn get_task_context(
+        &self,
+        project_id: String,
+        task_id: String,
+    ) -> GetTaskContextResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(GetTaskContextResponse, e),
+        };
+        let tid = match parse_task_id(&task_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(GetTaskContextResponse, e),
+        };
+        match self.store.get_context_bundle(pid, tid).await {
+            Ok(bundle) => GetTaskContextResponse::Ok(bundle.into()),
+            Err(e) => map_err_no_conflict!(GetTaskContextResponse, e),
+        }
+    }
+}
+
+// ── ClaimsApi ───────────────────────────────────────────────────────────
+
+#[async_trait::async_trait]
+impl ClaimsApi for AppState {
+    async fn claim_task(
+        &self,
+        project_id: String,
+        task_id: String,
+        body: wire::ClaimRequest,
+    ) -> ClaimTaskResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err!(ClaimTaskResponse, e),
+        };
+        let tid = match parse_task_id(&task_id) {
+            Ok(id) => id,
+            Err(e) => return map_err!(ClaimTaskResponse, e),
+        };
+        let input: shepherd_core::ClaimRequest = body.into();
+        match self
+            .store
+            .claim_task(pid, tid, &input, chrono::Utc::now())
+            .await
+        {
+            Ok(claim) => ClaimTaskResponse::Created(claim.into()),
+            Err(e) => map_err!(ClaimTaskResponse, e),
+        }
+    }
+
+    async fn renew_claim(
+        &self,
+        project_id: String,
+        task_id: String,
+        body: wire::ClaimRenewal,
+    ) -> RenewClaimResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_gone!(RenewClaimResponse, e),
+        };
+        let tid = match parse_task_id(&task_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_gone!(RenewClaimResponse, e),
+        };
+        let input: shepherd_core::ClaimRenewal = body.into();
+        match self
+            .store
+            .renew_claim(pid, tid, &input, chrono::Utc::now())
+            .await
+        {
+            Ok(claim) => RenewClaimResponse::Ok(claim.into()),
+            Err(e) => map_err_gone!(RenewClaimResponse, e),
+        }
+    }
+
+    async fn release_claim(
+        &self,
+        project_id: String,
+        task_id: String,
+        body: wire::ClaimRelease,
+    ) -> ReleaseClaimResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_gone!(ReleaseClaimResponse, e),
+        };
+        let tid = match parse_task_id(&task_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_gone!(ReleaseClaimResponse, e),
+        };
+        let input: shepherd_core::ClaimRelease = body.into();
+        match self
+            .store
+            .release_claim(pid, tid, &input, chrono::Utc::now())
+            .await
+        {
+            Ok(()) => ReleaseClaimResponse::NoContent,
+            Err(e) => map_err_gone!(ReleaseClaimResponse, e),
+        }
+    }
+}
+
+// ── SessionsApi ─────────────────────────────────────────────────────────
+
+#[async_trait::async_trait]
+impl SessionsApi for AppState {
+    async fn list_task_sessions(
+        &self,
+        project_id: String,
+        task_id: String,
+        cursor: Option<String>,
+        limit: Option<i32>,
+    ) -> ListTaskSessionsResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(ListTaskSessionsResponse, e),
+        };
+        let tid = match parse_task_id(&task_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(ListTaskSessionsResponse, e),
+        };
+        let limit = limit.map(|l| l as i64).unwrap_or(25);
+        match self
+            .store
+            .list_sessions(pid, tid, cursor.as_deref(), limit)
+            .await
+        {
+            Ok(page) => ListTaskSessionsResponse::Ok(page.into()),
+            Err(e) => map_err_no_conflict!(ListTaskSessionsResponse, e),
+        }
+    }
+
+    async fn create_task_session(
+        &self,
+        project_id: String,
+        task_id: String,
+        body: wire::SessionReport,
+    ) -> CreateTaskSessionResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_gone!(CreateTaskSessionResponse, e),
+        };
+        let tid = match parse_task_id(&task_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_gone!(CreateTaskSessionResponse, e),
+        };
+        let input: shepherd_core::SessionReport = body.into();
+        match self.store.create_session(pid, tid, &input).await {
+            Ok(session) => CreateTaskSessionResponse::Created(session.into()),
+            Err(e) => map_err_gone!(CreateTaskSessionResponse, e),
+        }
+    }
+
+    async fn get_task_session(
+        &self,
+        project_id: String,
+        task_id: String,
+        session_id: String,
+    ) -> GetTaskSessionResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(GetTaskSessionResponse, e),
+        };
+        let tid = match parse_task_id(&task_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(GetTaskSessionResponse, e),
+        };
+        let sid = match parse_session_id(&session_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(GetTaskSessionResponse, e),
+        };
+        match self.store.get_session(pid, tid, sid).await {
+            Ok(session) => GetTaskSessionResponse::Ok(session.into()),
+            Err(e) => map_err_no_conflict!(GetTaskSessionResponse, e),
+        }
+    }
+}
+
+// ── KnowledgeApi ────────────────────────────────────────────────────────
+
+#[async_trait::async_trait]
+impl KnowledgeApi for AppState {
+    async fn list_knowledge(
+        &self,
+        project_id: String,
+        cursor: Option<String>,
+        limit: Option<i32>,
+        scope: Option<ListKnowledgeScope>,
+        r#type: Option<ListKnowledgeType>,
+        task_id: Option<String>,
+    ) -> ListKnowledgeResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(ListKnowledgeResponse, e),
+        };
+        let tid = match task_id.as_deref().map(parse_task_id).transpose() {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(ListKnowledgeResponse, e),
+        };
+        let limit = limit.map(|l| l as i64).unwrap_or(25);
+        let core_scope = scope.map(|s| match s {
+            ListKnowledgeScope::Task => shepherd_core::KnowledgeScope::Task,
+            ListKnowledgeScope::Session => shepherd_core::KnowledgeScope::Session,
+            ListKnowledgeScope::Project => shepherd_core::KnowledgeScope::Project,
+        });
+        let core_type = r#type.map(|t| match t {
+            ListKnowledgeType::Link => shepherd_core::KnowledgeType::Link,
+            ListKnowledgeType::Transcript => shepherd_core::KnowledgeType::Transcript,
+            ListKnowledgeType::Decision => shepherd_core::KnowledgeType::Decision,
+            ListKnowledgeType::Note => shepherd_core::KnowledgeType::Note,
+        });
+        match self
+            .store
+            .list_knowledge(pid, cursor.as_deref(), limit, core_scope, core_type, tid)
+            .await
+        {
+            Ok(page) => ListKnowledgeResponse::Ok(page.into()),
+            Err(e) => map_err_no_conflict!(ListKnowledgeResponse, e),
+        }
+    }
+
+    async fn create_knowledge(
+        &self,
+        project_id: String,
+        body: wire::KnowledgeItemCreate,
+    ) -> CreateKnowledgeResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(CreateKnowledgeResponse, e),
+        };
+        let input: shepherd_core::KnowledgeItemCreate = body.into();
+        match self.store.create_knowledge(pid, &input).await {
+            Ok(item) => CreateKnowledgeResponse::Created(item.into()),
+            Err(e) => map_err_no_conflict!(CreateKnowledgeResponse, e),
+        }
+    }
+
+    async fn get_knowledge(
+        &self,
+        project_id: String,
+        knowledge_id: String,
+    ) -> GetKnowledgeResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(GetKnowledgeResponse, e),
+        };
+        let kid = match parse_knowledge_id(&knowledge_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(GetKnowledgeResponse, e),
+        };
+        match self.store.get_knowledge(pid, kid).await {
+            Ok(item) => GetKnowledgeResponse::Ok(item.into()),
+            Err(e) => map_err_no_conflict!(GetKnowledgeResponse, e),
+        }
+    }
+
+    async fn delete_knowledge(
+        &self,
+        project_id: String,
+        knowledge_id: String,
+    ) -> DeleteKnowledgeResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(DeleteKnowledgeResponse, e),
+        };
+        let kid = match parse_knowledge_id(&knowledge_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(DeleteKnowledgeResponse, e),
+        };
+        match self.store.delete_knowledge(pid, kid).await {
+            Ok(()) => DeleteKnowledgeResponse::NoContent,
+            Err(e) => map_err_no_conflict!(DeleteKnowledgeResponse, e),
+        }
+    }
+}
+
+// ── ExportImportApi ─────────────────────────────────────────────────────
+
+#[async_trait::async_trait]
+impl ExportImportApi for AppState {
+    async fn export_project(&self, project_id: String) -> ExportProjectResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(ExportProjectResponse, e),
+        };
+        match self.store.export_project(pid).await {
+            Ok(doc) => ExportProjectResponse::Ok(doc.into()),
+            Err(e) => map_err_no_conflict!(ExportProjectResponse, e),
+        }
+    }
+
+    async fn import_project(&self, body: wire::ExportDocument) -> ImportProjectResponse {
+        let doc: shepherd_core::ExportDocument = body.into();
+        match self.store.import_project(&doc).await {
+            Ok(result) => ImportProjectResponse::Created(result.into()),
+            Err(e) => map_err_minimal!(ImportProjectResponse, e),
         }
     }
 }

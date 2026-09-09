@@ -81,6 +81,45 @@ fn __query_empty_marker(
         None => Ok(false),
     }
 }
+/// Query parameters for `GET /api/v1/projects/{project_id}/knowledge` (operationId `listKnowledge`).
+#[derive(Debug, Default)]
+pub struct ListKnowledgeQuery {
+    pub cursor: ::std::option::Option<String>,
+    pub limit: ::std::option::Option<i32>,
+    pub scope: ::std::option::Option<ListKnowledgeScope>,
+    pub r#type: ::std::option::Option<ListKnowledgeType>,
+    pub task_id: ::std::option::Option<String>,
+}
+fn __decode_list_knowledge_query(
+    raw: ::std::option::Option<&str>,
+) -> ::std::result::Result<ListKnowledgeQuery, String> {
+    if let Some(raw) = raw {
+        __validate_urlencoded(raw)?;
+    }
+    let __pairs = __query_pairs(raw);
+    let cursor = __query_one(&__pairs, "cursor")?
+        .map(|raw| __decode_query_scalar(&raw, "cursor"))
+        .transpose()?;
+    let limit = __query_one(&__pairs, "limit")?
+        .map(|raw| __decode_query_scalar(&raw, "limit"))
+        .transpose()?;
+    let scope = __query_one(&__pairs, "scope")?
+        .map(|raw| __decode_query_scalar(&raw, "scope"))
+        .transpose()?;
+    let r#type = __query_one(&__pairs, "type")?
+        .map(|raw| __decode_query_scalar(&raw, "type"))
+        .transpose()?;
+    let task_id = __query_one(&__pairs, "task_id")?
+        .map(|raw| __decode_query_scalar(&raw, "task_id"))
+        .transpose()?;
+    Ok(ListKnowledgeQuery {
+        cursor,
+        limit,
+        scope,
+        r#type,
+        task_id,
+    })
+}
 /// Query parameters for `GET /api/v1/projects` (operationId `listProjects`).
 #[derive(Debug, Default)]
 pub struct ListProjectsQuery {
@@ -101,6 +140,27 @@ fn __decode_list_projects_query(
         .map(|raw| __decode_query_scalar(&raw, "limit"))
         .transpose()?;
     Ok(ListProjectsQuery { cursor, limit })
+}
+/// Query parameters for `GET /api/v1/projects/{project_id}/tasks/{task_id}/sessions` (operationId `listTaskSessions`).
+#[derive(Debug, Default)]
+pub struct ListTaskSessionsQuery {
+    pub cursor: ::std::option::Option<String>,
+    pub limit: ::std::option::Option<i32>,
+}
+fn __decode_list_task_sessions_query(
+    raw: ::std::option::Option<&str>,
+) -> ::std::result::Result<ListTaskSessionsQuery, String> {
+    if let Some(raw) = raw {
+        __validate_urlencoded(raw)?;
+    }
+    let __pairs = __query_pairs(raw);
+    let cursor = __query_one(&__pairs, "cursor")?
+        .map(|raw| __decode_query_scalar(&raw, "cursor"))
+        .transpose()?;
+    let limit = __query_one(&__pairs, "limit")?
+        .map(|raw| __decode_query_scalar(&raw, "limit"))
+        .transpose()?;
+    Ok(ListTaskSessionsQuery { cursor, limit })
 }
 /// Query parameters for `GET /api/v1/projects/{project_id}/tasks` (operationId `listTasks`).
 #[derive(Debug, Default)]
@@ -135,6 +195,700 @@ fn __decode_list_tasks_query(
         status,
         r#type,
     })
+}
+/// Build an axum::Router for the `ClaimsApi` trait.
+pub fn claims_api_router<T>(api: T) -> ::axum::Router
+where
+    T: ClaimsApi + Clone + Send + Sync + 'static,
+{
+    ::axum::Router::new()
+        .route(
+            "/api/v1/projects/{project_id}/tasks/{task_id}/claim",
+            ::axum::routing::post(claim_task_handler::<T>),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/tasks/{task_id}/claim/renew",
+            ::axum::routing::post(renew_claim_handler::<T>),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/tasks/{task_id}/claim/release",
+            ::axum::routing::post(release_claim_handler::<T>),
+        )
+        .layer(::axum::extract::DefaultBodyLimit::max(2097152usize))
+        .with_state(api)
+}
+async fn claim_task_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+    __request: ::axum::extract::Request,
+) -> ::axum::response::Response
+where
+    T: super::api::ClaimsApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_46_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let task_id: String = match __path_values.remove("task_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_47_PATH_1,
+                "/path/task_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let body: ClaimRequest = match super::validation::decode_json_body::<ClaimRequest>(
+        __request,
+        super::validation::VALIDATION_TARGET_45_BODY,
+        "application/json",
+        true,
+        2097152usize,
+    )
+    .await
+    {
+        Ok(Some(body)) => body,
+        Ok(None) => {
+            return ::axum::response::IntoResponse::into_response(
+                super::validation::generated_contract_error(),
+            );
+        }
+        Err(rejection) => return ::axum::response::IntoResponse::into_response(rejection),
+    };
+    ::axum::response::IntoResponse::into_response(api.claim_task(project_id, task_id, body).await)
+}
+async fn renew_claim_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+    __request: ::axum::extract::Request,
+) -> ::axum::response::Response
+where
+    T: super::api::ClaimsApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_49_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let task_id: String = match __path_values.remove("task_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_50_PATH_1,
+                "/path/task_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let body: ClaimRenewal = match super::validation::decode_json_body::<ClaimRenewal>(
+        __request,
+        super::validation::VALIDATION_TARGET_48_BODY,
+        "application/json",
+        true,
+        2097152usize,
+    )
+    .await
+    {
+        Ok(Some(body)) => body,
+        Ok(None) => {
+            return ::axum::response::IntoResponse::into_response(
+                super::validation::generated_contract_error(),
+            );
+        }
+        Err(rejection) => return ::axum::response::IntoResponse::into_response(rejection),
+    };
+    ::axum::response::IntoResponse::into_response(api.renew_claim(project_id, task_id, body).await)
+}
+async fn release_claim_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+    __request: ::axum::extract::Request,
+) -> ::axum::response::Response
+where
+    T: super::api::ClaimsApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_52_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let task_id: String = match __path_values.remove("task_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_53_PATH_1,
+                "/path/task_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let body: ClaimRelease = match super::validation::decode_json_body::<ClaimRelease>(
+        __request,
+        super::validation::VALIDATION_TARGET_51_BODY,
+        "application/json",
+        true,
+        2097152usize,
+    )
+    .await
+    {
+        Ok(Some(body)) => body,
+        Ok(None) => {
+            return ::axum::response::IntoResponse::into_response(
+                super::validation::generated_contract_error(),
+            );
+        }
+        Err(rejection) => return ::axum::response::IntoResponse::into_response(rejection),
+    };
+    ::axum::response::IntoResponse::into_response(
+        api.release_claim(project_id, task_id, body).await,
+    )
+}
+/// Build an axum::Router for the `ExportImportApi` trait.
+pub fn export_import_api_router<T>(api: T) -> ::axum::Router
+where
+    T: ExportImportApi + Clone + Send + Sync + 'static,
+{
+    ::axum::Router::new()
+        .route(
+            "/api/v1/projects/{project_id}/export",
+            ::axum::routing::get(export_project_handler::<T>),
+        )
+        .route(
+            "/api/v1/projects/import",
+            ::axum::routing::post(import_project_handler::<T>),
+        )
+        .layer(::axum::extract::DefaultBodyLimit::max(2097152usize))
+        .with_state(api)
+}
+async fn export_project_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+) -> ::axum::response::Response
+where
+    T: super::api::ExportImportApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_76_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    ::axum::response::IntoResponse::into_response(api.export_project(project_id).await)
+}
+async fn import_project_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __request: ::axum::extract::Request,
+) -> ::axum::response::Response
+where
+    T: super::api::ExportImportApi + Clone + Send + Sync + 'static,
+{
+    let body: ExportDocument = match super::validation::decode_json_body::<ExportDocument>(
+        __request,
+        super::validation::VALIDATION_TARGET_77_BODY,
+        "application/json",
+        true,
+        2097152usize,
+    )
+    .await
+    {
+        Ok(Some(body)) => body,
+        Ok(None) => {
+            return ::axum::response::IntoResponse::into_response(
+                super::validation::generated_contract_error(),
+            );
+        }
+        Err(rejection) => return ::axum::response::IntoResponse::into_response(rejection),
+    };
+    ::axum::response::IntoResponse::into_response(api.import_project(body).await)
+}
+/// Build an axum::Router for the `KnowledgeApi` trait.
+pub fn knowledge_api_router<T>(api: T) -> ::axum::Router
+where
+    T: KnowledgeApi + Clone + Send + Sync + 'static,
+{
+    ::axum::Router::new()
+        .route(
+            "/api/v1/projects/{project_id}/knowledge",
+            ::axum::routing::get(list_knowledge_handler::<T>),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/knowledge",
+            ::axum::routing::post(create_knowledge_handler::<T>),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/knowledge/{knowledge_id}",
+            ::axum::routing::get(get_knowledge_handler::<T>),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/knowledge/{knowledge_id}",
+            ::axum::routing::delete(delete_knowledge_handler::<T>),
+        )
+        .layer(::axum::extract::DefaultBodyLimit::max(2097152usize))
+        .with_state(api)
+}
+async fn list_knowledge_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+    ::axum::extract::RawQuery(__raw_query): ::axum::extract::RawQuery,
+) -> ::axum::response::Response
+where
+    T: super::api::KnowledgeApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_69_PATH_5,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    if let Some(raw) = __raw_query.as_deref() {
+        if __validate_urlencoded(raw).is_err() {
+            return ::axum::response::IntoResponse::into_response(
+                super::validation::malformed_parameter("/query"),
+            );
+        }
+    }
+    let __raw_query_pairs = __query_pairs(__raw_query.as_deref());
+    if let Ok(Some(raw)) = __query_one(&__raw_query_pairs, "cursor") {
+        if let Err(rejection) = super::validation::validate_string_parameter(
+            super::validation::VALIDATION_TARGET_64_QUERY_0,
+            "/query/cursor",
+            &raw,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    if let Ok(Some(raw)) = __query_one(&__raw_query_pairs, "scope") {
+        if let Err(rejection) = super::validation::validate_string_parameter(
+            super::validation::VALIDATION_TARGET_66_QUERY_2,
+            "/query/scope",
+            &raw,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    if let Ok(Some(raw)) = __query_one(&__raw_query_pairs, "type") {
+        if let Err(rejection) = super::validation::validate_string_parameter(
+            super::validation::VALIDATION_TARGET_67_QUERY_3,
+            "/query/type",
+            &raw,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    if let Ok(Some(raw)) = __query_one(&__raw_query_pairs, "task_id") {
+        if let Err(rejection) = super::validation::validate_string_parameter(
+            super::validation::VALIDATION_TARGET_68_QUERY_4,
+            "/query/task_id",
+            &raw,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    let __q: ListKnowledgeQuery = match __decode_list_knowledge_query(__raw_query.as_deref()) {
+        Ok(query) => query,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                super::validation::malformed_parameter("/query"),
+            );
+        }
+    };
+    if let Some(value) = &__q.cursor {
+        if let Err(rejection) = super::validation::validate_parameter(
+            super::validation::VALIDATION_TARGET_64_QUERY_0,
+            "/query/cursor",
+            value,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    if let Some(value) = &__q.limit {
+        if let Err(rejection) = super::validation::validate_parameter(
+            super::validation::VALIDATION_TARGET_65_QUERY_1,
+            "/query/limit",
+            value,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    if let Some(value) = &__q.scope {
+        if let Err(rejection) = super::validation::validate_parameter(
+            super::validation::VALIDATION_TARGET_66_QUERY_2,
+            "/query/scope",
+            value,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    if let Some(value) = &__q.r#type {
+        if let Err(rejection) = super::validation::validate_parameter(
+            super::validation::VALIDATION_TARGET_67_QUERY_3,
+            "/query/type",
+            value,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    if let Some(value) = &__q.task_id {
+        if let Err(rejection) = super::validation::validate_parameter(
+            super::validation::VALIDATION_TARGET_68_QUERY_4,
+            "/query/task_id",
+            value,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    ::axum::response::IntoResponse::into_response(
+        api.list_knowledge(
+            project_id,
+            __q.cursor,
+            __q.limit,
+            __q.scope,
+            __q.r#type,
+            __q.task_id,
+        )
+        .await,
+    )
+}
+async fn create_knowledge_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+    __request: ::axum::extract::Request,
+) -> ::axum::response::Response
+where
+    T: super::api::KnowledgeApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_71_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let body: KnowledgeItemCreate =
+        match super::validation::decode_json_body::<KnowledgeItemCreate>(
+            __request,
+            super::validation::VALIDATION_TARGET_70_BODY,
+            "application/json",
+            true,
+            2097152usize,
+        )
+        .await
+        {
+            Ok(Some(body)) => body,
+            Ok(None) => {
+                return ::axum::response::IntoResponse::into_response(
+                    super::validation::generated_contract_error(),
+                );
+            }
+            Err(rejection) => return ::axum::response::IntoResponse::into_response(rejection),
+        };
+    ::axum::response::IntoResponse::into_response(api.create_knowledge(project_id, body).await)
+}
+async fn get_knowledge_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+) -> ::axum::response::Response
+where
+    T: super::api::KnowledgeApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_72_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let knowledge_id: String = match __path_values.remove("knowledge_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_73_PATH_1,
+                "/path/knowledge_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    ::axum::response::IntoResponse::into_response(api.get_knowledge(project_id, knowledge_id).await)
+}
+async fn delete_knowledge_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+) -> ::axum::response::Response
+where
+    T: super::api::KnowledgeApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_74_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let knowledge_id: String = match __path_values.remove("knowledge_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_75_PATH_1,
+                "/path/knowledge_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    ::axum::response::IntoResponse::into_response(
+        api.delete_knowledge(project_id, knowledge_id).await,
+    )
 }
 /// Build an axum::Router for the `ProjectsApi` trait.
 pub fn projects_api_router<T>(api: T) -> ::axum::Router
@@ -424,7 +1178,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_35_PATH_0,
+                super::validation::VALIDATION_TARGET_37_PATH_0,
                 "/path/project_id",
                 true,
             ) {
@@ -444,7 +1198,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_36_PATH_1,
+                super::validation::VALIDATION_TARGET_38_PATH_1,
                 "/path/task_id",
                 true,
             ) {
@@ -471,85 +1225,6 @@ async fn create_task_relation_handler<T>(
         ::axum::extract::rejection::PathRejection,
     >,
     __request: ::axum::extract::Request,
-) -> ::axum::response::Response
-where
-    T: super::api::RelationsApi + Clone + Send + Sync + 'static,
-{
-    let ::axum::extract::Path(mut __path_values) = match __path_result {
-        Ok(path) => path,
-        Err(_) => {
-            return ::axum::response::IntoResponse::into_response(
-                ::axum::http::StatusCode::BAD_REQUEST,
-            );
-        }
-    };
-    let project_id: String = match __path_values.remove("project_id") {
-        Some(raw) => {
-            match super::validation::decode_parameter(
-                &raw,
-                super::validation::VALIDATION_TARGET_38_PATH_0,
-                "/path/project_id",
-                true,
-            ) {
-                Ok(value) => value,
-                Err(rejection) => {
-                    return ::axum::response::IntoResponse::into_response(rejection);
-                }
-            }
-        }
-        None => {
-            return ::axum::response::IntoResponse::into_response(
-                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
-    let task_id: String = match __path_values.remove("task_id") {
-        Some(raw) => {
-            match super::validation::decode_parameter(
-                &raw,
-                super::validation::VALIDATION_TARGET_39_PATH_1,
-                "/path/task_id",
-                true,
-            ) {
-                Ok(value) => value,
-                Err(rejection) => {
-                    return ::axum::response::IntoResponse::into_response(rejection);
-                }
-            }
-        }
-        None => {
-            return ::axum::response::IntoResponse::into_response(
-                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
-    let body: RelationCreate = match super::validation::decode_json_body::<RelationCreate>(
-        __request,
-        super::validation::VALIDATION_TARGET_37_BODY,
-        "application/json",
-        true,
-        2097152usize,
-    )
-    .await
-    {
-        Ok(Some(body)) => body,
-        Ok(None) => {
-            return ::axum::response::IntoResponse::into_response(
-                super::validation::generated_contract_error(),
-            );
-        }
-        Err(rejection) => return ::axum::response::IntoResponse::into_response(rejection),
-    };
-    ::axum::response::IntoResponse::into_response(
-        api.create_task_relation(project_id, task_id, body).await,
-    )
-}
-async fn delete_task_relation_handler<T>(
-    ::axum::extract::State(api): ::axum::extract::State<T>,
-    __path_result: ::std::result::Result<
-        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
-        ::axum::extract::rejection::PathRejection,
-    >,
 ) -> ::axum::response::Response
 where
     T: super::api::RelationsApi + Clone + Send + Sync + 'static,
@@ -602,11 +1277,90 @@ where
             );
         }
     };
+    let body: RelationCreate = match super::validation::decode_json_body::<RelationCreate>(
+        __request,
+        super::validation::VALIDATION_TARGET_39_BODY,
+        "application/json",
+        true,
+        2097152usize,
+    )
+    .await
+    {
+        Ok(Some(body)) => body,
+        Ok(None) => {
+            return ::axum::response::IntoResponse::into_response(
+                super::validation::generated_contract_error(),
+            );
+        }
+        Err(rejection) => return ::axum::response::IntoResponse::into_response(rejection),
+    };
+    ::axum::response::IntoResponse::into_response(
+        api.create_task_relation(project_id, task_id, body).await,
+    )
+}
+async fn delete_task_relation_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+) -> ::axum::response::Response
+where
+    T: super::api::RelationsApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_42_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let task_id: String = match __path_values.remove("task_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_43_PATH_1,
+                "/path/task_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
     let relation_id: String = match __path_values.remove("relation_id") {
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_42_PATH_2,
+                super::validation::VALIDATION_TARGET_44_PATH_2,
                 "/path/relation_id",
                 true,
             ) {
@@ -625,6 +1379,297 @@ where
     ::axum::response::IntoResponse::into_response(
         api.delete_task_relation(project_id, task_id, relation_id)
             .await,
+    )
+}
+/// Build an axum::Router for the `SessionsApi` trait.
+pub fn sessions_api_router<T>(api: T) -> ::axum::Router
+where
+    T: SessionsApi + Clone + Send + Sync + 'static,
+{
+    ::axum::Router::new()
+        .route(
+            "/api/v1/projects/{project_id}/tasks/{task_id}/sessions",
+            ::axum::routing::get(list_task_sessions_handler::<T>),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/tasks/{task_id}/sessions",
+            ::axum::routing::post(create_task_session_handler::<T>),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/tasks/{task_id}/sessions/{session_id}",
+            ::axum::routing::get(get_task_session_handler::<T>),
+        )
+        .layer(::axum::extract::DefaultBodyLimit::max(2097152usize))
+        .with_state(api)
+}
+async fn list_task_sessions_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+    ::axum::extract::RawQuery(__raw_query): ::axum::extract::RawQuery,
+) -> ::axum::response::Response
+where
+    T: super::api::SessionsApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_56_PATH_2,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let task_id: String = match __path_values.remove("task_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_57_PATH_3,
+                "/path/task_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    if let Some(raw) = __raw_query.as_deref() {
+        if __validate_urlencoded(raw).is_err() {
+            return ::axum::response::IntoResponse::into_response(
+                super::validation::malformed_parameter("/query"),
+            );
+        }
+    }
+    let __raw_query_pairs = __query_pairs(__raw_query.as_deref());
+    if let Ok(Some(raw)) = __query_one(&__raw_query_pairs, "cursor") {
+        if let Err(rejection) = super::validation::validate_string_parameter(
+            super::validation::VALIDATION_TARGET_54_QUERY_0,
+            "/query/cursor",
+            &raw,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    let __q: ListTaskSessionsQuery = match __decode_list_task_sessions_query(__raw_query.as_deref())
+    {
+        Ok(query) => query,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                super::validation::malformed_parameter("/query"),
+            );
+        }
+    };
+    if let Some(value) = &__q.cursor {
+        if let Err(rejection) = super::validation::validate_parameter(
+            super::validation::VALIDATION_TARGET_54_QUERY_0,
+            "/query/cursor",
+            value,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    if let Some(value) = &__q.limit {
+        if let Err(rejection) = super::validation::validate_parameter(
+            super::validation::VALIDATION_TARGET_55_QUERY_1,
+            "/query/limit",
+            value,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    ::axum::response::IntoResponse::into_response(
+        api.list_task_sessions(project_id, task_id, __q.cursor, __q.limit)
+            .await,
+    )
+}
+async fn create_task_session_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+    __request: ::axum::extract::Request,
+) -> ::axum::response::Response
+where
+    T: super::api::SessionsApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_59_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let task_id: String = match __path_values.remove("task_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_60_PATH_1,
+                "/path/task_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let body: SessionReport = match super::validation::decode_json_body::<SessionReport>(
+        __request,
+        super::validation::VALIDATION_TARGET_58_BODY,
+        "application/json",
+        true,
+        2097152usize,
+    )
+    .await
+    {
+        Ok(Some(body)) => body,
+        Ok(None) => {
+            return ::axum::response::IntoResponse::into_response(
+                super::validation::generated_contract_error(),
+            );
+        }
+        Err(rejection) => return ::axum::response::IntoResponse::into_response(rejection),
+    };
+    ::axum::response::IntoResponse::into_response(
+        api.create_task_session(project_id, task_id, body).await,
+    )
+}
+async fn get_task_session_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+) -> ::axum::response::Response
+where
+    T: super::api::SessionsApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_61_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let task_id: String = match __path_values.remove("task_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_62_PATH_1,
+                "/path/task_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let session_id: String = match __path_values.remove("session_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_63_PATH_2,
+                "/path/session_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    ::axum::response::IntoResponse::into_response(
+        api.get_task_session(project_id, task_id, session_id).await,
     )
 }
 /// Build an axum::Router for the `SystemApi` trait.
@@ -694,6 +1739,10 @@ where
         .route(
             "/api/v1/projects/{project_id}/next-task",
             ::axum::routing::get(get_next_task_handler::<T>),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/tasks/{task_id}/context",
+            ::axum::routing::get(get_task_context_handler::<T>),
         )
         .layer(::axum::extract::DefaultBodyLimit::max(2097152usize))
         .with_state(api)
@@ -1467,21 +2516,93 @@ where
     };
     ::axum::response::IntoResponse::into_response(api.get_next_task(project_id).await)
 }
-/// Combined router spanning 4 traits: ProjectsApi, RelationsApi, SystemApi, TasksApi.
-pub fn build_router<T1, T2, T3, T4>(
-    projects_api: T1,
-    relations_api: T2,
-    system_api: T3,
-    tasks_api: T4,
+async fn get_task_context_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+) -> ::axum::response::Response
+where
+    T: super::api::TasksApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_35_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let task_id: String = match __path_values.remove("task_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_36_PATH_1,
+                "/path/task_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    ::axum::response::IntoResponse::into_response(api.get_task_context(project_id, task_id).await)
+}
+/// Combined router spanning 8 traits: ClaimsApi, ExportImportApi, KnowledgeApi, ProjectsApi, RelationsApi, SessionsApi, SystemApi, TasksApi.
+pub fn build_router<T1, T2, T3, T4, T5, T6, T7, T8>(
+    claims_api: T1,
+    export_import_api: T2,
+    knowledge_api: T3,
+    projects_api: T4,
+    relations_api: T5,
+    sessions_api: T6,
+    system_api: T7,
+    tasks_api: T8,
 ) -> ::axum::Router
 where
-    T1: ProjectsApi + Clone + Send + Sync + 'static,
-    T2: RelationsApi + Clone + Send + Sync + 'static,
-    T3: SystemApi + Clone + Send + Sync + 'static,
-    T4: TasksApi + Clone + Send + Sync + 'static,
+    T1: ClaimsApi + Clone + Send + Sync + 'static,
+    T2: ExportImportApi + Clone + Send + Sync + 'static,
+    T3: KnowledgeApi + Clone + Send + Sync + 'static,
+    T4: ProjectsApi + Clone + Send + Sync + 'static,
+    T5: RelationsApi + Clone + Send + Sync + 'static,
+    T6: SessionsApi + Clone + Send + Sync + 'static,
+    T7: SystemApi + Clone + Send + Sync + 'static,
+    T8: TasksApi + Clone + Send + Sync + 'static,
 {
-    projects_api_router(projects_api)
+    claims_api_router(claims_api)
+        .merge(export_import_api_router(export_import_api))
+        .merge(knowledge_api_router(knowledge_api))
+        .merge(projects_api_router(projects_api))
         .merge(relations_api_router(relations_api))
+        .merge(sessions_api_router(sessions_api))
         .merge(system_api_router(system_api))
         .merge(tasks_api_router(tasks_api))
 }
