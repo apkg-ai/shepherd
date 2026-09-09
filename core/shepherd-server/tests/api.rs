@@ -127,12 +127,35 @@ async fn rate_limit_headers_are_present() {
 async fn cors_headers_are_present() {
     let app = test_app().await;
     let response = app
-        .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+        .clone()
+        .oneshot(
+            Request::get("/health")
+                .header("origin", "http://localhost:5173")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.headers()["access-control-allow-origin"],
+        "http://localhost:5173"
+    );
+
+    // Foreign origins must not be granted cross-origin read access to this
+    // unauthenticated local daemon.
+    let response = app
+        .oneshot(
+            Request::get("/health")
+                .header("origin", "https://evil.example.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
     assert!(
-        response
+        !response
             .headers()
             .contains_key("access-control-allow-origin")
     );
@@ -1440,6 +1463,91 @@ mod contract {
         let fake = "00000000-0000-0000-0000-000000000000";
 
         let (_, body) = get(&app, &format!("/api/v1/projects/{fake}")).await;
+        validate(&spec, "components/schemas/ProblemDetail", &body);
+    }
+
+    #[tokio::test]
+    async fn conflict_error_response_conforms_to_spec() {
+        let spec = load_spec();
+        let app = test_app().await;
+        let pid = create_project(&app, "conflict-contract").await;
+        let tid = create_task(&app, &pid, "Ready task", "approved").await;
+
+        // Approving an already-ready task is an invalid transition → 409.
+        let (status, body) = post(
+            &app,
+            &format!("/api/v1/projects/{pid}/tasks/{tid}/approve"),
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["type"], "urn:shepherd:error:invalid-transition");
+        validate(&spec, "components/schemas/ProblemDetail", &body);
+    }
+
+    #[tokio::test]
+    async fn request_validation_error_conforms_to_spec() {
+        let spec = load_spec();
+        let app = test_app().await;
+
+        // Missing required "name" — rejected by the generated validation
+        // layer, remapped to the shepherd ProblemDetail shape.
+        let (status, body) = post(&app, "/api/v1/projects", serde_json::json!({})).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["type"], "urn:shepherd:error:validation-error");
+        assert_eq!(body["errors"][0]["field"], "/body/name");
+        validate(&spec, "components/schemas/ProblemDetail", &body);
+    }
+
+    #[tokio::test]
+    async fn invalid_path_parameter_conforms_to_spec() {
+        let spec = load_spec();
+        let app = test_app().await;
+
+        let (status, body) = get(&app, "/api/v1/projects/not-a-uuid").await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["type"], "urn:shepherd:error:validation-error");
+        assert_eq!(body["errors"][0]["field"], "/path/project_id");
+        validate(&spec, "components/schemas/ProblemDetail", &body);
+    }
+
+    #[tokio::test]
+    async fn malformed_json_body_conforms_to_spec() {
+        let spec = load_spec();
+        let app = test_app().await;
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/projects")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{ not json"))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["type"], "urn:shepherd:error:validation-error");
+        validate(&spec, "components/schemas/ProblemDetail", &body);
+    }
+
+    #[tokio::test]
+    async fn unsupported_media_type_conforms_to_spec() {
+        let spec = load_spec();
+        let app = test_app().await;
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/projects")
+            .header(header::CONTENT_TYPE, "text/plain")
+            .body(Body::from("{\"name\":\"x\"}"))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        // The spec documents only 401/404/409/422/429/500; the remap layer
+        // folds pre-domain rejections into the documented 422.
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["type"], "urn:shepherd:error:validation-error");
         validate(&spec, "components/schemas/ProblemDetail", &body);
     }
 }

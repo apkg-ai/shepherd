@@ -24,21 +24,23 @@ HTTP 404
 [Asserts]
 jsonpath "$.type" == "urn:shepherd:error:not-found"
 
-# Invalid UUID in path → 400 or 422 (generated validation).
+# Invalid UUID in path → 422 with the spec's ProblemDetail shape.
 GET {{base_url}}/api/v1/projects/not-a-uuid
-HTTP *
+HTTP 422
 [Asserts]
-jsonpath "$.type" exists
-jsonpath "$.status" exists
+header "Content-Type" contains "application/problem+json"
+jsonpath "$.type" == "urn:shepherd:error:validation-error"
+jsonpath "$.status" == 422
+jsonpath "$.errors[0].field" == "/path/project_id"
 
 # Create project with missing required field "name".
 POST {{base_url}}/api/v1/projects
 Content-Type: application/json
 {}
-HTTP *
+HTTP 422
 [Asserts]
-jsonpath "$.type" exists
-jsonpath "$.status" >= 400
+jsonpath "$.type" == "urn:shepherd:error:validation-error"
+jsonpath "$.errors[0].field" == "/body/name"
 
 # Setup: create project for task validation tests.
 POST {{base_url}}/api/v1/projects
@@ -60,10 +62,9 @@ jsonpath "$.type" == "urn:shepherd:error:not-found"
 POST {{base_url}}/api/v1/projects/{{pid}}/tasks
 Content-Type: application/json
 { "description": "no title or type" }
-HTTP *
+HTTP 422
 [Asserts]
-jsonpath "$.type" exists
-jsonpath "$.status" >= 400
+jsonpath "$.type" == "urn:shepherd:error:validation-error"
 
 # Create relation with invalid target UUID.
 POST {{base_url}}/api/v1/projects/{{pid}}/tasks
@@ -79,10 +80,9 @@ Content-Type: application/json
   "type": "depends_on",
   "target_task_id": "not-a-uuid"
 }
-HTTP *
+HTTP 422
 [Asserts]
-jsonpath "$.type" exists
-jsonpath "$.status" >= 400
+jsonpath "$.type" == "urn:shepherd:error:validation-error"
 
 # 404 for DELETE nonexistent relation.
 DELETE {{base_url}}/api/v1/projects/{{pid}}/tasks/{{tid}}/relations/00000000-0000-0000-0000-000000000000

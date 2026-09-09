@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# E2E API tests using hurl. Boots the server on a fresh in-memory DB,
+# E2E API tests using hurl. Boots the server on a fresh temporary file DB,
 # runs all .hurl files, then tears down.
 set -euo pipefail
 
@@ -8,9 +8,20 @@ PORT="${HURL_PORT:-7542}"
 BASE="http://127.0.0.1:${PORT}"
 DB_DIR="$(mktemp -d)"
 DB_PATH="${DB_DIR}/hurl-test.db"
+SERVER_PID=""
+
+for tool in hurl curl cargo; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    echo "hurl-e2e: missing required tool: $tool" >&2
+    exit 1
+  }
+done
 
 cleanup() {
-  kill "$SERVER_PID" 2>/dev/null || true
+  if [ -n "$SERVER_PID" ]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
   rm -rf "$DB_DIR"
 }
 trap cleanup EXIT
@@ -41,11 +52,10 @@ done
 echo "hurl-e2e: server running on $BASE (PID $SERVER_PID)"
 
 # Run all hurl files in order.
-HURL_FILES="$(find "$ROOT/tests/hurl" -name '*.hurl' | sort)"
 PASS=0
 FAIL=0
 
-for f in $HURL_FILES; do
+while IFS= read -r f; do
   name="$(basename "$f")"
   if hurl --variable "base_url=$BASE" --test "$f" 2>&1; then
     PASS=$((PASS + 1))
@@ -53,7 +63,7 @@ for f in $HURL_FILES; do
     FAIL=$((FAIL + 1))
     echo "hurl-e2e: FAIL — $name"
   fi
-done
+done < <(find "$ROOT/tests/hurl" -name '*.hurl' | sort)
 
 echo ""
 echo "hurl-e2e: $PASS passed, $FAIL failed"

@@ -496,6 +496,10 @@ jobs:
   core-test-contract:
     name: Core / Test (Contract)
     runs-on: ubuntu-24.04-arm
+    # The integration job also runs the contract module via --test '*'; this
+    # job is kept as the explicit, named gate for the S4 acceptance
+    # criterion ("integration + contract tests green") and isolates contract
+    # failures from coverage-tool failures.
 
     defaults:
       run:
@@ -522,6 +526,77 @@ jobs:
       - name: Contract conformance tests
         run: |
           cargo test --package shepherd-server --test api -- contract
+
+  core-test-hurl:
+    name: Core / Test (Hurl E2E)
+    runs-on: ubuntu-24.04-arm
+    # API-level E2E: the real binary over a real socket (docs/05-testing.md).
+    # The hurl binary is pinned by sha256 like every other CI tool download.
+
+    defaults:
+      run:
+        working-directory: core
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
+
+      - name: Install hurl (pinned)
+        env:
+          HURL_VERSION: 8.0.1
+          HURL_SHA256: bc4732df4754748e9bf296aa3832ec019f798afb399f1279b72ed37b6e04525c
+        run: |
+          curl -fsSLo hurl.tar.gz "https://github.com/Orange-OpenSource/hurl/releases/download/${HURL_VERSION}/hurl-${HURL_VERSION}-aarch64-unknown-linux-gnu.tar.gz"
+          echo "${HURL_SHA256}  hurl.tar.gz" | sha256sum -c -
+          tar -xzf hurl.tar.gz
+          sudo cp "hurl-${HURL_VERSION}-aarch64-unknown-linux-gnu/bin/hurl" /usr/local/bin/
+          hurl --version
+
+      - name: Hurl E2E suite
+        run: |
+          "$GITHUB_WORKSPACE/scripts/hurl-e2e.sh"
+
+  core-generated-drift:
+    name: Core / Generated code drift
+    runs-on: ubuntu-24.04-arm
+    # Regenerates src/generated from openapi/shepherd.yaml and fails on any
+    # diff, so spec edits cannot leave the committed wire types stale.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt
+
+      - name: Install openapi-to-rust (pinned)
+        run: cargo install openapi-to-rust --version 0.16.0 --locked
+
+      - name: Regenerate and check for drift
+        run: |
+          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+          git diff --exit-code -- core/shepherd-server/src/generated
 
   core-test-fuzz:
     name: Core / Test (Fuzz)

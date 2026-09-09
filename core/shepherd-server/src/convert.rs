@@ -226,11 +226,20 @@ impl From<wire::RelationCreate> for core::RelationCreate {
 // ── Error → ProblemDetail ───────────────────────────────────────────────
 
 pub fn problem_detail(e: &core::Error) -> wire::ProblemDetail {
+    // Database errors can embed SQL fragments; keep them out of response
+    // bodies and log server-side instead.
+    let detail = match e {
+        core::Error::Database(err) => {
+            eprintln!("database error: {err}");
+            "internal database error".to_string()
+        }
+        other => other.to_string(),
+    };
     wire::ProblemDetail {
         r#type: e.urn().to_string(),
         title: e.title().to_string(),
         status: e.status_code() as i32,
-        detail: Some(e.to_string()),
+        detail: Some(detail),
         instance: None,
         errors: match e {
             core::Error::ValidationError { errors, .. } if !errors.is_empty() => Some(
@@ -249,6 +258,11 @@ pub fn problem_detail(e: &core::Error) -> wire::ProblemDetail {
 }
 
 // ── ID parsing helpers ──────────────────────────────────────────────────
+//
+// The generated router validates path parameters against the spec's UUID
+// pattern before handlers run, so the error branches here are unreachable
+// over HTTP today. They remain as defense-in-depth: the handlers receive
+// `String` and must convert to typed IDs for the store.
 
 pub fn parse_project_id(s: &str) -> Result<core::ProjectId, core::Error> {
     s.parse()

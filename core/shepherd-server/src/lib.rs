@@ -7,7 +7,10 @@
 //! implements the generated traits by delegating to `shepherd_core::Store`.
 
 mod convert;
-#[allow(warnings)]
+// The generated module triggers two clippy style lints by design (collapsed
+// `if` chains from the emission template, `must_use` on types already marked
+// `must_use`). Everything else stays lint-clean.
+#[allow(clippy::collapsible_if, clippy::double_must_use)]
 pub mod generated;
 mod middleware;
 
@@ -24,7 +27,7 @@ use crate::convert::{parse_project_id, parse_relation_id, parse_task_id, problem
 use crate::generated::server::api::*;
 use crate::generated::server::errors::*;
 use crate::generated::types as wire;
-use crate::middleware::{RateLimitHeaderLayer, cors_layer};
+use crate::middleware::{ProblemDetailRemapLayer, RateLimitHeaderLayer, cors_layer};
 
 /// Shared application state injected into handlers.
 #[derive(Clone)]
@@ -46,6 +49,7 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
 
     generated
         .route("/api/v1/openapi.yaml", get(openapi_spec))
+        .layer(ProblemDetailRemapLayer)
         .layer(RateLimitHeaderLayer)
         .layer(cors_layer())
         .fallback_service(ServeDir::new(ui_dir.as_ref()))
@@ -59,6 +63,10 @@ async fn openapi_spec() -> impl IntoResponse {
 
 /// Map a `shepherd_core::Error` to the matching response enum variant.
 /// Response enums with NotFound + Conflict variants.
+///
+/// Note: 410 (`Error::LeaseExpired`) currently folds into Conflict. No S4
+/// endpoint can produce it; when S5 adds claim endpoints, the spec (and the
+/// generated enums) should gain a 410 Gone response so leases map correctly.
 macro_rules! map_err {
     ($resp:ident, $err:expr) => {
         match $err.status_code() {

@@ -30,13 +30,16 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::parse();
 
     // Resolve database path: explicit flag, env var, or default.
-    let db_path = config.db.unwrap_or_else(|| {
-        let mut dir = dirs::home_dir().expect("cannot determine home directory");
-        dir.push(".shepherd");
-        std::fs::create_dir_all(&dir).expect("cannot create ~/.shepherd");
-        dir.push("shepherd.db");
-        dir
-    });
+    let db_path = match config.db {
+        Some(path) => path,
+        None => {
+            let home = dirs::home_dir().context("cannot determine home directory")?;
+            let dir = home.join(".shepherd");
+            std::fs::create_dir_all(&dir)
+                .with_context(|| format!("cannot create {}", dir.display()))?;
+            dir.join("shepherd.db")
+        }
+    };
 
     let store = Store::open(&db_path)
         .await
@@ -47,7 +50,10 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {addr}"))?;
-    println!("shepherd-server listening on http://{addr}");
+    println!(
+        "shepherd-server listening on http://{addr} (db: {})",
+        db_path.display()
+    );
     axum::serve(listener, shepherd_server::router(state, &config.ui_dir))
         .await
         .context("server error")?;
