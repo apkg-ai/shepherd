@@ -19,13 +19,20 @@ mod convert;
 pub mod generated;
 mod middleware;
 
+use std::convert::Infallible;
 use std::path::Path;
+use std::time::Duration;
 
 use axum::Router;
+use axum::extract::Query;
 use axum::http::header;
 use axum::response::IntoResponse;
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::get;
+use serde::Deserialize;
 use shepherd_core::Store;
+use tokio_stream::StreamExt as _;
+use tokio_stream::wrappers::BroadcastStream;
 use tower_http::services::ServeDir;
 
 use crate::convert::{
@@ -59,8 +66,14 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
         state.clone(),
     );
 
+    let sse_state = state.clone();
+
     generated
         .route("/api/v1/openapi.yaml", get(openapi_spec))
+        .route(
+            "/api/v1/events",
+            get(move |query: Query<EventsQuery>| sse_handler(sse_state, query)),
+        )
         .layer(ProblemDetailRemapLayer)
         .layer(RateLimitHeaderLayer)
         .layer(cors_layer())
@@ -69,6 +82,54 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
 
 async fn openapi_spec() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "application/yaml")], OPENAPI_SPEC)
+}
+
+// ── SSE event stream ──────────────────────────────────────────────────
+
+/// Query parameters for `GET /api/v1/events`.
+#[derive(Debug, Deserialize)]
+struct EventsQuery {
+    project_id: Option<String>,
+}
+
+/// SSE handler: streams domain events to the client, optionally filtered
+/// by project. No replay — clients refetch on reconnect.
+async fn sse_handler(
+    state: AppState,
+    Query(query): Query<EventsQuery>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let rx = state.store.subscribe();
+    let project_filter = query.project_id;
+
+    let stream = BroadcastStream::new(rx).filter_map(move |result| {
+        match result {
+            Ok(event) => {
+                // Apply project filter.
+                if let Some(ref pid) = project_filter
+                    && event.project_id().to_string() != *pid
+                {
+                    return None;
+                }
+
+                let sse_event = Event::default()
+                    .event(event.event_type())
+                    .json_data(event.to_payload())
+                    .ok()?;
+
+                Some(Ok(sse_event))
+            }
+            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
+                eprintln!("sse: client lagged, skipped {n} events");
+                None
+            }
+        }
+    });
+
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keepalive"),
+    )
 }
 
 /// Spawn the background claim sweeper: every `period`, expired leases are
