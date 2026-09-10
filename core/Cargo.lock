@@ -2291,6 +2291,7 @@ dependencies = [
  "shepherd-core",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tower",
  "tower-http 0.7.1",
  "url",
@@ -2753,6 +2754,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

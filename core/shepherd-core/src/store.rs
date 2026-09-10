@@ -14,6 +14,7 @@ use sqlx::{Row, SqlitePool};
 use crate::bundle;
 use crate::dag;
 use crate::error::Error;
+use crate::event::{DomainEvent, EventBus};
 use crate::export;
 use crate::lease;
 use crate::lifecycle::{self, Trigger};
@@ -21,21 +22,58 @@ use crate::model::*;
 
 type Result<T> = std::result::Result<T, Error>;
 
-/// SQLite-backed domain store.
+/// Why a claim was released. The DB column stores `as_str()` (see the
+/// CHECK constraint in the claims migration); the variant — not a string
+/// compare — picks the domain event emitted on release.
+#[derive(Clone, Copy, Debug)]
+enum ReleaseReason {
+    Expired,
+    Voluntary,
+    SessionReported,
+    TaskDeleted,
+}
+
+impl ReleaseReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Expired => "expired",
+            Self::Voluntary => "voluntary",
+            Self::SessionReported => "session_reported",
+            Self::TaskDeleted => "task_deleted",
+        }
+    }
+}
+
+/// SQLite-backed domain store with integrated event emission.
 #[derive(Clone)]
 pub struct Store {
     pool: SqlitePool,
+    event_bus: EventBus,
 }
 
 impl Store {
     /// Create a store from an existing pool.
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            event_bus: EventBus::new(),
+        }
     }
 
     /// Access the underlying connection pool (useful for raw SQL in tests).
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    /// Subscribe to the domain event stream. Returns a receiver that yields
+    /// every event emitted after this call.
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<DomainEvent> {
+        self.event_bus.subscribe()
+    }
+
+    /// Emit a domain event to all subscribers.
+    fn emit(&self, event: DomainEvent) {
+        self.event_bus.emit(event);
     }
 
     /// Open a file-backed store at the given path. Creates the file and
@@ -109,7 +147,14 @@ impl Store {
         .execute(&self.pool)
         .await?;
 
-        self.get_project(id).await
+        let project = self.get_project(id).await?;
+
+        self.emit(DomainEvent::ProjectCreated {
+            project_id: project.id,
+            name: project.name.clone(),
+        });
+
+        Ok(project)
     }
 
     pub async fn get_project(&self, id: ProjectId) -> Result<Project> {
@@ -151,6 +196,24 @@ impl Store {
         .bind(id.to_string())
         .execute(&self.pool)
         .await?;
+
+        // Compute the real diff for the event payload.
+        let mut updated_fields = Vec::new();
+        if name != existing.name {
+            updated_fields.push("name".to_string());
+        }
+        if desc != existing.description {
+            updated_fields.push("description".to_string());
+        }
+        if review_gate != existing.settings.review_gate {
+            updated_fields.push("settings".to_string());
+        }
+        if !updated_fields.is_empty() {
+            self.emit(DomainEvent::ProjectUpdated {
+                project_id: id,
+                updated_fields,
+            });
+        }
 
         self.get_project(id).await
     }
@@ -293,7 +356,27 @@ impl Store {
             self.recompute_graph_roles(project_id).await?;
         }
 
-        self.get_task(project_id, id).await
+        let task = self.get_task(project_id, id).await?;
+
+        // Emit TaskCreated with the logical initial status (proposed/approved),
+        // then TaskStatusChanged if auto-readied.
+        self.emit(DomainEvent::TaskCreated {
+            project_id,
+            task_id: id,
+            title: task.title.clone(),
+            task_type: task.task_type,
+            status,
+        });
+        if status != final_status {
+            self.emit(DomainEvent::TaskStatusChanged {
+                project_id,
+                task_id: id,
+                old_status: status,
+                new_status: final_status,
+            });
+        }
+
+        Ok(task)
     }
 
     pub async fn get_task(&self, project_id: ProjectId, id: TaskId) -> Result<Task> {
@@ -368,6 +451,34 @@ impl Store {
         .execute(&self.pool)
         .await?;
 
+        // Compute the real diff for the event payload.
+        let mut updated_fields = Vec::new();
+        if title != existing.title {
+            updated_fields.push("title".to_string());
+        }
+        if desc != existing.description {
+            updated_fields.push("description".to_string());
+        }
+        if task_type != existing.task_type {
+            updated_fields.push("type".to_string());
+        }
+        if metadata != existing.metadata {
+            updated_fields.push("metadata".to_string());
+        }
+        if assignee != existing.assignee.as_ref() {
+            updated_fields.push("assignee".to_string());
+        }
+        if graph_role != existing.graph_role {
+            updated_fields.push("graph_role".to_string());
+        }
+        if !updated_fields.is_empty() {
+            self.emit(DomainEvent::TaskUpdated {
+                project_id,
+                task_id: id,
+                updated_fields,
+            });
+        }
+
         self.get_task(project_id, id).await
     }
 
@@ -386,7 +497,7 @@ impl Store {
     ) -> Result<()> {
         // Cascade: release any active claim.
         if let Some(claim) = self.get_active_claim(id, now).await? {
-            self.release_claim_internal(claim.id, now, "task_deleted")
+            self.release_claim_internal(project_id, id, claim.id, now, ReleaseReason::TaskDeleted)
                 .await?;
         }
 
@@ -555,7 +666,8 @@ impl Store {
         };
         let new_status = lifecycle::transition(task.status, &trigger)?;
 
-        self.set_task_status(project_id, id, new_status).await?;
+        self.set_task_status(project_id, id, task.status, new_status)
+            .await?;
 
         match new_status {
             // Auto-ready: check if all deps are done.
@@ -583,7 +695,8 @@ impl Store {
             new_status = TaskStatus::Approved;
         }
 
-        self.set_task_status(project_id, id, new_status).await?;
+        self.set_task_status(project_id, id, task.status, new_status)
+            .await?;
 
         self.get_task(project_id, id).await
     }
@@ -610,6 +723,13 @@ impl Store {
         .bind(project_id.to_string())
         .execute(&self.pool)
         .await?;
+
+        self.emit(DomainEvent::TaskStatusChanged {
+            project_id,
+            task_id: id,
+            old_status: task.status,
+            new_status: TaskStatus::Blocked,
+        });
 
         self.get_task(project_id, id).await
     }
@@ -662,6 +782,13 @@ impl Store {
         .execute(&self.pool)
         .await?;
 
+        self.emit(DomainEvent::TaskStatusChanged {
+            project_id,
+            task_id: id,
+            old_status: task.status,
+            new_status,
+        });
+
         self.get_task(project_id, id).await
     }
 
@@ -669,7 +796,8 @@ impl Store {
         let task = self.get_task(project_id, id).await?;
         let new_status = lifecycle::transition(task.status, &Trigger::Cancel)?;
 
-        self.set_task_status(project_id, id, new_status).await?;
+        self.set_task_status(project_id, id, task.status, new_status)
+            .await?;
 
         self.get_task(project_id, id).await
     }
@@ -711,8 +839,13 @@ impl Store {
                 if source.status == TaskStatus::Ready {
                     let target = self.get_task(project_id, input.target_task_id).await?;
                     if target.status != TaskStatus::Done {
-                        self.set_task_status(project_id, source_task_id, TaskStatus::Approved)
-                            .await?;
+                        self.set_task_status(
+                            project_id,
+                            source_task_id,
+                            source.status,
+                            TaskStatus::Approved,
+                        )
+                        .await?;
                     }
                 }
             }
@@ -748,6 +881,14 @@ impl Store {
         // Recompute graph roles.
         self.recompute_graph_roles(project_id).await?;
 
+        self.emit(DomainEvent::RelationAdded {
+            project_id,
+            relation_id: id,
+            relation_type: input.relation_type,
+            source_task_id,
+            target_task_id: input.target_task_id,
+        });
+
         self.get_relation(id).await
     }
 
@@ -771,6 +912,11 @@ impl Store {
 
         // Recompute graph roles.
         self.recompute_graph_roles(project_id).await?;
+
+        self.emit(DomainEvent::RelationRemoved {
+            project_id,
+            relation_id: id,
+        });
 
         // Auto-ready cascade: removing a dependency might unblock tasks.
         if rel.relation_type == RelationType::DependsOn {
@@ -920,7 +1066,23 @@ impl Store {
 
         tx.commit().await?;
 
-        self.get_claim(claim_id).await
+        // Events emitted AFTER commit — no phantom events on rollback.
+        let claim = self.get_claim(claim_id).await?;
+        self.emit(DomainEvent::ClaimAcquired {
+            project_id,
+            task_id,
+            claim_id,
+            identity: input.identity.clone(),
+            expires_at: claim.expires_at,
+        });
+        self.emit(DomainEvent::TaskStatusChanged {
+            project_id,
+            task_id,
+            old_status: task.status,
+            new_status,
+        });
+
+        Ok(claim)
     }
 
     pub async fn renew_claim(
@@ -960,6 +1122,13 @@ impl Store {
         .execute(&self.pool)
         .await?;
 
+        self.emit(DomainEvent::ClaimRenewed {
+            project_id,
+            task_id,
+            claim_id: claim.id,
+            expires_at: new_expires,
+        });
+
         self.get_claim(claim.id).await
     }
 
@@ -985,7 +1154,7 @@ impl Store {
             });
         }
 
-        self.release_claim_internal(claim.id, now, "voluntary")
+        self.release_claim_internal(project_id, task_id, claim.id, now, ReleaseReason::Voluntary)
             .await?;
 
         // Return task to ready (or approved if new deps were added).
@@ -995,7 +1164,8 @@ impl Store {
             } else {
                 TaskStatus::Approved
             };
-            self.set_task_status(project_id, task_id, target).await?;
+            self.set_task_status(project_id, task_id, task.status, target)
+                .await?;
         }
 
         Ok(())
@@ -1036,7 +1206,7 @@ impl Store {
                 .parse()
                 .map_err(|e: String| Error::Internal(e))?;
 
-            self.release_claim_internal(claim_id, now, "expired")
+            self.release_claim_internal(project_id, task_id, claim_id, now, ReleaseReason::Expired)
                 .await?;
 
             if status == TaskStatus::InProgress {
@@ -1046,7 +1216,8 @@ impl Store {
                 } else {
                     TaskStatus::Approved
                 };
-                self.set_task_status(project_id, task_id, target).await?;
+                self.set_task_status(project_id, task_id, status, target)
+                    .await?;
             }
 
             released.push(task_id);
@@ -1057,7 +1228,11 @@ impl Store {
         // The state can only arise from a crash between a claim release and
         // its status update; rescue it back to ready/approved. The grace
         // period keeps the rescue from racing a healthy release→status
-        // window in release_claim/create_session.
+        // window in release_claim/create_session. Only the latest claim
+        // cycle (the last-inserted claim row) can be mid-window: a newer
+        // claim's existence proves the previous cycle's status update
+        // completed (the task went `ready` to be claimable again), so
+        // stale releases from older cycles must not delay the rescue.
         let cutoff = now - TimeDelta::seconds(30);
         let orphans = sqlx::query(
             "SELECT t.id, t.project_id FROM tasks t
@@ -1067,6 +1242,10 @@ impl Store {
                    SELECT 1 FROM claims c
                    WHERE c.task_id = t.id
                      AND (c.released_at IS NULL OR c.released_at > ?)
+                     AND c.rowid = (
+                         SELECT MAX(c2.rowid) FROM claims c2
+                         WHERE c2.task_id = t.id
+                     )
                )",
         )
         .bind(cutoff.to_rfc3339())
@@ -1090,7 +1269,8 @@ impl Store {
             } else {
                 TaskStatus::Approved
             };
-            self.set_task_status(project_id, task_id, target).await?;
+            self.set_task_status(project_id, task_id, TaskStatus::InProgress, target)
+                .await?;
             released.push(task_id);
         }
 
@@ -1104,6 +1284,7 @@ impl Store {
         project_id: ProjectId,
         task_id: TaskId,
         input: &SessionReport,
+        now: DateTime<Utc>,
     ) -> Result<Session> {
         let task = self.get_task(project_id, task_id).await?;
 
@@ -1114,8 +1295,6 @@ impl Store {
                 detail: "task must be in_progress to report a session".into(),
             });
         }
-
-        let now = Utc::now();
 
         // Strict claim guard: the reporter must hold the active claim.
         // Prevents a stale claimant (expired lease, task since re-claimed)
@@ -1134,8 +1313,14 @@ impl Store {
                 detail: "session identity does not match the active claim".into(),
             });
         }
-        self.release_claim_internal(claim.id, now, "session_reported")
-            .await?;
+        self.release_claim_internal(
+            project_id,
+            task_id,
+            claim.id,
+            now,
+            ReleaseReason::SessionReported,
+        )
+        .await?;
 
         let session_id = SessionId::new();
         let decisions = input.decisions.as_deref().unwrap_or(&[]);
@@ -1192,7 +1377,7 @@ impl Store {
                     review_gate: project.settings.review_gate,
                 };
                 let new_status = lifecycle::transition(task.status, &trigger)?;
-                self.set_task_status(project_id, task_id, new_status)
+                self.set_task_status(project_id, task_id, task.status, new_status)
                     .await?;
 
                 // Auto-ready cascade if task reached Done.
@@ -1209,9 +1394,19 @@ impl Store {
                 } else {
                     TaskStatus::Approved
                 };
-                self.set_task_status(project_id, task_id, target).await?;
+                self.set_task_status(project_id, task_id, task.status, target)
+                    .await?;
             }
         }
+
+        // Event emitted only after every write of the request succeeded —
+        // no event for a failed report (same discipline as claim_task).
+        self.emit(DomainEvent::SessionRecorded {
+            project_id,
+            task_id,
+            session_id,
+            outcome: input.outcome,
+        });
 
         self.get_session(project_id, task_id, session_id).await
     }
@@ -1589,15 +1784,18 @@ impl Store {
         }
 
         // Import relations.
+        let mut relation_ids = Vec::with_capacity(doc.relations.len());
         for rel in &doc.relations {
             let new_source = task_map[&rel.source_task_id];
             let new_target = task_map[&rel.target_task_id];
+            let new_rel_id = RelationId::new();
+            relation_ids.push(new_rel_id);
 
             sqlx::query(
                 "INSERT INTO relations (id, type, source_task_id, target_task_id, created_at)
                  VALUES (?, ?, ?, ?, ?)",
             )
-            .bind(RelationId::new().to_string())
+            .bind(new_rel_id.to_string())
             .bind(rel.relation_type.to_string())
             .bind(new_source.to_string())
             .bind(new_target.to_string())
@@ -1654,6 +1852,34 @@ impl Store {
             .bind(now.to_rfc3339())
             .execute(&self.pool)
             .await?;
+        }
+
+        // Events: the import materializes a full project in one mutation.
+        // Emitted only after every insert succeeded — no events for a
+        // failed import. Clients refetch on project.created per the v1
+        // recovery model; the per-entity events give project-filtered
+        // streams the same information.
+        self.emit(DomainEvent::ProjectCreated {
+            project_id: new_project_id,
+            name: doc.project.name.clone(),
+        });
+        for task in &doc.tasks {
+            self.emit(DomainEvent::TaskCreated {
+                project_id: new_project_id,
+                task_id: task_map[&task.id],
+                title: task.title.clone(),
+                task_type: task.task_type,
+                status: normalized_status(task),
+            });
+        }
+        for (rel, relation_id) in doc.relations.iter().zip(relation_ids) {
+            self.emit(DomainEvent::RelationAdded {
+                project_id: new_project_id,
+                relation_id,
+                relation_type: rel.relation_type,
+                source_task_id: task_map[&rel.source_task_id],
+                target_task_id: task_map[&rel.target_task_id],
+            });
         }
 
         Ok(export::import_summary(
@@ -1801,10 +2027,11 @@ impl Store {
         &self,
         project_id: ProjectId,
         id: TaskId,
+        old_status: TaskStatus,
         status: TaskStatus,
     ) -> Result<()> {
         let now = Utc::now();
-        sqlx::query(
+        let result = sqlx::query(
             "UPDATE tasks SET status = ?, updated_at = ?
              WHERE id = ? AND project_id = ? AND deleted_at IS NULL",
         )
@@ -1814,6 +2041,18 @@ impl Store {
         .bind(project_id.to_string())
         .execute(&self.pool)
         .await?;
+
+        // No phantom events: a 0-row update (soft-deleted task) must not
+        // broadcast a status change for a task that no longer exists.
+        if result.rows_affected() == 1 {
+            self.emit(DomainEvent::TaskStatusChanged {
+                project_id,
+                task_id: id,
+                old_status,
+                new_status: status,
+            });
+        }
+
         Ok(())
     }
 
@@ -1826,7 +2065,7 @@ impl Store {
 
         if self.all_deps_done(project_id, task_id).await? {
             let new_status = lifecycle::transition(task.status, &Trigger::AutoReady)?;
-            self.set_task_status(project_id, task_id, new_status)
+            self.set_task_status(project_id, task_id, task.status, new_status)
                 .await?;
         }
 
@@ -1931,19 +2170,35 @@ impl Store {
 
     async fn release_claim_internal(
         &self,
+        project_id: ProjectId,
+        task_id: TaskId,
         claim_id: ClaimId,
         now: DateTime<Utc>,
-        reason: &str,
+        reason: ReleaseReason,
     ) -> Result<()> {
         sqlx::query(
             "UPDATE claims SET released_at = ?, release_reason = ?
              WHERE id = ?",
         )
         .bind(now.to_rfc3339())
-        .bind(reason)
+        .bind(reason.as_str())
         .bind(claim_id.to_string())
         .execute(&self.pool)
         .await?;
+
+        match reason {
+            ReleaseReason::Expired => self.emit(DomainEvent::ClaimExpired {
+                project_id,
+                task_id,
+                claim_id,
+            }),
+            _ => self.emit(DomainEvent::ClaimReleased {
+                project_id,
+                task_id,
+                claim_id,
+            }),
+        }
+
         Ok(())
     }
 
@@ -1977,6 +2232,13 @@ impl Store {
         .bind(now.to_rfc3339())
         .execute(&self.pool)
         .await?;
+
+        self.emit(DomainEvent::KnowledgeAdded {
+            project_id,
+            knowledge_id: id,
+            knowledge_type: input.knowledge_type,
+            scope: input.scope,
+        });
 
         self.get_knowledge(project_id, id).await
     }
@@ -2526,6 +2788,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -2701,6 +2964,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -2837,6 +3101,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -3212,6 +3477,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -3552,6 +3818,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -3587,6 +3854,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -3624,6 +3892,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -3657,6 +3926,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap_err();
@@ -3692,6 +3962,7 @@ mod tests {
                     }]),
                     artifacts: Some(vec!["https://github.com/pr/1".into()]),
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -4667,6 +4938,7 @@ mod tests {
                 p.id,
                 t.id,
                 &session_report(other_identity(), SessionOutcome::Succeeded),
+                Utc::now(),
             )
             .await
             .unwrap_err();
@@ -4692,6 +4964,7 @@ mod tests {
                 p.id,
                 t.id,
                 &session_report(test_identity(), SessionOutcome::Succeeded),
+                Utc::now(),
             )
             .await
             .unwrap_err();
@@ -4765,6 +5038,7 @@ mod tests {
                 p.id,
                 t.id,
                 &session_report(test_identity(), SessionOutcome::Succeeded),
+                Utc::now(),
             )
             .await
             .unwrap_err();
@@ -4968,6 +5242,7 @@ mod tests {
                 p.id,
                 t.id,
                 &session_report(test_identity(), SessionOutcome::Succeeded),
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -5035,6 +5310,7 @@ mod tests {
                 p.id,
                 b.id,
                 &session_report(test_identity(), SessionOutcome::Succeeded),
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -5062,5 +5338,924 @@ mod tests {
         // Unblock must not restore a claim-less in_progress.
         let t = store.unblock_task(p.id, t.id).await.unwrap();
         assert_eq!(t.status, TaskStatus::Ready);
+    }
+
+    // ── Event emission tests ────────────────────────────────────────────
+
+    /// Drain all pending events from a broadcast receiver.
+    fn drain_events(rx: &mut tokio::sync::broadcast::Receiver<DomainEvent>) -> Vec<DomainEvent> {
+        let mut events = vec![];
+        while let Ok(e) = rx.try_recv() {
+            events.push(e);
+        }
+        events
+    }
+
+    /// Assert that an event list contains exactly one event matching the
+    /// given type string.
+    fn assert_has_event(events: &[DomainEvent], event_type: &str) {
+        let count = events
+            .iter()
+            .filter(|e| e.event_type() == event_type)
+            .count();
+        assert!(
+            count >= 1,
+            "expected at least one {event_type} event, found {count} in {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn events_full_lifecycle() {
+        // Exercises the happy-path agent loop and verifies that every
+        // event type in the catalog is emitted at least once.
+        let store = Store::new_in_memory().await.unwrap();
+        let mut rx = store.subscribe();
+
+        // 1. Create project → project.created
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "evt-test".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: true }),
+            })
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "project.created");
+
+        // 2. Create task (approved → auto-ready) → task.created + task.status_changed
+        let t = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "do thing".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "task.created");
+        assert_has_event(&events, "task.status_changed");
+        // The task.created status should be "approved" (logical), with a
+        // subsequent status_changed to "ready".
+        let created = events
+            .iter()
+            .find(|e| e.event_type() == "task.created")
+            .unwrap();
+        let payload = created.to_payload();
+        assert_eq!(payload["status"], "approved");
+        let changed = events
+            .iter()
+            .find(|e| e.event_type() == "task.status_changed")
+            .unwrap();
+        let payload = changed.to_payload();
+        assert_eq!(payload["old_status"], "approved");
+        assert_eq!(payload["new_status"], "ready");
+
+        // 3. Claim → claim.acquired + task.status_changed
+        let identity = test_identity();
+        let _claim = store
+            .claim_task(
+                p.id,
+                t.id,
+                &ClaimRequest {
+                    identity: identity.clone(),
+                    ttl_seconds: 300,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "claim.acquired");
+        assert_has_event(&events, "task.status_changed");
+
+        // 4. Renew claim → claim.renewed
+        store
+            .renew_claim(
+                p.id,
+                t.id,
+                &ClaimRenewal {
+                    identity: identity.clone(),
+                    ttl_seconds: Some(600),
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "claim.renewed");
+
+        // 5. Report session (succeeded + knowledge) → claim.released +
+        //    session.recorded + knowledge.added + task.status_changed
+        store
+            .create_session(
+                p.id,
+                t.id,
+                &SessionReport {
+                    identity: identity.clone(),
+                    started_at: Utc::now(),
+                    ended_at: Utc::now(),
+                    outcome: SessionOutcome::Succeeded,
+                    failure_reason: None,
+                    summary: Some("done".into()),
+                    decisions: None,
+                    knowledge_items: Some(vec![KnowledgeItemCreate {
+                        knowledge_type: KnowledgeType::Decision,
+                        title: "picked X".into(),
+                        content: "because Y".into(),
+                        scope: KnowledgeScope::Task,
+                        task_id: None,
+                        session_id: None,
+                    }]),
+                    artifacts: None,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "claim.released");
+        assert_has_event(&events, "session.recorded");
+        assert_has_event(&events, "knowledge.added");
+        assert_has_event(&events, "task.status_changed");
+        // With review_gate=true, task goes to in_review.
+        let status_event = events
+            .iter()
+            .rfind(|e| e.event_type() == "task.status_changed")
+            .unwrap();
+        assert_eq!(status_event.to_payload()["new_status"], "in_review");
+
+        // 6. Approve in-review → task.status_changed (in_review → done)
+        store.approve_task(p.id, t.id).await.unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "task.status_changed");
+        let payload = events
+            .iter()
+            .find(|e| e.event_type() == "task.status_changed")
+            .unwrap()
+            .to_payload();
+        assert_eq!(payload["old_status"], "in_review");
+        assert_eq!(payload["new_status"], "done");
+    }
+
+    #[tokio::test]
+    async fn events_relations_and_cascade() {
+        let store = Store::new_in_memory().await.unwrap();
+        let mut rx = store.subscribe();
+
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "rel-test".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+        drain_events(&mut rx);
+
+        // Two approved tasks, both auto-ready.
+        let t1 = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "upstream".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+        let t2 = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "downstream".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+        drain_events(&mut rx);
+
+        // Add dependency t2 → t1 → relation.added + task.status_changed (t2 demoted)
+        store
+            .create_relation(
+                p.id,
+                t2.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: t1.id,
+                },
+            )
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "relation.added");
+        assert_has_event(&events, "task.status_changed"); // ready → approved
+
+        // Complete t1 → cascade auto-readies t2
+        let identity = test_identity();
+        store
+            .claim_task(
+                p.id,
+                t1.id,
+                &ClaimRequest {
+                    identity: identity.clone(),
+                    ttl_seconds: 300,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        drain_events(&mut rx);
+
+        store
+            .create_session(
+                p.id,
+                t1.id,
+                &SessionReport {
+                    identity: identity.clone(),
+                    started_at: Utc::now(),
+                    ended_at: Utc::now(),
+                    outcome: SessionOutcome::Succeeded,
+                    failure_reason: None,
+                    summary: Some("done".into()),
+                    decisions: None,
+                    knowledge_items: None,
+                    artifacts: None,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        // Should include cascade: t2 auto-readied (approved → ready)
+        let cascade_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type() == "task.status_changed")
+            .collect();
+        assert!(
+            cascade_events.len() >= 2,
+            "expected cascade events: {cascade_events:?}"
+        );
+
+        // Delete relation → relation.removed
+        let rels = store.list_relations(p.id, t2.id).await.unwrap();
+        let rel = rels.first().unwrap();
+        drain_events(&mut rx);
+        store.delete_relation(p.id, t2.id, rel.id).await.unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "relation.removed");
+    }
+
+    #[tokio::test]
+    async fn events_claim_expired() {
+        let store = Store::new_in_memory().await.unwrap();
+        let mut rx = store.subscribe();
+
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "exp-test".into(),
+                description: None,
+                settings: None,
+            })
+            .await
+            .unwrap();
+        let t = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "claim me".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+        drain_events(&mut rx);
+
+        // Claim with short TTL.
+        let identity = test_identity();
+        store
+            .claim_task(
+                p.id,
+                t.id,
+                &ClaimRequest {
+                    identity,
+                    ttl_seconds: 30,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        drain_events(&mut rx);
+
+        // Expire via backdating and sweep.
+        force_expire_claim(&store, t.id).await;
+        store.sweep_expired_claims(Utc::now()).await.unwrap();
+
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "claim.expired");
+        assert_has_event(&events, "task.status_changed");
+    }
+
+    #[tokio::test]
+    async fn events_update_diffs() {
+        let store = Store::new_in_memory().await.unwrap();
+        let mut rx = store.subscribe();
+
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "diff-test".into(),
+                description: Some("original".into()),
+                settings: None,
+            })
+            .await
+            .unwrap();
+        drain_events(&mut rx);
+
+        // Update with actual change → event emitted.
+        store
+            .update_project(
+                p.id,
+                &ProjectUpdate {
+                    name: Some("renamed".into()),
+                    description: None,
+                    settings: None,
+                },
+            )
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "project.updated");
+        let payload = events
+            .iter()
+            .find(|e| e.event_type() == "project.updated")
+            .unwrap()
+            .to_payload();
+        let fields: Vec<String> =
+            serde_json::from_value(payload["updated_fields"].clone()).unwrap();
+        assert!(fields.contains(&"name".to_string()));
+        assert!(!fields.contains(&"description".to_string()));
+
+        // Update with same values → no event.
+        store
+            .update_project(
+                p.id,
+                &ProjectUpdate {
+                    name: Some("renamed".into()),
+                    description: None,
+                    settings: None,
+                },
+            )
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        assert!(
+            events.iter().all(|e| e.event_type() != "project.updated"),
+            "no event expected for no-op update"
+        );
+
+        // Task update diff.
+        let t = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "original-title".into(),
+                    description: Some("desc".into()),
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Proposed),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+        drain_events(&mut rx);
+
+        store
+            .update_task(
+                p.id,
+                t.id,
+                &TaskUpdate {
+                    title: Some("new-title".into()),
+                    description: None,
+                    task_type: None,
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "task.updated");
+        let payload = events
+            .iter()
+            .find(|e| e.event_type() == "task.updated")
+            .unwrap()
+            .to_payload();
+        let fields: Vec<String> =
+            serde_json::from_value(payload["updated_fields"].clone()).unwrap();
+        assert_eq!(fields, vec!["title"]);
+
+        // Task update with same values → no event (gap #5).
+        store
+            .update_task(
+                p.id,
+                t.id,
+                &TaskUpdate {
+                    title: Some("new-title".into()),
+                    description: None,
+                    task_type: None,
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        assert!(
+            events.iter().all(|e| e.event_type() != "task.updated"),
+            "no event expected for no-op task update"
+        );
+    }
+
+    #[tokio::test]
+    async fn events_block_unblock() {
+        let store = Store::new_in_memory().await.unwrap();
+        let mut rx = store.subscribe();
+
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "block-test".into(),
+                description: None,
+                settings: None,
+            })
+            .await
+            .unwrap();
+        let t = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "blockable".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+        drain_events(&mut rx);
+
+        // Block → task.status_changed (ready → blocked)
+        store.block_task(p.id, t.id, "waiting").await.unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "task.status_changed");
+        let payload = events[0].to_payload();
+        assert_eq!(payload["old_status"], "ready");
+        assert_eq!(payload["new_status"], "blocked");
+
+        // Unblock → task.status_changed (blocked → ready)
+        store.unblock_task(p.id, t.id).await.unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "task.status_changed");
+        let payload = events[0].to_payload();
+        assert_eq!(payload["old_status"], "blocked");
+        assert_eq!(payload["new_status"], "ready");
+    }
+
+    #[tokio::test]
+    async fn events_project_id_matches() {
+        // Verify every emitted event carries the correct project_id.
+        let store = Store::new_in_memory().await.unwrap();
+        let mut rx = store.subscribe();
+
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "pid-test".into(),
+                description: None,
+                settings: None,
+            })
+            .await
+            .unwrap();
+
+        store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "t".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let events = drain_events(&mut rx);
+        for event in &events {
+            assert_eq!(
+                event.project_id(),
+                p.id,
+                "wrong project_id on {}: {:?}",
+                event.event_type(),
+                event
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn events_knowledge_standalone() {
+        let store = Store::new_in_memory().await.unwrap();
+        let mut rx = store.subscribe();
+
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "k-test".into(),
+                description: None,
+                settings: None,
+            })
+            .await
+            .unwrap();
+        drain_events(&mut rx);
+
+        store
+            .create_knowledge(
+                p.id,
+                &KnowledgeItemCreate {
+                    knowledge_type: KnowledgeType::Note,
+                    title: "note".into(),
+                    content: "content".into(),
+                    scope: KnowledgeScope::Project,
+                    task_id: None,
+                    session_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "knowledge.added");
+        let payload = events
+            .iter()
+            .find(|e| e.event_type() == "knowledge.added")
+            .unwrap()
+            .to_payload();
+        assert_eq!(payload["type"], "note");
+        assert_eq!(payload["scope"], "project");
+    }
+
+    #[tokio::test]
+    async fn events_delete_task_cascade() {
+        // Gap #3: verify delete_task emits cascade events (claim.released
+        // for active claim, task.status_changed for auto-readied dependents).
+        let store = Store::new_in_memory().await.unwrap();
+
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "del-cascade".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+
+        // upstream (will be claimed then deleted) and downstream (depends on upstream).
+        let upstream = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "upstream".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+        let downstream = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "downstream".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // downstream depends on upstream.
+        store
+            .create_relation(
+                p.id,
+                downstream.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: upstream.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Claim upstream so it has an active claim.
+        store
+            .claim_task(
+                p.id,
+                upstream.id,
+                &ClaimRequest {
+                    identity: test_identity(),
+                    ttl_seconds: 300,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+
+        let mut rx = store.subscribe();
+
+        // Delete upstream — should cascade: release claim + auto-ready downstream.
+        store.delete_task(p.id, upstream.id).await.unwrap();
+
+        let events = drain_events(&mut rx);
+
+        // Claim should be released (reason "task_deleted" → ClaimReleased).
+        assert_has_event(&events, "claim.released");
+        // Downstream should be auto-readied (approved → ready) since its
+        // only dependency is now soft-deleted (effectively done).
+        assert_has_event(&events, "task.status_changed");
+        let auto_ready = events
+            .iter()
+            .find(|e| {
+                e.event_type() == "task.status_changed"
+                    && e.to_payload()["task_id"] == downstream.id.to_string()
+            })
+            .expect("expected status_changed for downstream task");
+        assert_eq!(auto_ready.to_payload()["new_status"], "ready");
+    }
+
+    #[tokio::test]
+    async fn events_voluntary_release_claim() {
+        // Gap #6: verify direct release_claim (reason "voluntary") emits
+        // claim.released + task.status_changed.
+        let store = Store::new_in_memory().await.unwrap();
+
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "vol-release".into(),
+                description: None,
+                settings: None,
+            })
+            .await
+            .unwrap();
+        let t = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "releasable".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let identity = test_identity();
+        store
+            .claim_task(
+                p.id,
+                t.id,
+                &ClaimRequest {
+                    identity: identity.clone(),
+                    ttl_seconds: 300,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+
+        let mut rx = store.subscribe();
+
+        // Voluntary release.
+        store
+            .release_claim(
+                p.id,
+                t.id,
+                &ClaimRelease {
+                    identity: identity.clone(),
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "claim.released");
+        assert_has_event(&events, "task.status_changed");
+
+        let status_event = events
+            .iter()
+            .find(|e| e.event_type() == "task.status_changed")
+            .unwrap()
+            .to_payload();
+        assert_eq!(status_event["old_status"], "in_progress");
+        assert_eq!(status_event["new_status"], "ready");
+    }
+
+    #[tokio::test]
+    async fn import_emits_project_task_relation_events() {
+        // The import endpoint is a mutation like any other — it must
+        // provably emit its events (S6 acceptance).
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let a = ready_task(&store, p.id, "import-a").await;
+        let b = proposed_task(&store, p.id, "import-b").await;
+        store
+            .create_relation(
+                p.id,
+                b.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: a.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        let doc = store.export_project(p.id).await.unwrap();
+        let mut rx = store.subscribe();
+        let result = store.import_project(&doc).await.unwrap();
+
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "project.created");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.event_type() == "task.created")
+                .count(),
+            2,
+            "expected one task.created per imported task in {events:?}"
+        );
+        assert_has_event(&events, "relation.added");
+
+        // All events carry the NEW project id, and task/relation events
+        // reference the remapped ids — never the exported ones.
+        for e in &events {
+            assert_eq!(e.project_id(), result.project_id);
+        }
+        let old_ids = [a.id, b.id];
+        for e in events.iter().filter(|e| e.event_type() == "task.created") {
+            let payload = e.to_payload();
+            let new_id = payload["task_id"].as_str().unwrap();
+            assert!(
+                !old_ids.iter().any(|old| old.to_string() == new_id),
+                "task.created must use the remapped id, got {new_id}"
+            );
+        }
+        let relation_event = events
+            .iter()
+            .find(|e| e.event_type() == "relation.added")
+            .unwrap()
+            .to_payload();
+        assert_eq!(relation_event["type"], "depends_on");
+        assert_ne!(
+            relation_event["relation_id"],
+            doc.relations[0].id.to_string(),
+            "relation.added must use a fresh relation id"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_of_soft_deleted_task_emits_no_status_change() {
+        // A 0-row status update (soft-deleted task) must not broadcast a
+        // phantom task.status_changed.
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let (t, _claim) = in_progress_task(&store, p.id, "doomed").await;
+
+        // Soft-delete the task out from under the claim, then expire the
+        // claim — the sweep will release it and try to flip the status of
+        // a row its UPDATE cannot touch.
+        let now = Utc::now();
+        sqlx::query("UPDATE tasks SET deleted_at = ? WHERE id = ?")
+            .bind(now.to_rfc3339())
+            .bind(t.id.to_string())
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let past = (now - TimeDelta::hours(1)).to_rfc3339();
+        sqlx::query("UPDATE claims SET expires_at = ? WHERE task_id = ? AND released_at IS NULL")
+            .bind(&past)
+            .bind(t.id.to_string())
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        let mut rx = store.subscribe();
+        store.sweep_expired_claims(now).await.unwrap();
+
+        let events = drain_events(&mut rx);
+        // The claim release itself is real and still emitted.
+        assert_has_event(&events, "claim.expired");
+        let phantom = events
+            .iter()
+            .any(|e| e.event_type() == "task.status_changed");
+        assert!(
+            !phantom,
+            "soft-deleted task must not emit task.status_changed: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_report_emits_session_recorded_after_all_writes() {
+        // session.recorded is broadcast only after every write of the
+        // request succeeded — it is the last event of the report.
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let (t, _claim) = in_progress_task(&store, p.id, "reported").await;
+
+        let mut rx = store.subscribe();
+        store
+            .create_session(
+                p.id,
+                t.id,
+                &SessionReport {
+                    identity: test_identity(),
+                    started_at: Utc::now(),
+                    ended_at: Utc::now(),
+                    outcome: SessionOutcome::Succeeded,
+                    failure_reason: None,
+                    summary: Some("done".into()),
+                    decisions: None,
+                    knowledge_items: Some(vec![KnowledgeItemCreate {
+                        knowledge_type: KnowledgeType::Decision,
+                        title: "picked rust".into(),
+                        content: "Rust is the best choice".into(),
+                        scope: KnowledgeScope::Task,
+                        task_id: None,
+                        session_id: None,
+                    }]),
+                    artifacts: None,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+
+        let events = drain_events(&mut rx);
+        let types: Vec<&str> = events.iter().map(|e| e.event_type()).collect();
+        assert_eq!(
+            types.last().copied(),
+            Some("session.recorded"),
+            "session.recorded must be the final event, got {types:?}"
+        );
+        assert_eq!(
+            types.first().copied(),
+            Some("claim.released"),
+            "claim release comes first, got {types:?}"
+        );
+        assert!(
+            types.contains(&"knowledge.added"),
+            "expected knowledge.added in {types:?}"
+        );
     }
 }

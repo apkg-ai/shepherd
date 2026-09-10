@@ -65,6 +65,35 @@ while IFS= read -r f; do
   fi
 done < <(find "$ROOT/tests/hurl" -name '*.hurl' | sort)
 
+# SSE smoke check. hurl cannot consume an infinite stream — it waits for
+# the response body to end, so a hurl file against /api/v1/events hangs
+# forever. Verify the endpoint with curl instead: status, content type,
+# and the 422 for a malformed project filter. Full event-frame delivery
+# is covered by the Rust integration tests (shepherd-server/tests/api.rs).
+SSE_HEADERS="$(mktemp)"
+CURL_RC=0
+curl -NsS --max-time 3 -D "$SSE_HEADERS" -o /dev/null "$BASE/api/v1/events" >/dev/null 2>&1 \
+  || CURL_RC=$?
+# 28 = timed out — expected: an SSE stream never ends.
+if [ "$CURL_RC" != 28 ] && [ "$CURL_RC" != 0 ]; then
+  echo "hurl-e2e: FAIL — SSE endpoint unreachable (curl exit $CURL_RC)"
+  rm -f "$SSE_HEADERS"
+  exit 1
+fi
+if ! grep -qi "^content-type: *text/event-stream" "$SSE_HEADERS"; then
+  echo "hurl-e2e: FAIL — SSE response missing text/event-stream content type"
+  rm -f "$SSE_HEADERS"
+  exit 1
+fi
+rm -f "$SSE_HEADERS"
+
+FILTER_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' "$BASE/api/v1/events?project_id=not-a-uuid")"
+if [ "$FILTER_STATUS" != 422 ]; then
+  echo "hurl-e2e: FAIL — malformed project_id filter must 422, got $FILTER_STATUS"
+  exit 1
+fi
+echo "hurl-e2e: SSE smoke check passed"
+
 echo ""
 echo "hurl-e2e: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

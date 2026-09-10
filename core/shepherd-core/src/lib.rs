@@ -6,6 +6,7 @@
 pub mod bundle;
 pub mod dag;
 pub mod error;
+pub mod event;
 pub mod export;
 pub mod lease;
 pub mod lifecycle;
@@ -13,6 +14,7 @@ pub mod model;
 pub mod store;
 
 pub use error::Error;
+pub use event::{DomainEvent, EventBus};
 pub use model::*;
 pub use store::Store;
 

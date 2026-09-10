@@ -382,6 +382,7 @@ impl ModelState {
                             knowledge_items: None,
                             artifacts: None,
                         },
+                        self.sim_now,
                     )
                     .await
                     .is_ok()

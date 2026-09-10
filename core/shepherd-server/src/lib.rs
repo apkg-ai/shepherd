@@ -19,13 +19,21 @@ mod convert;
 pub mod generated;
 mod middleware;
 
+use std::convert::Infallible;
 use std::path::Path;
+use std::time::Duration;
 
 use axum::Router;
+use axum::extract::Query;
 use axum::http::header;
-use axum::response::IntoResponse;
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use serde::Deserialize;
 use shepherd_core::Store;
+use tokio_stream::StreamExt as _;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tower_http::services::ServeDir;
 
 use crate::convert::{
@@ -59,8 +67,14 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
         state.clone(),
     );
 
+    let sse_state = state.clone();
+
     generated
         .route("/api/v1/openapi.yaml", get(openapi_spec))
+        .route(
+            "/api/v1/events",
+            get(move |query: Query<EventsQuery>| sse_handler(sse_state, query)),
+        )
         .layer(ProblemDetailRemapLayer)
         .layer(RateLimitHeaderLayer)
         .layer(cors_layer())
@@ -69,6 +83,89 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
 
 async fn openapi_spec() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "application/yaml")], OPENAPI_SPEC)
+}
+
+// ── SSE event stream ──────────────────────────────────────────────────
+
+/// Query parameters for `GET /api/v1/events`.
+#[derive(Debug, Deserialize)]
+struct EventsQuery {
+    project_id: Option<String>,
+}
+
+/// SSE handler: streams domain events to the client, optionally filtered
+/// by project. No replay — clients refetch on reconnect. A client that
+/// lags behind the bus buffer is disconnected (it then reconnects and
+/// refetches) rather than silently missing events.
+async fn sse_handler(state: AppState, Query(query): Query<EventsQuery>) -> Response {
+    // The spec declares a UUID pattern and a 422 for a malformed filter —
+    // do not silently stream nothing for a typo'd id.
+    let project_filter = match query.project_id {
+        Some(pid) => match parse_project_id(&pid) {
+            Ok(id) => Some(id),
+            Err(e) => return validation_problem_detail(&e),
+        },
+        None => None,
+    };
+
+    let rx = state.store.subscribe();
+
+    // On lag the stream ends: the client disconnects, reconnects, and
+    // refetches — the documented recovery path. Silently skipping the
+    // lost events would leave the client's view stale with no way to
+    // notice.
+    let stream = BroadcastStream::new(rx)
+        .take_while(|result| match result {
+            Err(BroadcastStreamRecvError::Lagged(n)) => {
+                println!(
+                    "sse: client lagged ({n} events lost), disconnecting — \
+                     client refetches on reconnect"
+                );
+                false
+            }
+            _ => true,
+        })
+        .filter_map(move |result| match result {
+            Ok(event) => {
+                // Apply project filter.
+                if let Some(pid) = project_filter
+                    && event.project_id() != pid
+                {
+                    return None;
+                }
+
+                let sse_event = Event::default()
+                    .event(event.event_type())
+                    .json_data(event.to_payload())
+                    .ok()?;
+
+                Some(Ok::<Event, Infallible>(sse_event))
+            }
+            // Unreachable: take_while ends the stream on Lagged.
+            Err(_) => None,
+        });
+
+    Sse::new(stream)
+        .keep_alive(
+            KeepAlive::new()
+                .interval(Duration::from_secs(15))
+                .text("keepalive"),
+        )
+        .into_response()
+}
+
+/// 422 problem-detail response, matching the generated error responses.
+fn validation_problem_detail(e: &shepherd_core::Error) -> Response {
+    let mut response = (
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        axum::Json(problem_detail(e)),
+    )
+        .into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/problem+json"),
+    );
+    response
 }
 
 /// Spawn the background claim sweeper: every `period`, expired leases are
@@ -580,7 +677,11 @@ impl SessionsApi for AppState {
             Err(e) => return map_err_gone!(CreateTaskSessionResponse, e),
         };
         let input: shepherd_core::SessionReport = body.into();
-        match self.store.create_session(pid, tid, &input).await {
+        match self
+            .store
+            .create_session(pid, tid, &input, chrono::Utc::now())
+            .await
+        {
             Ok(session) => CreateTaskSessionResponse::Created(session.into()),
             Err(e) => map_err_gone!(CreateTaskSessionResponse, e),
         }

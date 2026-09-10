@@ -833,6 +833,7 @@ async fn reject_task_in_review_returns_to_ready() {
                 knowledge_items: None,
                 artifacts: None,
             },
+            chrono::Utc::now(),
         )
         .await
         .unwrap();
@@ -918,6 +919,7 @@ async fn review_gate_on_sends_to_in_review() {
                 knowledge_items: None,
                 artifacts: None,
             },
+            chrono::Utc::now(),
         )
         .await
         .unwrap();
@@ -986,6 +988,7 @@ async fn review_gate_off_sends_to_done() {
                 knowledge_items: None,
                 artifacts: None,
             },
+            chrono::Utc::now(),
         )
         .await
         .unwrap();
@@ -1248,6 +1251,7 @@ async fn auto_ready_cascade_when_dependency_completes() {
                 knowledge_items: None,
                 artifacts: None,
             },
+            chrono::Utc::now(),
         )
         .await
         .unwrap();
@@ -2408,4 +2412,379 @@ mod contract {
         assert_eq!(status, StatusCode::GONE);
         validate(&spec, "components/schemas/ProblemDetail", &body);
     }
+}
+
+// ── SSE & event tests ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn sse_endpoint_returns_event_stream_content_type() {
+    let app = test_app().await;
+    let response = app
+        .oneshot(Request::get("/api/v1/events").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let ct = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .expect("content-type header")
+        .to_str()
+        .unwrap();
+    assert!(
+        ct.contains("text/event-stream"),
+        "expected text/event-stream, got: {ct}"
+    );
+}
+
+#[tokio::test]
+async fn sse_endpoint_with_project_filter() {
+    let app = test_app().await;
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/events?project_id=019421a5-7e6e-7000-8000-000000000001")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn rest_mutation_emits_domain_event() {
+    let (app, store) = test_app_with_store().await;
+    let mut rx = store.subscribe();
+
+    // POST a project through the REST API.
+    let (status, body) = post(
+        &app,
+        "/api/v1/projects",
+        serde_json::json!({ "name": "event-test" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let project_id = body["id"].as_str().unwrap();
+
+    // The store's event bus should have received a project.created event.
+    let event = rx.try_recv().expect("expected a domain event");
+    assert_eq!(event.event_type(), "project.created");
+    assert_eq!(event.project_id().to_string(), project_id);
+}
+
+#[tokio::test]
+async fn rest_create_task_emits_created_and_status_changed() {
+    let (app, store) = test_app_with_store().await;
+    let pid = create_project(&app, "evt-task-test").await;
+    let mut rx = store.subscribe();
+
+    // Create a task as approved (triggers auto-ready).
+    let (status, _) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks"),
+        serde_json::json!({
+            "title": "event task",
+            "type": "code",
+            "status": "approved",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Should emit task.created + task.status_changed (approved → ready).
+    let mut events = vec![];
+    while let Ok(e) = rx.try_recv() {
+        events.push(e);
+    }
+    let types: Vec<&str> = events.iter().map(|e| e.event_type()).collect();
+    assert!(
+        types.contains(&"task.created"),
+        "expected task.created in {types:?}"
+    );
+    assert!(
+        types.contains(&"task.status_changed"),
+        "expected task.status_changed in {types:?}"
+    );
+}
+
+#[tokio::test]
+async fn rest_full_agent_loop_emits_all_events() {
+    let (app, store) = test_app_with_store().await;
+    let pid = create_project(&app, "evt-loop-test").await;
+    let tid = create_task(&app, &pid, "loop-task", "approved").await;
+    let mut rx = store.subscribe();
+
+    // Claim.
+    let (status, _) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{tid}/claim"),
+        serde_json::json!({
+            "identity": identity("loop-sess"),
+            "ttl_seconds": 300,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Report session.
+    let (status, _) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{tid}/sessions"),
+        serde_json::json!({
+            "identity": identity("loop-sess"),
+            "started_at": "2026-01-01T00:00:00Z",
+            "ended_at": "2026-01-01T01:00:00Z",
+            "outcome": "succeeded",
+            "summary": "done",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Collect all events.
+    let mut events = vec![];
+    while let Ok(e) = rx.try_recv() {
+        events.push(e);
+    }
+    let types: Vec<&str> = events.iter().map(|e| e.event_type()).collect();
+
+    // Expected events from claim + session report:
+    assert!(
+        types.contains(&"claim.acquired"),
+        "missing claim.acquired in {types:?}"
+    );
+    assert!(
+        types.contains(&"task.status_changed"),
+        "missing task.status_changed in {types:?}"
+    );
+    assert!(
+        types.contains(&"claim.released"),
+        "missing claim.released in {types:?}"
+    );
+    assert!(
+        types.contains(&"session.recorded"),
+        "missing session.recorded in {types:?}"
+    );
+}
+
+#[tokio::test]
+async fn sse_delivers_event_frames_end_to_end() {
+    // Gap #1: Read actual SSE frames from the response body.
+    let (app, store) = test_app_with_store().await;
+
+    // Connect to the SSE endpoint.
+    let response = app
+        .oneshot(Request::get("/api/v1/events").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // The subscription is now active. Emit an event through the store.
+    store
+        .create_project(&shepherd_core::ProjectCreate {
+            name: "sse-frame-test".into(),
+            description: None,
+            settings: None,
+        })
+        .await
+        .unwrap();
+
+    // Read from the streaming body — the event should appear as SSE frames.
+    let mut body = response.into_body();
+    let frame = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        http_body_util::BodyExt::frame(&mut body),
+    )
+    .await
+    .expect("timed out waiting for SSE frame")
+    .expect("body stream ended")
+    .expect("body error");
+
+    let bytes = frame.into_data().expect("expected a data frame");
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+
+    // SSE format: "event: project.created\ndata: {...}\n\n"
+    assert!(
+        text.contains("event: project.created"),
+        "SSE frame missing event type: {text}"
+    );
+    assert!(
+        text.contains("\"project_id\""),
+        "SSE frame missing project_id in data: {text}"
+    );
+    assert!(
+        text.contains("\"name\""),
+        "SSE frame missing name in data: {text}"
+    );
+    assert!(
+        text.contains("sse-frame-test"),
+        "SSE frame missing project name value: {text}"
+    );
+}
+
+#[tokio::test]
+async fn sse_project_filter_excludes_other_projects() {
+    // Gap #2: Verify project_id filter actually filters events.
+    let (app, store) = test_app_with_store().await;
+
+    // Create two projects via the store.
+    let p_wanted = store
+        .create_project(&shepherd_core::ProjectCreate {
+            name: "wanted".into(),
+            description: None,
+            settings: None,
+        })
+        .await
+        .unwrap();
+    let _p_other = store
+        .create_project(&shepherd_core::ProjectCreate {
+            name: "other".into(),
+            description: None,
+            settings: None,
+        })
+        .await
+        .unwrap();
+
+    // Connect with project filter for the wanted project.
+    let response = app
+        .oneshot(
+            Request::get(format!("/api/v1/events?project_id={}", p_wanted.id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Emit an event for the OTHER project — should be filtered out.
+    store
+        .update_project(
+            _p_other.id,
+            &shepherd_core::ProjectUpdate {
+                name: Some("renamed-other".into()),
+                description: None,
+                settings: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    // Emit an event for the WANTED project — should pass the filter.
+    store
+        .create_task(
+            p_wanted.id,
+            &shepherd_core::TaskCreate {
+                title: "wanted-task".into(),
+                description: None,
+                task_type: shepherd_core::TaskType::Code,
+                status: Some(shepherd_core::TaskStatus::Proposed),
+                metadata: None,
+                assignee: None,
+                graph_role: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    // Read from the body — first real frame should be for the wanted project.
+    let mut body = response.into_body();
+    let frame = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        http_body_util::BodyExt::frame(&mut body),
+    )
+    .await
+    .expect("timed out waiting for SSE frame")
+    .expect("body stream ended")
+    .expect("body error");
+
+    let bytes = frame.into_data().expect("expected a data frame");
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+
+    // The frame should be for the wanted project's task, not the other project's update.
+    assert!(
+        text.contains("task.created"),
+        "expected task.created from wanted project, got: {text}"
+    );
+    assert!(
+        text.contains("wanted-task"),
+        "expected wanted-task title, got: {text}"
+    );
+    assert!(
+        !text.contains("renamed-other"),
+        "other project's event should have been filtered out: {text}"
+    );
+}
+
+#[tokio::test]
+async fn sse_malformed_project_filter_returns_422() {
+    // The spec declares a UUID pattern + 422 for the filter — a malformed
+    // id must be rejected, not silently stream nothing. (An uppercase UUID
+    // parses to the same value via the uuid crate and filters correctly.)
+    let app = test_app().await;
+
+    for bad in ["not-a-uuid", "019421a5-7e6e-7000-8000-00000000000"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/v1/events?project_id={bad}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "expected 422 for filter {bad:?}"
+        );
+        let ct = response.headers()[header::CONTENT_TYPE].to_str().unwrap();
+        assert!(
+            ct.contains("application/problem+json"),
+            "expected problem+json, got {ct}"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["type"], "urn:shepherd:error:validation-error");
+    }
+}
+
+#[tokio::test]
+async fn sse_lagged_client_is_disconnected() {
+    // A client that falls behind the bus buffer must be disconnected (it
+    // then reconnects and refetches) — never silently skip lost events.
+    let (app, store) = test_app_with_store().await;
+
+    // Connect; the handler's receiver is subscribed but not yet polled.
+    let response = app
+        .oneshot(Request::get("/api/v1/events").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Overflow the 256-slot broadcast buffer while nobody is polling.
+    for i in 0..300 {
+        store
+            .create_project(&shepherd_core::ProjectCreate {
+                name: format!("flood-{i}"),
+                description: None,
+                settings: None,
+            })
+            .await
+            .unwrap();
+    }
+
+    // The first poll yields Lagged → the stream must END (None), not hang
+    // and not silently resume.
+    let mut body = response.into_body();
+    let frame = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        http_body_util::BodyExt::frame(&mut body),
+    )
+    .await
+    .expect("timed out — lagged client was not disconnected");
+    assert!(
+        frame.is_none(),
+        "expected the stream to end after lag, got a frame: {frame:?}"
+    );
 }
