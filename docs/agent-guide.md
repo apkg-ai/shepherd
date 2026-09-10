@@ -385,7 +385,10 @@ curl -s -X POST \
   -d @backup.json | jq .
 ```
 
-Import always creates a **new project** — no merge semantics in v1.
+Import always creates a **new project** — no merge semantics in v1. Claims
+are runtime state and are not exported: any `in_progress` task in the
+document is normalized on import to `ready` (all its dependencies `done`) or
+`approved`, so it is immediately claimable in the new project.
 
 ## Error handling
 

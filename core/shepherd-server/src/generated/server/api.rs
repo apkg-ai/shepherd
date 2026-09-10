@@ -6,6 +6,28 @@
 use super::super::types::*;
 use super::errors::*;
 #[derive(Debug, Clone, PartialEq, Eq, ::serde::Deserialize, ::serde::Serialize, Default)]
+pub enum ListKnowledgeScope {
+    #[default]
+    #[serde(rename = "task")]
+    Task,
+    #[serde(rename = "session")]
+    Session,
+    #[serde(rename = "project")]
+    Project,
+}
+#[derive(Debug, Clone, PartialEq, Eq, ::serde::Deserialize, ::serde::Serialize, Default)]
+pub enum ListKnowledgeType {
+    #[default]
+    #[serde(rename = "link")]
+    Link,
+    #[serde(rename = "transcript")]
+    Transcript,
+    #[serde(rename = "decision")]
+    Decision,
+    #[serde(rename = "note")]
+    Note,
+}
+#[derive(Debug, Clone, PartialEq, Eq, ::serde::Deserialize, ::serde::Serialize, Default)]
 pub enum ListTasksStatus {
     #[default]
     #[serde(rename = "proposed")]
@@ -38,6 +60,86 @@ pub enum ListTasksType {
     Review,
     #[serde(rename = "research")]
     Research,
+}
+/// Operations under the `claims` tag.
+#[async_trait::async_trait]
+pub trait ClaimsApi: Send + Sync + 'static {
+    /// Claim a task
+    ///
+    /// `POST /api/v1/projects/{project_id}/tasks/{task_id}/claim`
+    async fn claim_task(
+        &self,
+        project_id: String,
+        task_id: String,
+        body: ClaimRequest,
+    ) -> ClaimTaskResponse;
+    /// Renew a task claim
+    ///
+    /// `POST /api/v1/projects/{project_id}/tasks/{task_id}/claim/renew`
+    async fn renew_claim(
+        &self,
+        project_id: String,
+        task_id: String,
+        body: ClaimRenewal,
+    ) -> RenewClaimResponse;
+    /// Release a task claim
+    ///
+    /// `POST /api/v1/projects/{project_id}/tasks/{task_id}/claim/release`
+    async fn release_claim(
+        &self,
+        project_id: String,
+        task_id: String,
+        body: ClaimRelease,
+    ) -> ReleaseClaimResponse;
+}
+/// Operations under the `export-import` tag.
+#[async_trait::async_trait]
+pub trait ExportImportApi: Send + Sync + 'static {
+    /// Export a project as a versioned JSON document
+    ///
+    /// `GET /api/v1/projects/{project_id}/export`
+    async fn export_project(&self, project_id: String) -> ExportProjectResponse;
+    /// Import a project from an export document
+    ///
+    /// `POST /api/v1/projects/import`
+    async fn import_project(&self, body: ExportDocument) -> ImportProjectResponse;
+}
+/// Operations under the `knowledge` tag.
+#[async_trait::async_trait]
+pub trait KnowledgeApi: Send + Sync + 'static {
+    /// List knowledge items for a project
+    ///
+    /// `GET /api/v1/projects/{project_id}/knowledge`
+    async fn list_knowledge(
+        &self,
+        project_id: String,
+        cursor: ::std::option::Option<String>,
+        limit: ::std::option::Option<i32>,
+        scope: ::std::option::Option<ListKnowledgeScope>,
+        r#type: ::std::option::Option<ListKnowledgeType>,
+        task_id: ::std::option::Option<String>,
+    ) -> ListKnowledgeResponse;
+    /// Create a knowledge item
+    ///
+    /// `POST /api/v1/projects/{project_id}/knowledge`
+    async fn create_knowledge(
+        &self,
+        project_id: String,
+        body: KnowledgeItemCreate,
+    ) -> CreateKnowledgeResponse;
+    /// Get a knowledge item by ID
+    ///
+    /// `GET /api/v1/projects/{project_id}/knowledge/{knowledge_id}`
+    async fn get_knowledge(&self, project_id: String, knowledge_id: String)
+    -> GetKnowledgeResponse;
+    /// Delete a knowledge item
+    ///
+    /// `DELETE /api/v1/projects/{project_id}/knowledge/{knowledge_id}`
+    async fn delete_knowledge(
+        &self,
+        project_id: String,
+        knowledge_id: String,
+    ) -> DeleteKnowledgeResponse;
 }
 /// Operations under the `projects` tag.
 #[async_trait::async_trait]
@@ -100,6 +202,38 @@ pub trait RelationsApi: Send + Sync + 'static {
         task_id: String,
         relation_id: String,
     ) -> DeleteTaskRelationResponse;
+}
+/// Operations under the `sessions` tag.
+#[async_trait::async_trait]
+pub trait SessionsApi: Send + Sync + 'static {
+    /// List sessions for a task
+    ///
+    /// `GET /api/v1/projects/{project_id}/tasks/{task_id}/sessions`
+    async fn list_task_sessions(
+        &self,
+        project_id: String,
+        task_id: String,
+        cursor: ::std::option::Option<String>,
+        limit: ::std::option::Option<i32>,
+    ) -> ListTaskSessionsResponse;
+    /// Report a work session
+    ///
+    /// `POST /api/v1/projects/{project_id}/tasks/{task_id}/sessions`
+    async fn create_task_session(
+        &self,
+        project_id: String,
+        task_id: String,
+        body: SessionReport,
+    ) -> CreateTaskSessionResponse;
+    /// Get a session by ID
+    ///
+    /// `GET /api/v1/projects/{project_id}/tasks/{task_id}/sessions/{session_id}`
+    async fn get_task_session(
+        &self,
+        project_id: String,
+        task_id: String,
+        session_id: String,
+    ) -> GetTaskSessionResponse;
 }
 /// Operations under the `system` tag.
 #[async_trait::async_trait]
@@ -183,4 +317,9 @@ pub trait TasksApi: Send + Sync + 'static {
     ///
     /// `GET /api/v1/projects/{project_id}/next-task`
     async fn get_next_task(&self, project_id: String) -> GetNextTaskResponse;
+    /// Get the context bundle for a task
+    ///
+    /// `GET /api/v1/projects/{project_id}/tasks/{task_id}/context`
+    async fn get_task_context(&self, project_id: String, task_id: String)
+    -> GetTaskContextResponse;
 }

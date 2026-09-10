@@ -315,6 +315,163 @@ impl AsRef<str> for TaskCreateGraphRoleItem {
         self.as_str()
     }
 }
+///Request body for reporting a work session. The task must be in_progress and claimed by the reporting identity.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SessionReport {
+    ///Links to artifacts produced.
+    ///Constraint: minItems=0, maxItems=100
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifacts: Option<Vec<String>>,
+    ///Key decisions made during this session.
+    ///Constraint: minItems=0, maxItems=100
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decisions: Option<Vec<String>>,
+    ///When the work session ended.
+    ///Constraint: minLength=20, maxLength=32
+    pub ended_at: chrono::DateTime<chrono::Utc>,
+    ///Required when outcome is `failed`. Explains why the session failed.
+    ///Constraint: minLength=1, maxLength=5000, pattern=`^[\s\S]+$`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
+    pub identity: Identity,
+    ///Knowledge items produced during this session.
+    ///Constraint: minItems=0, maxItems=100
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub knowledge_items: Option<Vec<KnowledgeItemCreate>>,
+    ///Whether the session succeeded or failed.
+    ///Constraint: minLength=6, maxLength=9
+    pub outcome: SessionReportOutcome,
+    ///When the work session started.
+    ///Constraint: minLength=20, maxLength=32
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    ///Human-readable summary of what was accomplished.
+    ///Constraint: minLength=1, maxLength=10000, pattern=`^[\s\S]+$`
+    pub summary: String,
+}
+impl SessionReport {
+    /// Construct this request with every required wire field.
+    pub fn new(
+        ended_at: chrono::DateTime<chrono::Utc>,
+        identity: Identity,
+        outcome: SessionReportOutcome,
+        started_at: chrono::DateTime<chrono::Utc>,
+        summary: String,
+    ) -> Self {
+        Self {
+            ended_at,
+            identity,
+            outcome,
+            started_at,
+            summary,
+            artifacts: None,
+            decisions: None,
+            failure_reason: None,
+            knowledge_items: None,
+        }
+    }
+    /// Start a dependency-free builder with every required wire field.
+    pub fn builder(
+        ended_at: chrono::DateTime<chrono::Utc>,
+        identity: Identity,
+        outcome: SessionReportOutcome,
+        started_at: chrono::DateTime<chrono::Utc>,
+        summary: String,
+    ) -> SessionReportBuilder {
+        SessionReportBuilder::new(ended_at, identity, outcome, started_at, summary)
+    }
+}
+/// Dependency-free builder for [`#struct_name`].
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct SessionReportBuilder {
+    value: SessionReport,
+}
+impl SessionReportBuilder {
+    /// Start a builder with every required wire field.
+    pub fn new(
+        ended_at: chrono::DateTime<chrono::Utc>,
+        identity: Identity,
+        outcome: SessionReportOutcome,
+        started_at: chrono::DateTime<chrono::Utc>,
+        summary: String,
+    ) -> Self {
+        Self {
+            value: SessionReport::new(ended_at, identity, outcome, started_at, summary),
+        }
+    }
+    #[doc = concat!("Set the optional `", "artifacts", "` request field.")]
+    #[must_use]
+    pub fn artifacts(mut self, artifacts: Vec<String>) -> Self {
+        self.value.artifacts = Some(artifacts);
+        self
+    }
+    #[doc = concat!("Set the optional `", "decisions", "` request field.")]
+    #[must_use]
+    pub fn decisions(mut self, decisions: Vec<String>) -> Self {
+        self.value.decisions = Some(decisions);
+        self
+    }
+    #[doc = concat!("Set the optional `", "failure_reason", "` request field.")]
+    #[must_use]
+    pub fn failure_reason(mut self, failure_reason: String) -> Self {
+        self.value.failure_reason = Some(failure_reason);
+        self
+    }
+    #[doc = concat!("Set the optional `", "knowledge_items", "` request field.")]
+    #[must_use]
+    pub fn knowledge_items(mut self, knowledge_items: Vec<KnowledgeItemCreate>) -> Self {
+        self.value.knowledge_items = Some(knowledge_items);
+        self
+    }
+    /// Finish building the request model.
+    pub fn build(self) -> SessionReport {
+        self.value
+    }
+}
+///Whether the session succeeded or failed.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum SessionReportOutcome {
+    #[default]
+    #[serde(rename = "succeeded")]
+    Succeeded,
+    #[serde(rename = "failed")]
+    Failed,
+}
+impl SessionReportOutcome {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+        }
+    }
+}
+impl ::std::fmt::Display for SessionReportOutcome {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+impl AsRef<str> for SessionReportOutcome {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+///Paginated list of sessions.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SessionList {
+    ///Whether more pages exist after this one.
+    pub has_more: bool,
+    ///Array of session resources.
+    ///Constraint: minItems=0, maxItems=100
+    pub items: Vec<Session>,
+    ///Cursor for fetching the next page. Null if no more pages.
+    ///Constraint: minLength=1, maxLength=256, pattern=`^[a-zA-Z0-9_=-]+$`
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "tri_state_serde::deserialize"
+    )]
+    pub next_cursor: Option<Option<String>>,
+}
 ///List of relations for a task. Not paginated — a task's relation count is bounded by the project task count.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RelationList {
@@ -492,6 +649,168 @@ pub struct NextTaskResult {
     ///The highest-priority ready and unclaimed task, or null if nothing is available.
     pub task: Option<Task>,
 }
+///Paginated list of knowledge items.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KnowledgeItemList {
+    ///Whether more pages exist after this one.
+    pub has_more: bool,
+    ///Array of knowledge item resources.
+    ///Constraint: minItems=0, maxItems=100
+    pub items: Vec<KnowledgeItem>,
+    ///Cursor for fetching the next page. Null if no more pages.
+    ///Constraint: minLength=1, maxLength=256, pattern=`^[a-zA-Z0-9_=-]+$`
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "tri_state_serde::deserialize"
+    )]
+    pub next_cursor: Option<Option<String>>,
+}
+///Request body for creating a knowledge item.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KnowledgeItemCreate {
+    ///The knowledge item content.
+    ///Constraint: minLength=1, maxLength=100000, pattern=`^[\s\S]+$`
+    pub content: String,
+    ///Where to attach this item. Defaults to `project` when created via the project knowledge endpoint. Set to `task` with a task_id when attaching to a task.
+    ///Constraint: minLength=4, maxLength=7
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<KnowledgeItemCreateScope>,
+    ///Session to attach to, when scope is `session`.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<uuid::Uuid>,
+    ///Task to attach to, when scope is `task`.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<uuid::Uuid>,
+    ///Short title for the knowledge item.
+    ///Constraint: minLength=1, maxLength=500, pattern=`^\S[\s\S]*$`
+    pub title: String,
+    ///Knowledge item type.
+    ///Constraint: minLength=4, maxLength=10
+    pub r#type: KnowledgeItemCreateType,
+}
+impl KnowledgeItemCreate {
+    /// Construct this request with every required wire field.
+    pub fn new(content: String, title: String, r#type: KnowledgeItemCreateType) -> Self {
+        Self {
+            content,
+            title,
+            r#type,
+            scope: None,
+            session_id: None,
+            task_id: None,
+        }
+    }
+    /// Start a dependency-free builder with every required wire field.
+    pub fn builder(
+        content: String,
+        title: String,
+        r#type: KnowledgeItemCreateType,
+    ) -> KnowledgeItemCreateBuilder {
+        KnowledgeItemCreateBuilder::new(content, title, r#type)
+    }
+}
+/// Dependency-free builder for [`#struct_name`].
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct KnowledgeItemCreateBuilder {
+    value: KnowledgeItemCreate,
+}
+impl KnowledgeItemCreateBuilder {
+    /// Start a builder with every required wire field.
+    pub fn new(content: String, title: String, r#type: KnowledgeItemCreateType) -> Self {
+        Self {
+            value: KnowledgeItemCreate::new(content, title, r#type),
+        }
+    }
+    #[doc = concat!("Set the optional `", "scope", "` request field.")]
+    #[must_use]
+    pub fn scope(mut self, scope: KnowledgeItemCreateScope) -> Self {
+        self.value.scope = Some(scope);
+        self
+    }
+    #[doc = concat!("Set the optional `", "session_id", "` request field.")]
+    #[must_use]
+    pub fn session_id(mut self, session_id: uuid::Uuid) -> Self {
+        self.value.session_id = Some(session_id);
+        self
+    }
+    #[doc = concat!("Set the optional `", "task_id", "` request field.")]
+    #[must_use]
+    pub fn task_id(mut self, task_id: uuid::Uuid) -> Self {
+        self.value.task_id = Some(task_id);
+        self
+    }
+    /// Finish building the request model.
+    pub fn build(self) -> KnowledgeItemCreate {
+        self.value
+    }
+}
+///Knowledge item type.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum KnowledgeItemCreateType {
+    #[default]
+    #[serde(rename = "link")]
+    Link,
+    #[serde(rename = "transcript")]
+    Transcript,
+    #[serde(rename = "decision")]
+    Decision,
+    #[serde(rename = "note")]
+    Note,
+}
+impl KnowledgeItemCreateType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Link => "link",
+            Self::Transcript => "transcript",
+            Self::Decision => "decision",
+            Self::Note => "note",
+        }
+    }
+}
+impl ::std::fmt::Display for KnowledgeItemCreateType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+impl AsRef<str> for KnowledgeItemCreateType {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+///Where to attach this item. Defaults to `project` when created via the project knowledge endpoint. Set to `task` with a task_id when attaching to a task.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum KnowledgeItemCreateScope {
+    #[default]
+    #[serde(rename = "task")]
+    Task,
+    #[serde(rename = "session")]
+    Session,
+    #[serde(rename = "project")]
+    Project,
+}
+impl KnowledgeItemCreateScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Task => "task",
+            Self::Session => "session",
+            Self::Project => "project",
+        }
+    }
+}
+impl ::std::fmt::Display for KnowledgeItemCreateScope {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+impl AsRef<str> for KnowledgeItemCreateScope {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
 ///Service health report per draft-inadarei-api-health-check-06. Content-Type: application/health+json.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Health {
@@ -539,6 +858,96 @@ impl ::std::fmt::Display for HealthStatus {
     }
 }
 impl AsRef<str> for HealthStatus {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+///Versioned, self-contained JSON export of a project. Carries its own schema version independently of the API version. Import always creates a new project — no merge semantics in v1.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ExportDocument {
+    ///All knowledge items in the project.
+    ///Constraint: minItems=0, maxItems=50000
+    pub knowledge: Vec<KnowledgeItem>,
+    pub project: Project,
+    ///All relations in the project.
+    ///Constraint: minItems=0, maxItems=50000
+    pub relations: Vec<Relation>,
+    ///All sessions in the project.
+    ///Constraint: minItems=0, maxItems=50000
+    pub sessions: Vec<Session>,
+    ///All tasks in the project.
+    ///Constraint: minItems=0, maxItems=10000
+    pub tasks: Vec<Task>,
+    ///Export document schema version (SemVer). The server rejects imports with incompatible versions.
+    ///Constraint: minLength=5, maxLength=20, pattern=`^\d+\.\d+\.\d+(-[a-z0-9.]+)?$`
+    pub version: String,
+}
+///A structured work episode on a task. Records identity, timestamps, outcome, decisions made, knowledge items produced, and artifacts.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Session {
+    ///Links to artifacts produced (commits, PRs, files). Artifacts are not a separate entity — they are knowledge items of type `link`.
+    ///Constraint: minItems=0, maxItems=100
+    pub artifacts: Vec<String>,
+    ///When this session record was created.
+    ///Constraint: minLength=20, maxLength=32
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    ///Key decisions made during this session.
+    ///Constraint: minItems=0, maxItems=100
+    pub decisions: Vec<String>,
+    ///When the work session ended.
+    ///Constraint: minLength=20, maxLength=32
+    pub ended_at: chrono::DateTime<chrono::Utc>,
+    ///Explanation of why the session failed. Required when outcome is `failed`, null otherwise.
+    ///Constraint: minLength=1, maxLength=5000, pattern=`^[\s\S]+$`
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "tri_state_serde::deserialize"
+    )]
+    pub failure_reason: Option<Option<String>>,
+    ///Unique session identifier.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    pub id: uuid::Uuid,
+    pub identity: Identity,
+    ///Knowledge items produced during this session.
+    ///Constraint: minItems=0, maxItems=100
+    pub knowledge_items: Vec<KnowledgeItem>,
+    ///Whether the session succeeded or failed.
+    ///Constraint: minLength=6, maxLength=9
+    pub outcome: SessionOutcome,
+    ///When the work session started.
+    ///Constraint: minLength=20, maxLength=32
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    ///Human-readable summary of what was accomplished.
+    ///Constraint: minLength=0, maxLength=10000, pattern=`^[\s\S]*$`
+    pub summary: String,
+    ///Task this session was recorded against.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    pub task_id: uuid::Uuid,
+}
+///Whether the session succeeded or failed.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum SessionOutcome {
+    #[default]
+    #[serde(rename = "succeeded")]
+    Succeeded,
+    #[serde(rename = "failed")]
+    Failed,
+}
+impl SessionOutcome {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+        }
+    }
+}
+impl ::std::fmt::Display for SessionOutcome {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+impl AsRef<str> for SessionOutcome {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
@@ -614,6 +1023,23 @@ pub struct Project {
 pub struct ProjectSettings {
     ///When true (default), tasks transition from `in_progress` to `in_review` on successful session. When false, they go directly to `done`.
     pub review_gate: bool,
+}
+///The assembled context a caller receives upon claiming a task. Contains the task itself, summaries from dependency ancestors and parent chain, project-level knowledge, linked artifacts, and in-flight sibling awareness.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ContextBundle {
+    ///Summaries and decisions from dependency ancestors and parent chain, ordered from root to immediate predecessor.
+    ///Constraint: minItems=0, maxItems=500
+    pub ancestor_summaries: Vec<AncestorSummary>,
+    ///Artifacts linked to this task and its ancestors.
+    ///Constraint: minItems=0, maxItems=500
+    pub artifacts: Vec<String>,
+    ///Project-level knowledge items (conventions, goals, glossary).
+    ///Constraint: minItems=0, maxItems=500
+    pub project_knowledge: Vec<KnowledgeItem>,
+    ///Related tasks currently claimed by other sessions. Provides in-flight sibling awareness to prevent duplicated work.
+    ///Constraint: minItems=0, maxItems=100
+    pub sibling_tasks: Vec<SiblingTask>,
+    pub task: Task,
 }
 ///A unit of work within a project. Typed, positioned in the graph, and driven through the lifecycle state machine.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -770,6 +1196,259 @@ impl AsRef<str> for TaskGraphRoleItem {
 }
 ///Currently assigned identity, or null if unassigned.
 pub type NullableIdentity = Identity;
+///Minimal view of a related task currently being worked on by another session.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SiblingTask {
+    pub claimed_by: Identity,
+    ///Sibling task current status.
+    ///Constraint: minLength=4, maxLength=11
+    pub status: SiblingTaskStatus,
+    ///Sibling task identifier.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    pub task_id: uuid::Uuid,
+    ///Sibling task title.
+    ///Constraint: minLength=1, maxLength=500, pattern=`^\S[\s\S]*$`
+    pub title: String,
+}
+///Sibling task current status.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum SiblingTaskStatus {
+    #[default]
+    #[serde(rename = "proposed")]
+    Proposed,
+    #[serde(rename = "approved")]
+    Approved,
+    #[serde(rename = "ready")]
+    Ready,
+    #[serde(rename = "in_progress")]
+    InProgress,
+    #[serde(rename = "in_review")]
+    InReview,
+    #[serde(rename = "done")]
+    Done,
+    #[serde(rename = "blocked")]
+    Blocked,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+}
+impl SiblingTaskStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Proposed => "proposed",
+            Self::Approved => "approved",
+            Self::Ready => "ready",
+            Self::InProgress => "in_progress",
+            Self::InReview => "in_review",
+            Self::Done => "done",
+            Self::Blocked => "blocked",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+impl ::std::fmt::Display for SiblingTaskStatus {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+impl AsRef<str> for SiblingTaskStatus {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+///A typed, reusable piece of information attached to a task, session, or the project itself. Addressable project-wide regardless of which task produced it.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KnowledgeItem {
+    ///The knowledge item content.
+    ///Constraint: minLength=1, maxLength=100000, pattern=`^[\s\S]+$`
+    pub content: String,
+    ///When this knowledge item was created.
+    ///Constraint: minLength=20, maxLength=32
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    ///Unique knowledge item identifier.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    pub id: uuid::Uuid,
+    ///Parent project identifier.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    pub project_id: uuid::Uuid,
+    ///Where this knowledge item is attached. `project` = project-level knowledge (conventions, goals). `task` = produced by or attached to a task. `session` = produced during a specific session.
+    ///Constraint: minLength=4, maxLength=7
+    pub scope: KnowledgeItemScope,
+    ///Session this item is attached to, if scope is `session`.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "tri_state_serde::deserialize"
+    )]
+    pub session_id: Option<Option<uuid::Uuid>>,
+    ///Task this item is attached to, if scope is `task`.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "tri_state_serde::deserialize"
+    )]
+    pub task_id: Option<Option<uuid::Uuid>>,
+    ///Short title for the knowledge item.
+    ///Constraint: minLength=1, maxLength=500, pattern=`^\S[\s\S]*$`
+    pub title: String,
+    ///Knowledge item type. `link` = issue/PR/commit/doc. `transcript` = session transcript. `decision` = a recorded decision. `note` = refined, reusable content.
+    ///Constraint: minLength=4, maxLength=10
+    pub r#type: KnowledgeItemType,
+}
+///Knowledge item type. `link` = issue/PR/commit/doc. `transcript` = session transcript. `decision` = a recorded decision. `note` = refined, reusable content.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum KnowledgeItemType {
+    #[default]
+    #[serde(rename = "link")]
+    Link,
+    #[serde(rename = "transcript")]
+    Transcript,
+    #[serde(rename = "decision")]
+    Decision,
+    #[serde(rename = "note")]
+    Note,
+}
+impl KnowledgeItemType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Link => "link",
+            Self::Transcript => "transcript",
+            Self::Decision => "decision",
+            Self::Note => "note",
+        }
+    }
+}
+impl ::std::fmt::Display for KnowledgeItemType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+impl AsRef<str> for KnowledgeItemType {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+///Where this knowledge item is attached. `project` = project-level knowledge (conventions, goals). `task` = produced by or attached to a task. `session` = produced during a specific session.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum KnowledgeItemScope {
+    #[default]
+    #[serde(rename = "task")]
+    Task,
+    #[serde(rename = "session")]
+    Session,
+    #[serde(rename = "project")]
+    Project,
+}
+impl KnowledgeItemScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Task => "task",
+            Self::Session => "session",
+            Self::Project => "project",
+        }
+    }
+}
+impl ::std::fmt::Display for KnowledgeItemScope {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+impl AsRef<str> for KnowledgeItemScope {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+///Request body for claiming a task.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ClaimRequest {
+    pub identity: Identity,
+    ///Requested lease duration in seconds. The server may cap this value.
+    ///Constraint: minimum=30, maximum=86400
+    pub ttl_seconds: i32,
+}
+///Request body for renewing a claim.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ClaimRenewal {
+    pub identity: Identity,
+    ///New lease duration from now. If omitted, the original TTL is reused.
+    ///Constraint: minimum=30, maximum=86400
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<i32>,
+}
+impl ClaimRenewal {
+    /// Construct this request with every required wire field.
+    pub fn new(identity: Identity) -> Self {
+        Self {
+            identity,
+            ttl_seconds: None,
+        }
+    }
+    /// Start a dependency-free builder with every required wire field.
+    pub fn builder(identity: Identity) -> ClaimRenewalBuilder {
+        ClaimRenewalBuilder::new(identity)
+    }
+}
+/// Dependency-free builder for [`#struct_name`].
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct ClaimRenewalBuilder {
+    value: ClaimRenewal,
+}
+impl ClaimRenewalBuilder {
+    /// Start a builder with every required wire field.
+    pub fn new(identity: Identity) -> Self {
+        Self {
+            value: ClaimRenewal::new(identity),
+        }
+    }
+    #[doc = concat!("Set the optional `", "ttl_seconds", "` request field.")]
+    #[must_use]
+    pub fn ttl_seconds(mut self, ttl_seconds: i32) -> Self {
+        self.value.ttl_seconds = Some(ttl_seconds);
+        self
+    }
+    /// Finish building the request model.
+    pub fn build(self) -> ClaimRenewal {
+        self.value
+    }
+}
+///Request body for releasing a claim.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ClaimRelease {
+    pub identity: Identity,
+}
+///A lease binding a task to a caller identity for a bounded time. At most one active claim per task; expired leases release the task back to ready automatically.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Claim {
+    ///When the claim was first acquired.
+    ///Constraint: minLength=20, maxLength=32
+    pub acquired_at: chrono::DateTime<chrono::Utc>,
+    ///When the claim expires if not renewed.
+    ///Constraint: minLength=20, maxLength=32
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    ///Unique claim identifier.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    pub id: uuid::Uuid,
+    pub identity: Identity,
+    ///Opaque lease identifier used for renewal and release verification.
+    ///Constraint: minLength=1, maxLength=100, pattern=`^[a-zA-Z0-9_-]+$`
+    pub lease_id: String,
+    ///When the claim was last renewed, if ever.
+    ///Constraint: minLength=20, maxLength=32
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "tri_state_serde::deserialize"
+    )]
+    pub renewed_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    ///Claimed task identifier.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    pub task_id: uuid::Uuid,
+    ///Lease time-to-live in seconds.
+    ///Constraint: minimum=30, maximum=86400
+    pub ttl_seconds: i32,
+}
 ///Self-declared caller descriptor. Not authentication — callers identify themselves on claim and report calls. The harness (e.g. Claude Code, Cursor), the agent/model (e.g. Opus 5), a session identifier, and an optional label. Stored on sessions and claims; humans get an identity too.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Identity {
@@ -787,6 +1466,70 @@ pub struct Identity {
     ///Constraint: minLength=1, maxLength=200, pattern=`^[\x20-\x7E]+$`
     pub session_id: String,
 }
+///Summary of a dependency ancestor or parent task — what it produced and what decisions were made.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AncestorSummary {
+    ///Decisions made during the ancestor's sessions.
+    ///Constraint: minItems=0, maxItems=100
+    pub decisions: Vec<String>,
+    ///Ancestor task current status.
+    ///Constraint: minLength=4, maxLength=11
+    pub status: AncestorSummaryStatus,
+    ///Combined summary from the ancestor's sessions.
+    ///Constraint: minLength=0, maxLength=10000, pattern=`^[\s\S]*$`
+    pub summary: String,
+    ///Ancestor task identifier.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    pub task_id: uuid::Uuid,
+    ///Ancestor task title.
+    ///Constraint: minLength=1, maxLength=500, pattern=`^\S[\s\S]*$`
+    pub title: String,
+}
+///Ancestor task current status.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum AncestorSummaryStatus {
+    #[default]
+    #[serde(rename = "proposed")]
+    Proposed,
+    #[serde(rename = "approved")]
+    Approved,
+    #[serde(rename = "ready")]
+    Ready,
+    #[serde(rename = "in_progress")]
+    InProgress,
+    #[serde(rename = "in_review")]
+    InReview,
+    #[serde(rename = "done")]
+    Done,
+    #[serde(rename = "blocked")]
+    Blocked,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+}
+impl AncestorSummaryStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Proposed => "proposed",
+            Self::Approved => "approved",
+            Self::Ready => "ready",
+            Self::InProgress => "in_progress",
+            Self::InReview => "in_review",
+            Self::Done => "done",
+            Self::Blocked => "blocked",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+impl ::std::fmt::Display for AncestorSummaryStatus {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+impl AsRef<str> for AncestorSummaryStatus {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
 ///Request body for approving a proposed task.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ApprovalRequest {
@@ -801,6 +1544,25 @@ pub struct BlockRequest {
     ///Explanation for why the task is blocked.
     ///Constraint: minLength=1, maxLength=2000, pattern=`^[\s\S]+$`
     pub reason: String,
+}
+///Result of a successful project import.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ImportResult {
+    ///Number of knowledge items imported.
+    ///Constraint: minimum=0, maximum=50000
+    pub knowledge_count: i32,
+    ///Identifier of the newly created project.
+    ///Constraint: minLength=36, maxLength=36, pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    pub project_id: uuid::Uuid,
+    ///Number of relations imported.
+    ///Constraint: minimum=0, maximum=50000
+    pub relation_count: i32,
+    ///Number of sessions imported.
+    ///Constraint: minimum=0, maximum=50000
+    pub session_count: i32,
+    ///Number of tasks imported.
+    ///Constraint: minimum=0, maximum=10000
+    pub task_count: i32,
 }
 ///Request body for rejecting a task in review.
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -1268,6 +1268,732 @@ async fn auto_ready_cascade_when_dependency_completes() {
     assert_eq!(body["task"]["id"], a);
 }
 
+// ── S5: the agent loop over REST ────────────────────────────────────────
+
+/// Identity JSON body fragment for claim/session calls.
+fn identity(session_id: &str) -> Value {
+    serde_json::json!({
+        "harness": "claude-code",
+        "agent_model": "opus-5",
+        "session_id": session_id
+    })
+}
+
+/// Claim a task over REST, asserting success. Returns the claim body.
+async fn claim(app: &axum::Router, pid: &str, tid: &str, session_id: &str) -> Value {
+    let (status, body) = post(
+        app,
+        &format!("/api/v1/projects/{pid}/tasks/{tid}/claim"),
+        serde_json::json!({ "identity": identity(session_id), "ttl_seconds": 300 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "claim failed: {body}");
+    body
+}
+
+/// Report a session over REST. Returns `(status, body)`.
+async fn report_session(
+    app: &axum::Router,
+    pid: &str,
+    tid: &str,
+    session_id: &str,
+    outcome: &str,
+    extra: Value,
+) -> (StatusCode, Value) {
+    let mut body = serde_json::json!({
+        "identity": identity(session_id),
+        "started_at": "2026-09-10T10:00:00Z",
+        "ended_at": "2026-09-10T10:30:00Z",
+        "outcome": outcome,
+        "summary": "worked on the task"
+    });
+    if let (Value::Object(base), Value::Object(more)) = (&mut body, extra) {
+        base.extend(more);
+    }
+    post(
+        app,
+        &format!("/api/v1/projects/{pid}/tasks/{tid}/sessions"),
+        body,
+    )
+    .await
+}
+
+/// Create a claim whose lease is already expired by backdating `now`
+/// (avoids waiting out MIN_TTL). The task ends up `in_progress` with an
+/// expired, unswept claim — exactly the crashed-agent state.
+async fn claim_expired(store: &shepherd_core::Store, pid: &str, tid: &str, session_id: &str) {
+    let pid = shepherd_core::ProjectId::from_uuid(pid.parse().unwrap());
+    let tid = shepherd_core::TaskId::from_uuid(tid.parse().unwrap());
+    let past = chrono::Utc::now() - chrono::TimeDelta::hours(1);
+    store
+        .claim_task(
+            pid,
+            tid,
+            &shepherd_core::ClaimRequest {
+                identity: shepherd_core::Identity {
+                    harness: "claude-code".into(),
+                    agent_model: "opus-5".into(),
+                    session_id: session_id.into(),
+                    label: None,
+                },
+                ttl_seconds: 30,
+            },
+            past,
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn full_agent_loop_via_rest() {
+    let app = test_app().await;
+
+    // Project with the review gate on (default).
+    let pid = create_project(&app, "agent-loop").await;
+    let a = create_task(&app, &pid, "Design the schema", "approved").await;
+    let b = create_task(&app, &pid, "Implement the API", "approved").await;
+
+    // B depends on A → B demoted to approved.
+    post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{b}/relations"),
+        serde_json::json!({ "type": "depends_on", "target_task_id": a }),
+    )
+    .await;
+
+    // 1. next-task offers A (the only ready task).
+    let (status, body) = get(&app, &format!("/api/v1/projects/{pid}/next-task")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["task"]["id"], a);
+
+    // 2. Claim it.
+    let claim_body = claim(&app, &pid, &a, "sess-1").await;
+    assert_eq!(claim_body["task_id"], a);
+    assert!(!claim_body["lease_id"].as_str().unwrap().is_empty());
+
+    // A second claim conflicts.
+    let (status, body) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{a}/claim"),
+        serde_json::json!({ "identity": identity("sess-2"), "ttl_seconds": 300 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["type"], "urn:shepherd:error:claim-conflict");
+
+    // 3. Context bundle.
+    let (status, body) = get(&app, &format!("/api/v1/projects/{pid}/tasks/{a}/context")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["task"]["id"], a);
+    assert_eq!(body["task"]["status"], "in_progress");
+
+    // Renew the lease mid-work.
+    let (status, body) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{a}/claim/renew"),
+        serde_json::json!({ "identity": identity("sess-1"), "ttl_seconds": 600 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "renew failed: {body}");
+    assert_eq!(body["ttl_seconds"], 600);
+    assert!(body["renewed_at"].is_string());
+
+    // 4. Report success → in_review (gate on).
+    let (status, session) = report_session(
+        &app,
+        &pid,
+        &a,
+        "sess-1",
+        "succeeded",
+        serde_json::json!({
+            "decisions": ["normalized the schema"],
+            "artifacts": ["https://example.com/pr/1"],
+            "knowledge_items": [{
+                "type": "decision",
+                "title": "Schema shape",
+                "content": "Tables are third normal form."
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "session failed: {session}");
+    assert_eq!(session["outcome"], "succeeded");
+    let sid = session["id"].as_str().unwrap();
+
+    let (_, task) = get(&app, &format!("/api/v1/projects/{pid}/tasks/{a}")).await;
+    assert_eq!(task["status"], "in_review");
+
+    // Session is retrievable and listed.
+    let (status, body) = get(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{a}/sessions/{sid}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["id"], sid);
+    let (_, body) = get(&app, &format!("/api/v1/projects/{pid}/tasks/{a}/sessions")).await;
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+    // The listed session hydrates its knowledge items too.
+    assert_eq!(
+        body["items"][0]["knowledge_items"][0]["title"],
+        "Schema shape"
+    );
+
+    // 5. Human approves the review → A done, B auto-readies.
+    let (status, _) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{a}/approve"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = get(&app, &format!("/api/v1/projects/{pid}/next-task")).await;
+    assert_eq!(body["task"]["id"], b, "B should be offered once A is done");
+}
+
+#[tokio::test]
+async fn failed_session_returns_task_to_ready_with_attempt_history() {
+    let app = test_app().await;
+    let pid = create_project(&app, "failure-path").await;
+    let tid = create_task(&app, &pid, "Flaky work", "approved").await;
+
+    claim(&app, &pid, &tid, "sess-fail").await;
+    let (status, session) = report_session(
+        &app,
+        &pid,
+        &tid,
+        "sess-fail",
+        "failed",
+        serde_json::json!({ "failure_reason": "tests would not pass" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(session["outcome"], "failed");
+    assert_eq!(session["failure_reason"], "tests would not pass");
+
+    // Task is claimable again with its attempt history kept.
+    let (_, task) = get(&app, &format!("/api/v1/projects/{pid}/tasks/{tid}")).await;
+    assert_eq!(task["status"], "ready");
+    assert_eq!(task["attempt_count"], 1);
+
+    // Second attempt succeeds; attempt count keeps growing.
+    claim(&app, &pid, &tid, "sess-retry").await;
+    let (status, _) =
+        report_session(&app, &pid, &tid, "sess-retry", "succeeded", Value::Null).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (_, task) = get(&app, &format!("/api/v1/projects/{pid}/tasks/{tid}")).await;
+    assert_eq!(task["attempt_count"], 2);
+
+    // Both attempts stay on record; the cursor walks them exactly once,
+    // newest first.
+    let (_, page1) = get(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{tid}/sessions?limit=1"),
+    )
+    .await;
+    assert_eq!(page1["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page1["items"][0]["outcome"], "succeeded");
+    assert_eq!(page1["has_more"], true);
+    let cursor = page1["next_cursor"].as_str().unwrap();
+    let (_, page2) = get(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{tid}/sessions?limit=1&cursor={cursor}"),
+    )
+    .await;
+    assert_eq!(page2["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page2["items"][0]["outcome"], "failed");
+    assert_eq!(page2["has_more"], false);
+}
+
+#[tokio::test]
+async fn release_returns_task_to_ready() {
+    let app = test_app().await;
+    let pid = create_project(&app, "release-path").await;
+    let tid = create_task(&app, &pid, "Give up on this", "approved").await;
+
+    claim(&app, &pid, &tid, "sess-quit").await;
+    let (status, _) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{tid}/claim/release"),
+        serde_json::json!({ "identity": identity("sess-quit") }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (_, task) = get(&app, &format!("/api/v1/projects/{pid}/tasks/{tid}")).await;
+    assert_eq!(task["status"], "ready");
+
+    // Renewing after release is 410 Gone.
+    let (status, body) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{tid}/claim/renew"),
+        serde_json::json!({ "identity": identity("sess-quit") }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::GONE);
+    assert_eq!(body["type"], "urn:shepherd:error:lease-expired");
+}
+
+#[tokio::test]
+async fn claim_guard_rejections() {
+    let app = test_app().await;
+    let pid = create_project(&app, "guards").await;
+
+    // Claiming a non-ready task → 409 task-not-ready.
+    let proposed = create_task(&app, &pid, "Not approved yet", "proposed").await;
+    let (status, body) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{proposed}/claim"),
+        serde_json::json!({ "identity": identity("s"), "ttl_seconds": 300 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["type"], "urn:shepherd:error:task-not-ready");
+
+    // Out-of-range TTL is rejected by validation.
+    let ready = create_task(&app, &pid, "Ready task", "approved").await;
+    let (status, _) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{ready}/claim"),
+        serde_json::json!({ "identity": identity("s"), "ttl_seconds": 5 }),
+    )
+    .await;
+    assert!(
+        status == StatusCode::BAD_REQUEST || status == StatusCode::UNPROCESSABLE_ENTITY,
+        "expected 400 or 422 for TTL below minimum, got {status}"
+    );
+
+    // Renew/release/report by a different identity → 409 claim-conflict.
+    claim(&app, &pid, &ready, "sess-owner").await;
+    for path in ["claim/renew", "claim/release"] {
+        let (status, body) = post(
+            &app,
+            &format!("/api/v1/projects/{pid}/tasks/{ready}/{path}"),
+            serde_json::json!({ "identity": identity("sess-intruder") }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{path} should conflict");
+        assert_eq!(body["type"], "urn:shepherd:error:claim-conflict");
+    }
+    let (status, body) = report_session(
+        &app,
+        &pid,
+        &ready,
+        "sess-intruder",
+        "succeeded",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["type"], "urn:shepherd:error:claim-conflict");
+
+    // Renewing a task that has no claim at all → 410 Gone.
+    let unclaimed = create_task(&app, &pid, "Never claimed", "approved").await;
+    let (status, body) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{unclaimed}/claim/renew"),
+        serde_json::json!({ "identity": identity("s") }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::GONE);
+    assert_eq!(body["type"], "urn:shepherd:error:lease-expired");
+}
+
+#[tokio::test]
+async fn expired_lease_frees_task_and_blocks_stale_report() {
+    let (app, store) = test_app_with_store().await;
+    let pid = create_project(&app, "expiry").await;
+    let tid = create_task(&app, &pid, "Crashed agent work", "approved").await;
+
+    // Agent claims, then crashes: lease expires unswept.
+    claim_expired(&store, &pid, &tid, "sess-crashed").await;
+    let (_, task) = get(&app, &format!("/api/v1/projects/{pid}/tasks/{tid}")).await;
+    assert_eq!(task["status"], "in_progress");
+
+    // The crashed agent's late report is rejected: the lease is gone.
+    let (status, body) =
+        report_session(&app, &pid, &tid, "sess-crashed", "succeeded", Value::Null).await;
+    assert_eq!(status, StatusCode::GONE);
+    assert_eq!(body["type"], "urn:shepherd:error:lease-expired");
+
+    // next-task sweeps the expired lease and offers the task again.
+    let (_, body) = get(&app, &format!("/api/v1/projects/{pid}/next-task")).await;
+    assert_eq!(body["task"]["id"], tid);
+    assert_eq!(body["task"]["status"], "ready");
+
+    // Another agent can claim and finish it.
+    claim(&app, &pid, &tid, "sess-rescue").await;
+    let (status, _) =
+        report_session(&app, &pid, &tid, "sess-rescue", "succeeded", Value::Null).await;
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn context_bundle_aggregates_ancestors_knowledge_and_siblings() {
+    let app = test_app().await;
+    let (_, proj) = post(
+        &app,
+        "/api/v1/projects",
+        serde_json::json!({ "name": "context", "settings": { "review_gate": false } }),
+    )
+    .await;
+    let pid = proj["id"].as_str().unwrap().to_string();
+
+    // Ancestor task, completed with a decision and an artifact.
+    let ancestor = create_task(&app, &pid, "Pick the storage engine", "approved").await;
+    let target = create_task(&app, &pid, "Wire the storage", "approved").await;
+    post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{target}/relations"),
+        serde_json::json!({ "type": "depends_on", "target_task_id": ancestor }),
+    )
+    .await;
+    claim(&app, &pid, &ancestor, "sess-a").await;
+    let (status, _) = report_session(
+        &app,
+        &pid,
+        &ancestor,
+        "sess-a",
+        "succeeded",
+        serde_json::json!({
+            "decisions": ["SQLite with WAL"],
+            "artifacts": ["https://example.com/pr/7"]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Project-level knowledge.
+    let (status, _) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/knowledge"),
+        serde_json::json!({
+            "type": "note",
+            "title": "Conventions",
+            "content": "Cursor pagination everywhere.",
+            "scope": "project"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // A decomposition parent: its summaries belong in the bundle too.
+    let parent = create_task(&app, &pid, "Storage epic", "approved").await;
+    let (status, _) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{parent}/relations"),
+        serde_json::json!({ "type": "decomposition", "target_task_id": target }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // An in-flight sibling claimed by someone else.
+    let sibling = create_task(&app, &pid, "Parallel work", "approved").await;
+    claim(&app, &pid, &sibling, "sess-sibling").await;
+
+    // Claim the target and pull its bundle.
+    claim(&app, &pid, &target, "sess-b").await;
+    let (status, bundle) = get(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{target}/context"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bundle["task"]["id"], target);
+
+    // Both the dependency ancestor and the decomposition parent appear.
+    let ancestors = bundle["ancestor_summaries"].as_array().unwrap();
+    assert_eq!(ancestors.len(), 2);
+    let ancestor_ids: Vec<&str> = ancestors
+        .iter()
+        .map(|a| a["task_id"].as_str().unwrap())
+        .collect();
+    assert!(ancestor_ids.contains(&ancestor.as_str()));
+    assert!(ancestor_ids.contains(&parent.as_str()));
+    let dep_ancestor = ancestors
+        .iter()
+        .find(|a| a["task_id"] == ancestor.as_str())
+        .unwrap();
+    assert_eq!(dep_ancestor["decisions"][0], "SQLite with WAL");
+
+    assert_eq!(bundle["artifacts"][0], "https://example.com/pr/7");
+    assert_eq!(bundle["project_knowledge"][0]["title"], "Conventions");
+
+    let siblings = bundle["sibling_tasks"].as_array().unwrap();
+    assert_eq!(siblings.len(), 1, "only the sibling, not the target itself");
+    assert_eq!(siblings[0]["task_id"], sibling);
+    assert_eq!(siblings[0]["claimed_by"]["session_id"], "sess-sibling");
+}
+
+#[tokio::test]
+async fn background_sweeper_frees_expired_lease_without_traffic() {
+    let (app, store) = test_app_with_store().await;
+    let pid = create_project(&app, "sweeper").await;
+    let tid = create_task(&app, &pid, "Crashed and forgotten", "approved").await;
+
+    // A crashed agent's lease, already expired.
+    claim_expired(&store, &pid, &tid, "sess-crashed").await;
+    let (_, task) = get(&app, &format!("/api/v1/projects/{pid}/tasks/{tid}")).await;
+    assert_eq!(task["status"], "in_progress");
+
+    // The background sweeper alone must free the task — no next-task call.
+    let sweeper = shepherd_server::spawn_claim_sweeper(store, std::time::Duration::from_millis(20));
+    let mut freed = false;
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let (_, task) = get(&app, &format!("/api/v1/projects/{pid}/tasks/{tid}")).await;
+        if task["status"] == "ready" {
+            freed = true;
+            break;
+        }
+    }
+    sweeper.abort();
+    assert!(
+        freed,
+        "sweeper should return the expired-lease task to ready"
+    );
+}
+
+// ── S5: knowledge CRUD ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn knowledge_crud_and_scope_filters() {
+    let app = test_app().await;
+    let pid = create_project(&app, "knowledge").await;
+    let tid = create_task(&app, &pid, "Produces knowledge", "approved").await;
+
+    // Project-scoped item.
+    let (status, project_item) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/knowledge"),
+        serde_json::json!({
+            "type": "decision",
+            "title": "Error model",
+            "content": "RFC 9457 everywhere.",
+            "scope": "project"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(project_item["scope"], "project");
+    let kid = project_item["id"].as_str().unwrap().to_string();
+
+    // Task-scoped item.
+    let (status, task_item) = post(
+        &app,
+        &format!("/api/v1/projects/{pid}/knowledge"),
+        serde_json::json!({
+            "type": "link",
+            "title": "The PR",
+            "content": "https://example.com/pr/2",
+            "scope": "task",
+            "task_id": tid
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(task_item["task_id"], tid);
+
+    // List all, then filter by scope, type, and task.
+    let (_, body) = get(&app, &format!("/api/v1/projects/{pid}/knowledge")).await;
+    assert_eq!(body["items"].as_array().unwrap().len(), 2);
+    let (_, body) = get(
+        &app,
+        &format!("/api/v1/projects/{pid}/knowledge?scope=project"),
+    )
+    .await;
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+    assert_eq!(body["items"][0]["id"], kid.as_str());
+    let (_, body) = get(&app, &format!("/api/v1/projects/{pid}/knowledge?type=link")).await;
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+    let (_, body) = get(
+        &app,
+        &format!("/api/v1/projects/{pid}/knowledge?task_id={tid}"),
+    )
+    .await;
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+
+    // Cursor pagination walks all items exactly once.
+    let (_, page1) = get(&app, &format!("/api/v1/projects/{pid}/knowledge?limit=1")).await;
+    assert_eq!(page1["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page1["has_more"], true);
+    let cursor = page1["next_cursor"].as_str().unwrap();
+    let (_, page2) = get(
+        &app,
+        &format!("/api/v1/projects/{pid}/knowledge?limit=1&cursor={cursor}"),
+    )
+    .await;
+    assert_eq!(page2["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page2["has_more"], false);
+    assert_ne!(page1["items"][0]["id"], page2["items"][0]["id"]);
+
+    // Get, delete, gone.
+    let (status, body) = get(&app, &format!("/api/v1/projects/{pid}/knowledge/{kid}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["title"], "Error model");
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/projects/{pid}/knowledge/{kid}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = get(&app, &format!("/api/v1/projects/{pid}/knowledge/{kid}")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+// ── S5: export / import ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn export_import_roundtrip_with_normalization() {
+    let app = test_app().await;
+    let (_, proj) = post(
+        &app,
+        "/api/v1/projects",
+        serde_json::json!({ "name": "exported", "settings": { "review_gate": false } }),
+    )
+    .await;
+    let pid = proj["id"].as_str().unwrap().to_string();
+
+    // One done task whose session produced knowledge, one mid-work task.
+    let done = create_task(&app, &pid, "Finished work", "approved").await;
+    claim(&app, &pid, &done, "sess-1").await;
+    report_session(
+        &app,
+        &pid,
+        &done,
+        "sess-1",
+        "succeeded",
+        serde_json::json!({
+            "knowledge_items": [{
+                "type": "decision",
+                "title": "Produced in session",
+                "content": "Travels through export and import."
+            }]
+        }),
+    )
+    .await;
+    let midwork = create_task(&app, &pid, "Mid-flight work", "approved").await;
+    claim(&app, &pid, &midwork, "sess-2").await;
+    post(
+        &app,
+        &format!("/api/v1/projects/{pid}/knowledge"),
+        serde_json::json!({
+            "type": "note",
+            "title": "Glossary",
+            "content": "Everything is a task.",
+            "scope": "project"
+        }),
+    )
+    .await;
+
+    // Export.
+    let (status, doc) = get(&app, &format!("/api/v1/projects/{pid}/export")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(doc["version"], "1.0.0");
+    assert_eq!(doc["tasks"].as_array().unwrap().len(), 2);
+    assert_eq!(doc["sessions"].as_array().unwrap().len(), 1);
+    assert_eq!(doc["knowledge"].as_array().unwrap().len(), 2);
+
+    // Import → a new project with matching counts.
+    let (status, result) = post(&app, "/api/v1/projects/import", doc.clone()).await;
+    assert_eq!(status, StatusCode::CREATED, "import failed: {result}");
+    let new_pid = result["project_id"].as_str().unwrap();
+    assert_ne!(new_pid, pid, "import must create a new project");
+    assert_eq!(result["task_count"], 2);
+    assert_eq!(result["session_count"], 1);
+    assert_eq!(result["knowledge_count"], 2);
+
+    // Claims are not exported: the in_progress task normalized to ready.
+    let (_, tasks) = get(&app, &format!("/api/v1/projects/{new_pid}/tasks")).await;
+    let imported_midwork = tasks["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["title"] == "Mid-flight work")
+        .unwrap();
+    assert_eq!(imported_midwork["status"], "ready");
+
+    // Knowledge references are remapped to the NEW task and session ids:
+    // querying by the imported done task's id finds the session knowledge.
+    let imported_done = tasks["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["title"] == "Finished work")
+        .unwrap();
+    let new_done_id = imported_done["id"].as_str().unwrap();
+    assert_ne!(new_done_id, done, "imported task must get a fresh id");
+    let (_, ki) = get(
+        &app,
+        &format!("/api/v1/projects/{new_pid}/knowledge?task_id={new_done_id}"),
+    )
+    .await;
+    assert_eq!(ki["items"].as_array().unwrap().len(), 1);
+    assert_eq!(ki["items"][0]["title"], "Produced in session");
+    let (_, sessions) = get(
+        &app,
+        &format!("/api/v1/projects/{new_pid}/tasks/{new_done_id}/sessions"),
+    )
+    .await;
+    assert_eq!(
+        ki["items"][0]["session_id"], sessions["items"][0]["id"],
+        "knowledge must point at the imported session, not the old one"
+    );
+
+    // Incompatible schema version → 422.
+    let mut bad = doc;
+    bad["version"] = Value::String("2.0.0".into());
+    let (status, body) = post(&app, "/api/v1/projects/import", bad).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["type"], "urn:shepherd:error:import-schema-mismatch");
+}
+
+// ── S5: concurrency — N parallel claims, exactly one winner ─────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn n_parallel_claims_exactly_one_winner() {
+    // A file-backed store: the in-memory pool has a single connection which
+    // serializes writes and would hide the race this test exists to catch.
+    let dir = tempfile::tempdir().unwrap();
+    let store = shepherd_core::Store::open(dir.path().join("claims.db"))
+        .await
+        .unwrap();
+    let state = shepherd_server::AppState { store };
+    let app = shepherd_server::router(state, "does-not-exist");
+
+    let pid = create_project(&app, "contested").await;
+    let tid = create_task(&app, &pid, "One winner only", "approved").await;
+
+    const N: usize = 16;
+    let mut handles = Vec::new();
+    for i in 0..N {
+        let app = app.clone();
+        let path = format!("/api/v1/projects/{pid}/tasks/{tid}/claim");
+        handles.push(tokio::spawn(async move {
+            let body = serde_json::json!({
+                "identity": identity(&format!("sess-{i}")),
+                "ttl_seconds": 300
+            });
+            let (status, _) = post(&app, &path, body).await;
+            status
+        }));
+    }
+
+    let mut winners = 0;
+    let mut conflicts = 0;
+    for handle in handles {
+        match handle.await.unwrap() {
+            StatusCode::CREATED => winners += 1,
+            StatusCode::CONFLICT => conflicts += 1,
+            other => panic!("unexpected status under contention: {other}"),
+        }
+    }
+    assert_eq!(winners, 1, "exactly one claim must win");
+    assert_eq!(conflicts, N - 1, "all others must conflict");
+}
+
 // ── Contract conformance (schema validation) ────────────────────────────
 
 mod contract {
@@ -1548,6 +2274,138 @@ mod contract {
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         let body: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(body["type"], "urn:shepherd:error:validation-error");
+        validate(&spec, "components/schemas/ProblemDetail", &body);
+    }
+
+    // ── S5: agent-loop schemas ──────────────────────────────────────────
+
+    /// Set up a project with one claimed task; returns `(pid, tid)`.
+    async fn claimed_task(app: &axum::Router, name: &str) -> (String, String) {
+        let pid = create_project(app, name).await;
+        let tid = create_task(app, &pid, "Claimed task", "approved").await;
+        claim(app, &pid, &tid, "sess-contract").await;
+        (pid, tid)
+    }
+
+    #[tokio::test]
+    async fn claim_response_conforms_to_spec() {
+        let spec = load_spec();
+        let app = test_app().await;
+        let pid = create_project(&app, "claim-contract").await;
+        let tid = create_task(&app, &pid, "Claim me", "approved").await;
+
+        let (_, body) = post(
+            &app,
+            &format!("/api/v1/projects/{pid}/tasks/{tid}/claim"),
+            serde_json::json!({ "identity": identity("sess-c"), "ttl_seconds": 300 }),
+        )
+        .await;
+        validate(&spec, "components/schemas/Claim", &body);
+
+        // Renewed claim conforms too (renewed_at now set).
+        let (_, body) = post(
+            &app,
+            &format!("/api/v1/projects/{pid}/tasks/{tid}/claim/renew"),
+            serde_json::json!({ "identity": identity("sess-c") }),
+        )
+        .await;
+        validate(&spec, "components/schemas/Claim", &body);
+    }
+
+    #[tokio::test]
+    async fn context_bundle_conforms_to_spec() {
+        let spec = load_spec();
+        let app = test_app().await;
+        let (pid, tid) = claimed_task(&app, "context-contract").await;
+
+        let (_, body) = get(&app, &format!("/api/v1/projects/{pid}/tasks/{tid}/context")).await;
+        validate(&spec, "components/schemas/ContextBundle", &body);
+    }
+
+    #[tokio::test]
+    async fn session_responses_conform_to_spec() {
+        let spec = load_spec();
+        let app = test_app().await;
+        let (pid, tid) = claimed_task(&app, "session-contract").await;
+
+        let (_, body) = report_session(
+            &app,
+            &pid,
+            &tid,
+            "sess-contract",
+            "succeeded",
+            serde_json::json!({
+                "decisions": ["a decision"],
+                "artifacts": ["https://example.com/pr/9"],
+                "knowledge_items": [{
+                    "type": "note",
+                    "title": "Learned",
+                    "content": "Something reusable."
+                }]
+            }),
+        )
+        .await;
+        validate(&spec, "components/schemas/Session", &body);
+
+        let (_, body) = get(
+            &app,
+            &format!("/api/v1/projects/{pid}/tasks/{tid}/sessions"),
+        )
+        .await;
+        validate(&spec, "components/schemas/SessionList", &body);
+    }
+
+    #[tokio::test]
+    async fn knowledge_responses_conform_to_spec() {
+        let spec = load_spec();
+        let app = test_app().await;
+        let pid = create_project(&app, "knowledge-contract").await;
+
+        let (_, body) = post(
+            &app,
+            &format!("/api/v1/projects/{pid}/knowledge"),
+            serde_json::json!({
+                "type": "decision",
+                "title": "Contract knowledge",
+                "content": "Validated against the spec.",
+                "scope": "project"
+            }),
+        )
+        .await;
+        validate(&spec, "components/schemas/KnowledgeItem", &body);
+
+        let (_, body) = get(&app, &format!("/api/v1/projects/{pid}/knowledge")).await;
+        validate(&spec, "components/schemas/KnowledgeItemList", &body);
+    }
+
+    #[tokio::test]
+    async fn export_and_import_conform_to_spec() {
+        let spec = load_spec();
+        let app = test_app().await;
+        let (pid, tid) = claimed_task(&app, "export-contract").await;
+        report_session(&app, &pid, &tid, "sess-contract", "succeeded", Value::Null).await;
+
+        let (_, doc) = get(&app, &format!("/api/v1/projects/{pid}/export")).await;
+        validate(&spec, "components/schemas/ExportDocument", &doc);
+
+        let (_, result) = post(&app, "/api/v1/projects/import", doc).await;
+        validate(&spec, "components/schemas/ImportResult", &result);
+    }
+
+    #[tokio::test]
+    async fn gone_error_response_conforms_to_spec() {
+        let spec = load_spec();
+        let app = test_app().await;
+        let pid = create_project(&app, "gone-contract").await;
+        let tid = create_task(&app, &pid, "Never claimed", "approved").await;
+
+        let (status, body) = post(
+            &app,
+            &format!("/api/v1/projects/{pid}/tasks/{tid}/claim/renew"),
+            serde_json::json!({ "identity": identity("sess-x") }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::GONE);
         validate(&spec, "components/schemas/ProblemDetail", &body);
     }
 }

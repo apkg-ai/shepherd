@@ -23,6 +23,11 @@ struct Config {
     /// Path to the SQLite database file.
     #[arg(long, env = "SHEPHERD_DB")]
     db: Option<PathBuf>,
+
+    /// Interval in seconds between expired-claim sweeps (0 disables the
+    /// background sweeper; expired leases are then only released lazily).
+    #[arg(long, env = "SHEPHERD_SWEEP_INTERVAL_SECONDS", default_value_t = 5)]
+    sweep_interval_seconds: u64,
 }
 
 #[tokio::main]
@@ -44,6 +49,15 @@ async fn main() -> anyhow::Result<()> {
     let store = Store::open(&db_path)
         .await
         .with_context(|| format!("failed to open database at {}", db_path.display()))?;
+
+    // Background sweeper: releases expired claims so crashed agents' tasks
+    // return to `ready` without waiting for the next API call (lazy sweep).
+    if config.sweep_interval_seconds > 0 {
+        shepherd_server::spawn_claim_sweeper(
+            store.clone(),
+            std::time::Duration::from_secs(config.sweep_interval_seconds),
+        );
+    }
 
     let state = shepherd_server::AppState { store };
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, config.port));

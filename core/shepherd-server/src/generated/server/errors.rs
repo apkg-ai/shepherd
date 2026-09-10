@@ -1535,6 +1535,93 @@ impl IntoResponse for GetNextTaskResponse {
         }
     }
 }
+/// Response for `GET /api/v1/projects/{project_id}/tasks/{task_id}/context` (operationId `getTaskContext`).
+pub enum GetTaskContextResponse {
+    Ok(ContextBundle),
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for GetTaskContextResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::Ok(body) => {
+                let mut response = (StatusCode::OK, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
 /// Response for `GET /api/v1/projects/{project_id}/tasks/{task_id}/relations` (operationId `listTaskRelations`).
 pub enum ListTaskRelationsResponse {
     Ok(RelationList),
@@ -1749,6 +1836,1106 @@ impl IntoResponse for DeleteTaskRelationResponse {
             }
             Self::NotFound(body) => {
                 let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `POST /api/v1/projects/{project_id}/tasks/{task_id}/claim` (operationId `claimTask`).
+pub enum ClaimTaskResponse {
+    Created(Claim),
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    Conflict(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for ClaimTaskResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::Created(body) => {
+                let mut response = (StatusCode::CREATED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Conflict(body) => {
+                let mut response = (StatusCode::CONFLICT, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `POST /api/v1/projects/{project_id}/tasks/{task_id}/claim/renew` (operationId `renewClaim`).
+pub enum RenewClaimResponse {
+    Ok(Claim),
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    Conflict(ProblemDetail),
+    Gone(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for RenewClaimResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::Ok(body) => {
+                let mut response = (StatusCode::OK, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Conflict(body) => {
+                let mut response = (StatusCode::CONFLICT, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Gone(body) => {
+                let mut response = (StatusCode::GONE, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `POST /api/v1/projects/{project_id}/tasks/{task_id}/claim/release` (operationId `releaseClaim`).
+pub enum ReleaseClaimResponse {
+    NoContent,
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    Conflict(ProblemDetail),
+    Gone(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for ReleaseClaimResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::NoContent => StatusCode::NO_CONTENT.into_response(),
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Conflict(body) => {
+                let mut response = (StatusCode::CONFLICT, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Gone(body) => {
+                let mut response = (StatusCode::GONE, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `GET /api/v1/projects/{project_id}/tasks/{task_id}/sessions` (operationId `listTaskSessions`).
+pub enum ListTaskSessionsResponse {
+    Ok(SessionList),
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for ListTaskSessionsResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::Ok(body) => {
+                let mut response = (StatusCode::OK, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `POST /api/v1/projects/{project_id}/tasks/{task_id}/sessions` (operationId `createTaskSession`).
+pub enum CreateTaskSessionResponse {
+    Created(Session),
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    Conflict(ProblemDetail),
+    Gone(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for CreateTaskSessionResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::Created(body) => {
+                let mut response = (StatusCode::CREATED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Conflict(body) => {
+                let mut response = (StatusCode::CONFLICT, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Gone(body) => {
+                let mut response = (StatusCode::GONE, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `GET /api/v1/projects/{project_id}/tasks/{task_id}/sessions/{session_id}` (operationId `getTaskSession`).
+pub enum GetTaskSessionResponse {
+    Ok(Session),
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for GetTaskSessionResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::Ok(body) => {
+                let mut response = (StatusCode::OK, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `GET /api/v1/projects/{project_id}/knowledge` (operationId `listKnowledge`).
+pub enum ListKnowledgeResponse {
+    Ok(KnowledgeItemList),
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for ListKnowledgeResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::Ok(body) => {
+                let mut response = (StatusCode::OK, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `POST /api/v1/projects/{project_id}/knowledge` (operationId `createKnowledge`).
+pub enum CreateKnowledgeResponse {
+    Created(KnowledgeItem),
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for CreateKnowledgeResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::Created(body) => {
+                let mut response = (StatusCode::CREATED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `GET /api/v1/projects/{project_id}/knowledge/{knowledge_id}` (operationId `getKnowledge`).
+pub enum GetKnowledgeResponse {
+    Ok(KnowledgeItem),
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for GetKnowledgeResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::Ok(body) => {
+                let mut response = (StatusCode::OK, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `DELETE /api/v1/projects/{project_id}/knowledge/{knowledge_id}` (operationId `deleteKnowledge`).
+pub enum DeleteKnowledgeResponse {
+    NoContent,
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for DeleteKnowledgeResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::NoContent => StatusCode::NO_CONTENT.into_response(),
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `GET /api/v1/projects/{project_id}/export` (operationId `exportProject`).
+pub enum ExportProjectResponse {
+    Ok(ExportDocument),
+    Unauthorized(ProblemDetail),
+    NotFound(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for ExportProjectResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::Ok(body) => {
+                let mut response = (StatusCode::OK, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::NotFound(body) => {
+                let mut response = (StatusCode::NOT_FOUND, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::UnprocessableEntity(body) => {
+                let mut response = (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::TooManyRequests(body) => {
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::InternalServerError(body) => {
+                let mut response = (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+        }
+    }
+}
+/// Response for `POST /api/v1/projects/import` (operationId `importProject`).
+pub enum ImportProjectResponse {
+    Created(ImportResult),
+    Unauthorized(ProblemDetail),
+    UnprocessableEntity(ProblemDetail),
+    TooManyRequests(ProblemDetail),
+    InternalServerError(ProblemDetail),
+}
+impl IntoResponse for ImportProjectResponse {
+    fn into_response(self) -> ::axum::response::Response {
+        match self {
+            Self::Created(body) => {
+                let mut response = (StatusCode::CREATED, Json(body)).into_response();
+                let Ok(content_type) =
+                    ::axum::http::HeaderValue::from_bytes("application/json".as_bytes())
+                else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                response
+                    .headers_mut()
+                    .insert(::axum::http::header::CONTENT_TYPE, content_type);
+                response
+            }
+            Self::Unauthorized(body) => {
+                let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
                 let Ok(content_type) =
                     ::axum::http::HeaderValue::from_bytes("application/problem+json".as_bytes())
                 else {

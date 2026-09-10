@@ -69,6 +69,62 @@ async fn migrations_create_indexes() {
         indexes.contains(&"idx_knowledge_by_project".into()),
         "missing knowledge by project index"
     );
+    assert!(
+        indexes.contains(&"idx_claims_one_active".into()),
+        "missing one-active-claim unique index"
+    );
+}
+
+#[tokio::test]
+async fn second_active_claim_rejected() {
+    let store = Store::new_in_memory().await.unwrap();
+    let pool = store.pool();
+
+    seed_project_and_task(pool, "p1", "t1").await;
+
+    sqlx::query(
+        "INSERT INTO claims (id, task_id, identity, ttl_seconds, lease_id, acquired_at, expires_at)
+         VALUES ('c1', 't1', '{}', 300, 'l1', '2026-09-07T00:00:00Z', '2026-09-07T00:05:00Z')",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let result = sqlx::query(
+        "INSERT INTO claims (id, task_id, identity, ttl_seconds, lease_id, acquired_at, expires_at)
+         VALUES ('c2', 't1', '{}', 300, 'l2', '2026-09-07T00:01:00Z', '2026-09-07T00:06:00Z')",
+    )
+    .execute(pool)
+    .await;
+
+    assert!(
+        result.is_err(),
+        "should reject second active claim per task"
+    );
+}
+
+#[tokio::test]
+async fn released_claims_do_not_conflict() {
+    let store = Store::new_in_memory().await.unwrap();
+    let pool = store.pool();
+
+    seed_project_and_task(pool, "p1", "t1").await;
+
+    sqlx::query(
+        "INSERT INTO claims (id, task_id, identity, ttl_seconds, lease_id, acquired_at, expires_at, released_at, release_reason)
+         VALUES ('c1', 't1', '{}', 300, 'l1', '2026-09-07T00:00:00Z', '2026-09-07T00:05:00Z', '2026-09-07T00:02:00Z', 'voluntary')",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO claims (id, task_id, identity, ttl_seconds, lease_id, acquired_at, expires_at)
+         VALUES ('c2', 't1', '{}', 300, 'l2', '2026-09-07T00:03:00Z', '2026-09-07T00:08:00Z')",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
