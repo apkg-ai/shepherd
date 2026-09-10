@@ -22,6 +22,28 @@ use crate::model::*;
 
 type Result<T> = std::result::Result<T, Error>;
 
+/// Why a claim was released. The DB column stores `as_str()` (see the
+/// CHECK constraint in the claims migration); the variant — not a string
+/// compare — picks the domain event emitted on release.
+#[derive(Clone, Copy, Debug)]
+enum ReleaseReason {
+    Expired,
+    Voluntary,
+    SessionReported,
+    TaskDeleted,
+}
+
+impl ReleaseReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Expired => "expired",
+            Self::Voluntary => "voluntary",
+            Self::SessionReported => "session_reported",
+            Self::TaskDeleted => "task_deleted",
+        }
+    }
+}
+
 /// SQLite-backed domain store with integrated event emission.
 #[derive(Clone)]
 pub struct Store {
@@ -475,7 +497,7 @@ impl Store {
     ) -> Result<()> {
         // Cascade: release any active claim.
         if let Some(claim) = self.get_active_claim(id, now).await? {
-            self.release_claim_internal(project_id, id, claim.id, now, "task_deleted")
+            self.release_claim_internal(project_id, id, claim.id, now, ReleaseReason::TaskDeleted)
                 .await?;
         }
 
@@ -1132,7 +1154,7 @@ impl Store {
             });
         }
 
-        self.release_claim_internal(project_id, task_id, claim.id, now, "voluntary")
+        self.release_claim_internal(project_id, task_id, claim.id, now, ReleaseReason::Voluntary)
             .await?;
 
         // Return task to ready (or approved if new deps were added).
@@ -1184,7 +1206,7 @@ impl Store {
                 .parse()
                 .map_err(|e: String| Error::Internal(e))?;
 
-            self.release_claim_internal(project_id, task_id, claim_id, now, "expired")
+            self.release_claim_internal(project_id, task_id, claim_id, now, ReleaseReason::Expired)
                 .await?;
 
             if status == TaskStatus::InProgress {
@@ -1291,8 +1313,14 @@ impl Store {
                 detail: "session identity does not match the active claim".into(),
             });
         }
-        self.release_claim_internal(project_id, task_id, claim.id, now, "session_reported")
-            .await?;
+        self.release_claim_internal(
+            project_id,
+            task_id,
+            claim.id,
+            now,
+            ReleaseReason::SessionReported,
+        )
+        .await?;
 
         let session_id = SessionId::new();
         let decisions = input.decisions.as_deref().unwrap_or(&[]);
@@ -1317,13 +1345,6 @@ impl Store {
         .bind(now.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
-        self.emit(DomainEvent::SessionRecorded {
-            project_id,
-            task_id,
-            session_id,
-            outcome: input.outcome,
-        });
 
         // Create knowledge items from the report.
         if let Some(ki_inputs) = &input.knowledge_items {
@@ -1377,6 +1398,15 @@ impl Store {
                     .await?;
             }
         }
+
+        // Event emitted only after every write of the request succeeded —
+        // no event for a failed report (same discipline as claim_task).
+        self.emit(DomainEvent::SessionRecorded {
+            project_id,
+            task_id,
+            session_id,
+            outcome: input.outcome,
+        });
 
         self.get_session(project_id, task_id, session_id).await
     }
@@ -1754,15 +1784,18 @@ impl Store {
         }
 
         // Import relations.
+        let mut relation_ids = Vec::with_capacity(doc.relations.len());
         for rel in &doc.relations {
             let new_source = task_map[&rel.source_task_id];
             let new_target = task_map[&rel.target_task_id];
+            let new_rel_id = RelationId::new();
+            relation_ids.push(new_rel_id);
 
             sqlx::query(
                 "INSERT INTO relations (id, type, source_task_id, target_task_id, created_at)
                  VALUES (?, ?, ?, ?, ?)",
             )
-            .bind(RelationId::new().to_string())
+            .bind(new_rel_id.to_string())
             .bind(rel.relation_type.to_string())
             .bind(new_source.to_string())
             .bind(new_target.to_string())
@@ -1819,6 +1852,34 @@ impl Store {
             .bind(now.to_rfc3339())
             .execute(&self.pool)
             .await?;
+        }
+
+        // Events: the import materializes a full project in one mutation.
+        // Emitted only after every insert succeeded — no events for a
+        // failed import. Clients refetch on project.created per the v1
+        // recovery model; the per-entity events give project-filtered
+        // streams the same information.
+        self.emit(DomainEvent::ProjectCreated {
+            project_id: new_project_id,
+            name: doc.project.name.clone(),
+        });
+        for task in &doc.tasks {
+            self.emit(DomainEvent::TaskCreated {
+                project_id: new_project_id,
+                task_id: task_map[&task.id],
+                title: task.title.clone(),
+                task_type: task.task_type,
+                status: normalized_status(task),
+            });
+        }
+        for (rel, relation_id) in doc.relations.iter().zip(relation_ids) {
+            self.emit(DomainEvent::RelationAdded {
+                project_id: new_project_id,
+                relation_id,
+                relation_type: rel.relation_type,
+                source_task_id: task_map[&rel.source_task_id],
+                target_task_id: task_map[&rel.target_task_id],
+            });
         }
 
         Ok(export::import_summary(
@@ -1970,7 +2031,7 @@ impl Store {
         status: TaskStatus,
     ) -> Result<()> {
         let now = Utc::now();
-        sqlx::query(
+        let result = sqlx::query(
             "UPDATE tasks SET status = ?, updated_at = ?
              WHERE id = ? AND project_id = ? AND deleted_at IS NULL",
         )
@@ -1981,12 +2042,16 @@ impl Store {
         .execute(&self.pool)
         .await?;
 
-        self.emit(DomainEvent::TaskStatusChanged {
-            project_id,
-            task_id: id,
-            old_status,
-            new_status: status,
-        });
+        // No phantom events: a 0-row update (soft-deleted task) must not
+        // broadcast a status change for a task that no longer exists.
+        if result.rows_affected() == 1 {
+            self.emit(DomainEvent::TaskStatusChanged {
+                project_id,
+                task_id: id,
+                old_status,
+                new_status: status,
+            });
+        }
 
         Ok(())
     }
@@ -2109,30 +2174,29 @@ impl Store {
         task_id: TaskId,
         claim_id: ClaimId,
         now: DateTime<Utc>,
-        reason: &str,
+        reason: ReleaseReason,
     ) -> Result<()> {
         sqlx::query(
             "UPDATE claims SET released_at = ?, release_reason = ?
              WHERE id = ?",
         )
         .bind(now.to_rfc3339())
-        .bind(reason)
+        .bind(reason.as_str())
         .bind(claim_id.to_string())
         .execute(&self.pool)
         .await?;
 
-        if reason == "expired" {
-            self.emit(DomainEvent::ClaimExpired {
+        match reason {
+            ReleaseReason::Expired => self.emit(DomainEvent::ClaimExpired {
                 project_id,
                 task_id,
                 claim_id,
-            });
-        } else {
-            self.emit(DomainEvent::ClaimReleased {
+            }),
+            _ => self.emit(DomainEvent::ClaimReleased {
                 project_id,
                 task_id,
                 claim_id,
-            });
+            }),
         }
 
         Ok(())
@@ -6035,5 +6099,163 @@ mod tests {
             .to_payload();
         assert_eq!(status_event["old_status"], "in_progress");
         assert_eq!(status_event["new_status"], "ready");
+    }
+
+    #[tokio::test]
+    async fn import_emits_project_task_relation_events() {
+        // The import endpoint is a mutation like any other — it must
+        // provably emit its events (S6 acceptance).
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let a = ready_task(&store, p.id, "import-a").await;
+        let b = proposed_task(&store, p.id, "import-b").await;
+        store
+            .create_relation(
+                p.id,
+                b.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: a.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        let doc = store.export_project(p.id).await.unwrap();
+        let mut rx = store.subscribe();
+        let result = store.import_project(&doc).await.unwrap();
+
+        let events = drain_events(&mut rx);
+        assert_has_event(&events, "project.created");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.event_type() == "task.created")
+                .count(),
+            2,
+            "expected one task.created per imported task in {events:?}"
+        );
+        assert_has_event(&events, "relation.added");
+
+        // All events carry the NEW project id, and task/relation events
+        // reference the remapped ids — never the exported ones.
+        for e in &events {
+            assert_eq!(e.project_id(), result.project_id);
+        }
+        let old_ids = [a.id, b.id];
+        for e in events.iter().filter(|e| e.event_type() == "task.created") {
+            let payload = e.to_payload();
+            let new_id = payload["task_id"].as_str().unwrap();
+            assert!(
+                !old_ids.iter().any(|old| old.to_string() == new_id),
+                "task.created must use the remapped id, got {new_id}"
+            );
+        }
+        let relation_event = events
+            .iter()
+            .find(|e| e.event_type() == "relation.added")
+            .unwrap()
+            .to_payload();
+        assert_eq!(relation_event["type"], "depends_on");
+        assert_ne!(
+            relation_event["relation_id"],
+            doc.relations[0].id.to_string(),
+            "relation.added must use a fresh relation id"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_of_soft_deleted_task_emits_no_status_change() {
+        // A 0-row status update (soft-deleted task) must not broadcast a
+        // phantom task.status_changed.
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let (t, _claim) = in_progress_task(&store, p.id, "doomed").await;
+
+        // Soft-delete the task out from under the claim, then expire the
+        // claim — the sweep will release it and try to flip the status of
+        // a row its UPDATE cannot touch.
+        let now = Utc::now();
+        sqlx::query("UPDATE tasks SET deleted_at = ? WHERE id = ?")
+            .bind(now.to_rfc3339())
+            .bind(t.id.to_string())
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let past = (now - TimeDelta::hours(1)).to_rfc3339();
+        sqlx::query("UPDATE claims SET expires_at = ? WHERE task_id = ? AND released_at IS NULL")
+            .bind(&past)
+            .bind(t.id.to_string())
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        let mut rx = store.subscribe();
+        store.sweep_expired_claims(now).await.unwrap();
+
+        let events = drain_events(&mut rx);
+        // The claim release itself is real and still emitted.
+        assert_has_event(&events, "claim.expired");
+        let phantom = events
+            .iter()
+            .any(|e| e.event_type() == "task.status_changed");
+        assert!(
+            !phantom,
+            "soft-deleted task must not emit task.status_changed: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_report_emits_session_recorded_after_all_writes() {
+        // session.recorded is broadcast only after every write of the
+        // request succeeded — it is the last event of the report.
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let (t, _claim) = in_progress_task(&store, p.id, "reported").await;
+
+        let mut rx = store.subscribe();
+        store
+            .create_session(
+                p.id,
+                t.id,
+                &SessionReport {
+                    identity: test_identity(),
+                    started_at: Utc::now(),
+                    ended_at: Utc::now(),
+                    outcome: SessionOutcome::Succeeded,
+                    failure_reason: None,
+                    summary: Some("done".into()),
+                    decisions: None,
+                    knowledge_items: Some(vec![KnowledgeItemCreate {
+                        knowledge_type: KnowledgeType::Decision,
+                        title: "picked rust".into(),
+                        content: "Rust is the best choice".into(),
+                        scope: KnowledgeScope::Task,
+                        task_id: None,
+                        session_id: None,
+                    }]),
+                    artifacts: None,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+
+        let events = drain_events(&mut rx);
+        let types: Vec<&str> = events.iter().map(|e| e.event_type()).collect();
+        assert_eq!(
+            types.last().copied(),
+            Some("session.recorded"),
+            "session.recorded must be the final event, got {types:?}"
+        );
+        assert_eq!(
+            types.first().copied(),
+            Some("claim.released"),
+            "claim release comes first, got {types:?}"
+        );
+        assert!(
+            types.contains(&"knowledge.added"),
+            "expected knowledge.added in {types:?}"
+        );
     }
 }

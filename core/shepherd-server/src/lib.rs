@@ -26,13 +26,14 @@ use std::time::Duration;
 use axum::Router;
 use axum::extract::Query;
 use axum::http::header;
-use axum::response::IntoResponse;
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Deserialize;
 use shepherd_core::Store;
 use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tower_http::services::ServeDir;
 
 use crate::convert::{
@@ -93,20 +94,42 @@ struct EventsQuery {
 }
 
 /// SSE handler: streams domain events to the client, optionally filtered
-/// by project. No replay — clients refetch on reconnect.
-async fn sse_handler(
-    state: AppState,
-    Query(query): Query<EventsQuery>,
-) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
-    let rx = state.store.subscribe();
-    let project_filter = query.project_id;
+/// by project. No replay — clients refetch on reconnect. A client that
+/// lags behind the bus buffer is disconnected (it then reconnects and
+/// refetches) rather than silently missing events.
+async fn sse_handler(state: AppState, Query(query): Query<EventsQuery>) -> Response {
+    // The spec declares a UUID pattern and a 422 for a malformed filter —
+    // do not silently stream nothing for a typo'd id.
+    let project_filter = match query.project_id {
+        Some(pid) => match parse_project_id(&pid) {
+            Ok(id) => Some(id),
+            Err(e) => return validation_problem_detail(&e),
+        },
+        None => None,
+    };
 
-    let stream = BroadcastStream::new(rx).filter_map(move |result| {
-        match result {
+    let rx = state.store.subscribe();
+
+    // On lag the stream ends: the client disconnects, reconnects, and
+    // refetches — the documented recovery path. Silently skipping the
+    // lost events would leave the client's view stale with no way to
+    // notice.
+    let stream = BroadcastStream::new(rx)
+        .take_while(|result| match result {
+            Err(BroadcastStreamRecvError::Lagged(n)) => {
+                println!(
+                    "sse: client lagged ({n} events lost), disconnecting — \
+                     client refetches on reconnect"
+                );
+                false
+            }
+            _ => true,
+        })
+        .filter_map(move |result| match result {
             Ok(event) => {
                 // Apply project filter.
-                if let Some(ref pid) = project_filter
-                    && event.project_id().to_string() != *pid
+                if let Some(pid) = project_filter
+                    && event.project_id() != pid
                 {
                     return None;
                 }
@@ -116,20 +139,33 @@ async fn sse_handler(
                     .json_data(event.to_payload())
                     .ok()?;
 
-                Some(Ok(sse_event))
+                Some(Ok::<Event, Infallible>(sse_event))
             }
-            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
-                eprintln!("sse: client lagged, skipped {n} events");
-                None
-            }
-        }
-    });
+            // Unreachable: take_while ends the stream on Lagged.
+            Err(_) => None,
+        });
 
-    Sse::new(stream).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(15))
-            .text("keepalive"),
+    Sse::new(stream)
+        .keep_alive(
+            KeepAlive::new()
+                .interval(Duration::from_secs(15))
+                .text("keepalive"),
+        )
+        .into_response()
+}
+
+/// 422 problem-detail response, matching the generated error responses.
+fn validation_problem_detail(e: &shepherd_core::Error) -> Response {
+    let mut response = (
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        axum::Json(problem_detail(e)),
     )
+        .into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/problem+json"),
+    );
+    response
 }
 
 /// Spawn the background claim sweeper: every `period`, expired leases are

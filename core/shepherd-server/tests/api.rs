@@ -2713,3 +2713,78 @@ async fn sse_project_filter_excludes_other_projects() {
         "other project's event should have been filtered out: {text}"
     );
 }
+
+#[tokio::test]
+async fn sse_malformed_project_filter_returns_422() {
+    // The spec declares a UUID pattern + 422 for the filter — a malformed
+    // id must be rejected, not silently stream nothing. (An uppercase UUID
+    // parses to the same value via the uuid crate and filters correctly.)
+    let app = test_app().await;
+
+    for bad in ["not-a-uuid", "019421a5-7e6e-7000-8000-00000000000"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/v1/events?project_id={bad}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "expected 422 for filter {bad:?}"
+        );
+        let ct = response.headers()[header::CONTENT_TYPE].to_str().unwrap();
+        assert!(
+            ct.contains("application/problem+json"),
+            "expected problem+json, got {ct}"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["type"], "urn:shepherd:error:validation-error");
+    }
+}
+
+#[tokio::test]
+async fn sse_lagged_client_is_disconnected() {
+    // A client that falls behind the bus buffer must be disconnected (it
+    // then reconnects and refetches) — never silently skip lost events.
+    let (app, store) = test_app_with_store().await;
+
+    // Connect; the handler's receiver is subscribed but not yet polled.
+    let response = app
+        .oneshot(Request::get("/api/v1/events").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Overflow the 256-slot broadcast buffer while nobody is polling.
+    for i in 0..300 {
+        store
+            .create_project(&shepherd_core::ProjectCreate {
+                name: format!("flood-{i}"),
+                description: None,
+                settings: None,
+            })
+            .await
+            .unwrap();
+    }
+
+    // The first poll yields Lagged → the stream must END (None), not hang
+    // and not silently resume.
+    let mut body = response.into_body();
+    let frame = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        http_body_util::BodyExt::frame(&mut body),
+    )
+    .await
+    .expect("timed out — lagged client was not disconnected");
+    assert!(
+        frame.is_none(),
+        "expected the stream to end after lag, got a frame: {frame:?}"
+    );
+}
