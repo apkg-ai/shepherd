@@ -641,7 +641,11 @@ impl SessionsApi for AppState {
             Err(e) => return map_err_gone!(CreateTaskSessionResponse, e),
         };
         let input: shepherd_core::SessionReport = body.into();
-        match self.store.create_session(pid, tid, &input).await {
+        match self
+            .store
+            .create_session(pid, tid, &input, chrono::Utc::now())
+            .await
+        {
             Ok(session) => CreateTaskSessionResponse::Created(session.into()),
             Err(e) => map_err_gone!(CreateTaskSessionResponse, e),
         }

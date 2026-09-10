@@ -833,6 +833,7 @@ async fn reject_task_in_review_returns_to_ready() {
                 knowledge_items: None,
                 artifacts: None,
             },
+            chrono::Utc::now(),
         )
         .await
         .unwrap();
@@ -918,6 +919,7 @@ async fn review_gate_on_sends_to_in_review() {
                 knowledge_items: None,
                 artifacts: None,
             },
+            chrono::Utc::now(),
         )
         .await
         .unwrap();
@@ -986,6 +988,7 @@ async fn review_gate_off_sends_to_done() {
                 knowledge_items: None,
                 artifacts: None,
             },
+            chrono::Utc::now(),
         )
         .await
         .unwrap();
@@ -1248,6 +1251,7 @@ async fn auto_ready_cascade_when_dependency_completes() {
                 knowledge_items: None,
                 artifacts: None,
             },
+            chrono::Utc::now(),
         )
         .await
         .unwrap();

@@ -1206,7 +1206,11 @@ impl Store {
         // The state can only arise from a crash between a claim release and
         // its status update; rescue it back to ready/approved. The grace
         // period keeps the rescue from racing a healthy release→status
-        // window in release_claim/create_session.
+        // window in release_claim/create_session. Only the latest claim
+        // cycle (the last-inserted claim row) can be mid-window: a newer
+        // claim's existence proves the previous cycle's status update
+        // completed (the task went `ready` to be claimable again), so
+        // stale releases from older cycles must not delay the rescue.
         let cutoff = now - TimeDelta::seconds(30);
         let orphans = sqlx::query(
             "SELECT t.id, t.project_id FROM tasks t
@@ -1216,6 +1220,10 @@ impl Store {
                    SELECT 1 FROM claims c
                    WHERE c.task_id = t.id
                      AND (c.released_at IS NULL OR c.released_at > ?)
+                     AND c.rowid = (
+                         SELECT MAX(c2.rowid) FROM claims c2
+                         WHERE c2.task_id = t.id
+                     )
                )",
         )
         .bind(cutoff.to_rfc3339())
@@ -1254,6 +1262,7 @@ impl Store {
         project_id: ProjectId,
         task_id: TaskId,
         input: &SessionReport,
+        now: DateTime<Utc>,
     ) -> Result<Session> {
         let task = self.get_task(project_id, task_id).await?;
 
@@ -1264,8 +1273,6 @@ impl Store {
                 detail: "task must be in_progress to report a session".into(),
             });
         }
-
-        let now = Utc::now();
 
         // Strict claim guard: the reporter must hold the active claim.
         // Prevents a stale claimant (expired lease, task since re-claimed)
@@ -2717,6 +2724,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -2892,6 +2900,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -3028,6 +3037,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -3403,6 +3413,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -3743,6 +3754,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -3778,6 +3790,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -3815,6 +3828,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -3848,6 +3862,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap_err();
@@ -3883,6 +3898,7 @@ mod tests {
                     }]),
                     artifacts: Some(vec!["https://github.com/pr/1".into()]),
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -4858,6 +4874,7 @@ mod tests {
                 p.id,
                 t.id,
                 &session_report(other_identity(), SessionOutcome::Succeeded),
+                Utc::now(),
             )
             .await
             .unwrap_err();
@@ -4883,6 +4900,7 @@ mod tests {
                 p.id,
                 t.id,
                 &session_report(test_identity(), SessionOutcome::Succeeded),
+                Utc::now(),
             )
             .await
             .unwrap_err();
@@ -4956,6 +4974,7 @@ mod tests {
                 p.id,
                 t.id,
                 &session_report(test_identity(), SessionOutcome::Succeeded),
+                Utc::now(),
             )
             .await
             .unwrap_err();
@@ -5159,6 +5178,7 @@ mod tests {
                 p.id,
                 t.id,
                 &session_report(test_identity(), SessionOutcome::Succeeded),
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -5226,6 +5246,7 @@ mod tests {
                 p.id,
                 b.id,
                 &session_report(test_identity(), SessionOutcome::Succeeded),
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -5391,6 +5412,7 @@ mod tests {
                     }]),
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
@@ -5514,6 +5536,7 @@ mod tests {
                     knowledge_items: None,
                     artifacts: None,
                 },
+                Utc::now(),
             )
             .await
             .unwrap();
