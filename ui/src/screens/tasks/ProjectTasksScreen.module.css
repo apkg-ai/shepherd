@@ -1,10 +1,3 @@
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--space-4);
-}
-
 .newTask {
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-1);
@@ -21,7 +14,6 @@
 .filters {
   display: flex;
   gap: var(--space-4);
-  margin-bottom: var(--space-4);
 }
 
 .filter {
@@ -32,24 +24,86 @@
   color: var(--color-text-muted);
 }
 
+.card {
+  composes: card from "../../styles/surfaces.module.css";
+  overflow: hidden;
+}
+
 .table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-sm);
+  composes: table from "../../styles/surfaces.module.css";
 }
 
-.table th {
-  text-align: left;
-  padding: var(--space-2) var(--space-3);
+.row {
+  /* Status-tinted accent along the row edge, driven by data-status. */
+  box-shadow: inset 3px 0 0 var(--row-accent, transparent);
+}
+
+.row[data-status="ready"] {
+  --row-accent: var(--color-accent);
+}
+
+.row[data-status="in_progress"] {
+  --row-accent: var(--color-accent);
+}
+
+.row[data-status="in_review"] {
+  --row-accent: var(--color-attention);
+}
+
+.row[data-status="blocked"] {
+  --row-accent: var(--color-warning);
+}
+
+.statusCell {
+  width: 110px;
+}
+
+.titleCell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-left: calc(var(--depth, 0) * var(--space-5));
+}
+
+.collapse {
+  border: none;
+  background: none;
+  cursor: pointer;
   color: var(--color-text-muted);
-  font-weight: 600;
-  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  width: 18px;
+  padding: 0;
 }
 
-.table td {
-  padding: var(--space-3);
-  border-bottom: 1px solid var(--color-border);
-  vertical-align: middle;
+.collapseSpacer {
+  width: 18px;
+  flex-shrink: 0;
+}
+
+.chip {
+  font-size: var(--text-xs);
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.chipWaiting {
+  composes: chip;
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.parentCrumb {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
 }
 
 .muted {
