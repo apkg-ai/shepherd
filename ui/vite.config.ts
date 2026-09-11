@@ -13,6 +13,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["src/test-setup.ts"],
+    // Vitest owns src/**/*.test.* only — Playwright specs live in e2e/ and
+    // would otherwise match vitest's default *.spec.* include.
+    include: ["src/**/*.test.{ts,tsx}"],
     coverage: {
       provider: "v8",
       reporter: [["text"], ["lcovonly", { file: "ui-unit.lcov" }]],
