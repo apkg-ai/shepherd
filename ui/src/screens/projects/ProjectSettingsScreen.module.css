@@ -1,5 +1,8 @@
 .wrap {
+  /* Constrained for readable form/line lengths, centered so wide screens
+     frame the content instead of leaving the right half empty. */
   max-width: 720px;
+  margin-inline: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
