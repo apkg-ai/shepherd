@@ -123,65 +123,84 @@ function SettingsForm({ project }: { project: Project }) {
         description="Name, review gate, portability, and the danger zone."
       />
 
-      <form onSubmit={submit} noValidate className={styles.form}>
-        <FormField label="Name" error={errors["name"]}>
-          {(props) => (
-            <input {...props} type="text" value={name} onChange={(e) => setName(e.target.value)} />
-          )}
-        </FormField>
-        <FormField label="Description" error={errors["description"]}>
-          {(props) => (
-            <textarea
-              {...props}
-              rows={3}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
+      <section className={styles.card}>
+        <header className={styles.cardHeader}>
+          <h3>General</h3>
+          <p className={styles.muted}>The project's identity and how agent work completes.</p>
+        </header>
+        <form onSubmit={submit} noValidate>
+          <FormField label="Name" error={errors["name"]}>
+            {(props) => (
+              <input
+                {...props}
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            )}
+          </FormField>
+          <FormField label="Description" error={errors["description"]}>
+            {(props) => (
+              <textarea
+                {...props}
+                rows={3}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            )}
+          </FormField>
+          <label className={styles.gateRow}>
+            <input
+              type="checkbox"
+              checked={reviewGate}
+              onChange={(e) => setReviewGate(e.target.checked)}
             />
-          )}
-        </FormField>
-        <label className={styles.checkbox}>
-          <input
-            type="checkbox"
-            checked={reviewGate}
-            onChange={(e) => setReviewGate(e.target.checked)}
-          />
-          <span>
-            <strong>Review gate</strong> — on: successful agent sessions land in review for human
-            approval; off: they complete straight to done.
-          </span>
-        </label>
-        {errors["_form"] ? (
-          <p className={styles.formError} role="alert">
-            {errors["_form"]}
-          </p>
-        ) : null}
-        <div>
-          <Button type="submit" variant="primary" busy={updateProject.isPending}>
-            Save settings
-          </Button>
-        </div>
-      </form>
-
-      <section className={styles.block}>
-        <h3>Export</h3>
-        <p className={styles.muted}>
-          Download the full project — tasks, relations, sessions, knowledge — as a portable JSON
-          document.
-        </p>
-        <Button busy={exporting} onClick={() => void onExport()}>
-          Export project
-        </Button>
+            <span>
+              <strong>Review gate</strong> — on: successful agent sessions land in review for human
+              approval; off: they complete straight to done.
+            </span>
+          </label>
+          {errors["_form"] ? (
+            <p className={styles.formError} role="alert">
+              {errors["_form"]}
+            </p>
+          ) : null}
+          <footer className={styles.cardFooter}>
+            <Button type="submit" variant="primary" busy={updateProject.isPending}>
+              Save settings
+            </Button>
+          </footer>
+        </form>
       </section>
 
-      <section className={`${styles.block} ${styles.danger}`}>
-        <h3>Danger zone</h3>
-        <p className={styles.muted}>
-          Deleting a project removes its tasks, relations, sessions, and knowledge. This cannot be
-          undone.
-        </p>
-        <Button variant="danger" onClick={() => setDeleteOpen(true)}>
-          Delete project
-        </Button>
+      <section className={styles.card}>
+        <div className={styles.actionRow}>
+          <div>
+            <h3>Export</h3>
+            <p className={styles.muted}>
+              Download the full project — tasks, relations, sessions, knowledge — as a portable JSON
+              document.
+            </p>
+          </div>
+          <Button busy={exporting} onClick={() => void onExport()}>
+            Export project
+          </Button>
+        </div>
+      </section>
+
+      <section className={styles.cardDanger}>
+        <div className={styles.actionRow}>
+          <div>
+            <h3 className={styles.dangerTitle}>Danger zone</h3>
+            <p className={styles.muted}>
+              Deleting a project removes its tasks, relations, sessions, and knowledge. This cannot
+              be undone.
+            </p>
+          </div>
+          <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+            Delete project
+          </Button>
+        </div>
       </section>
 
       <ConfirmDialog
