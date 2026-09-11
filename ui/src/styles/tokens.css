@@ -4,6 +4,8 @@
  * same --status-* variables, so keep status styling here, not in components.
  */
 :root {
+  color-scheme: light;
+
   /* Palette */
   --color-bg: #ffffff;
   --color-surface: #f6f7f9;
@@ -25,6 +27,9 @@
   --color-attention: #7c3aed;
   --color-attention-soft: #ece3fd;
 
+  /* Text on accent-filled surfaces (primary buttons, in_progress chip). */
+  --color-on-accent: #ffffff;
+
   /* Status language (04-ui.md): proposed dashed, ready highlighted,
      in_progress claimed, in_review flagged, done dimmed, blocked warning. */
   --status-proposed-fg: var(--color-text-muted);
@@ -39,7 +44,7 @@
   --status-ready-bg: var(--color-accent-soft);
   --status-ready-border: 1px solid var(--color-accent);
 
-  --status-in_progress-fg: #ffffff;
+  --status-in_progress-fg: var(--color-on-accent);
   --status-in_progress-bg: var(--color-accent);
   --status-in_progress-border: 1px solid var(--color-accent);
 
@@ -79,4 +84,39 @@
   --text-md: 14px;
   --text-lg: 16px;
   --text-xl: 20px;
+}
+
+/* Dark theme. `data-theme` on <html> always holds the RESOLVED theme —
+   "system" is a stored preference resolved in src/lib/theme.ts (and the
+   pre-paint script in index.html), so one block serves both explicit dark
+   and system-dark. Status tokens derive from the palette and retheme
+   automatically. */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #0f1216;
+  --color-surface: #171b21;
+  --color-surface-raised: #1d232b;
+  --color-border: #2a313b;
+  --color-border-strong: #4b5563;
+  --color-text: #e6e9ed;
+  --color-text-muted: #9aa3af;
+  --color-text-faint: #6b7482;
+
+  --color-accent: #60a5fa;
+  --color-accent-soft: #1c2f4d;
+  --color-success: #34d399;
+  --color-success-soft: #12291f;
+  --color-warning: #e8a33d;
+  --color-warning-soft: #2e2412;
+  --color-danger: #f87171;
+  --color-danger-soft: #341a1a;
+  --color-attention: #a78bfa;
+  --color-attention-soft: #251b3a;
+
+  /* Accent is light in dark mode — dark text keeps the chip legible. */
+  --color-on-accent: #0c1220;
+
+  --shadow-1: 0 1px 3px rgb(0 0 0 / 45%);
+  --shadow-2: 0 8px 30px rgb(0 0 0 / 60%);
 }

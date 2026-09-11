@@ -12,6 +12,7 @@ import { FormField } from "./FormField";
 import { IdentityChip } from "./IdentityChip";
 import { LoadMore } from "./LoadMore";
 import { ReasonDialog } from "./ReasonDialog";
+import { ThemeToggle } from "./ThemeToggle";
 import { StatusBadge } from "./StatusBadge";
 import { EmptyState, ErrorState, LoadingState } from "./states";
 import { ToastProvider, useToast } from "./Toast";
@@ -303,5 +304,26 @@ describe("AttemptBadge atLeast", () => {
   it("claims exact counts when fully loaded", () => {
     render(<AttemptBadge attempts={5} failures={2} atLeast={false} />);
     expect(screen.getByText("5 attempts, 2 failed")).toBeInTheDocument();
+  });
+});
+
+describe("ThemeToggle", () => {
+  it("applies and persists the picked theme", async () => {
+    const user = userEvent.setup();
+    render(<ThemeToggle />);
+
+    await user.click(screen.getByRole("button", { name: "Dark" }));
+    expect(document.documentElement.dataset["theme"]).toBe("dark");
+    expect(localStorage.getItem("shepherd-theme")).toBe("dark");
+    expect(screen.getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByRole("button", { name: "Light" }));
+    expect(document.documentElement.dataset["theme"]).toBe("light");
+
+    // System resolves to light in jsdom (no matchMedia → not dark).
+    await user.click(screen.getByRole("button", { name: "System" }));
+    expect(document.documentElement.dataset["theme"]).toBe("light");
+    localStorage.clear();
+    delete document.documentElement.dataset["theme"];
   });
 });
