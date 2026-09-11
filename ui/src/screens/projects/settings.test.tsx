@@ -177,3 +177,43 @@ describe("Settings state isolation", () => {
     await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Beta proj"));
   });
 });
+
+const settingsProject = project({
+  name: "Access proj",
+  description: "for agent access tests",
+  settings: { review_gate: true },
+});
+
+function renderSettingsHarness() {
+  return renderRoute(`/projects/${settingsProject.id}/settings`, {
+    handlers: [getGetProjectMockHandler(settingsProject)],
+  });
+}
+
+describe("Agent access", () => {
+  it("shows server URL, project id, and connection check with copy buttons", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderSettingsHarness();
+    expect(await screen.findByText("Agent access")).toBeInTheDocument();
+
+    // Project id rendered as copyable code
+    const idNodes = screen.getAllByText(settingsProject.id);
+    expect(idNodes.length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByRole("button", { name: "Copy project ID" }));
+    expect(writeText).toHaveBeenCalledWith(settingsProject.id);
+    expect(await screen.findByText("Copied ✓")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Copy connection check command" }));
+    expect(writeText).toHaveBeenLastCalledWith(
+      expect.stringContaining(`/api/v1/projects/${settingsProject.id}/next-task`),
+    );
+  });
+
+  it("shows created/updated metadata in the General card", async () => {
+    renderSettingsHarness();
+    expect(await screen.findByText(/Created .* · updated /)).toBeInTheDocument();
+  });
+});
