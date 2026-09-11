@@ -121,3 +121,26 @@ describe("Sidebar", () => {
     expect(reviewLink).toHaveTextContent(/^Review$/);
   });
 });
+
+describe("Combined review badge", () => {
+  const proj = project({ name: "Alpha" });
+
+  it("counts work in review and proposals together", async () => {
+    renderRoute(`/projects/${proj.id}`, {
+      handlers: [
+        getGetProjectMockHandler(proj),
+        getListProjectsMockHandler(page([proj])),
+        getListTasksMockHandler(({ request }) => {
+          const status = new URL(request.url).searchParams.get("status");
+          if (status === "in_review") {
+            return page([task({ status: "in_review" }), task({ status: "in_review" })]);
+          }
+          if (status === "proposed") return page([task({ status: "proposed" })]);
+          return page([]);
+        }),
+      ],
+    });
+    const reviewLink = await screen.findByRole("link", { name: /^Review/ });
+    expect(await within(reviewLink).findByText("3")).toBeInTheDocument();
+  });
+});

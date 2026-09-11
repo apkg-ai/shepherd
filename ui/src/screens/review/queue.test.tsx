@@ -155,3 +155,33 @@ describe("Review queue", () => {
     expect(await screen.findByText("No proposals waiting")).toBeInTheDocument();
   });
 });
+
+describe("Tab counts", () => {
+  const proj = project({ name: "Tab counts" });
+
+  it("shows first-page-honest counts on both tabs", async () => {
+    renderRoute(`/projects/${proj.id}/review`, {
+      handlers: [
+        getGetProjectMockHandler(proj),
+        getListTasksMockHandler(({ request }) => {
+          const status = new URL(request.url).searchParams.get("status");
+          if (status === "in_review") return page([task({ status: "in_review" })]);
+          if (status === "proposed") return page([task({ status: "proposed" })]);
+          return page([]);
+        }),
+      ],
+    });
+    const inReviewTab = await screen.findByRole("tab", { name: "In review" });
+    expect(await within(inReviewTab).findByText("1")).toBeInTheDocument();
+    const proposalsTab = screen.getByRole("tab", { name: "Proposals" });
+    expect(await within(proposalsTab).findByText("1")).toBeInTheDocument();
+  });
+
+  it("omits counts for empty queues", async () => {
+    renderRoute(`/projects/${project().id}/review`, {
+      handlers: [getListTasksMockHandler(page([]))],
+    });
+    const inReviewTab = await screen.findByRole("tab", { name: "In review" });
+    expect(within(inReviewTab).queryByText(/\d/)).not.toBeInTheDocument();
+  });
+});

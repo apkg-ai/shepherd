@@ -35,15 +35,21 @@ function ProjectSwitcher({ activeProjectId }: { activeProjectId?: string }) {
 }
 
 /**
- * Count of tasks awaiting review — first-page honest: cursor pagination
- * can't give exact totals, so past one page it reads "25+".
+ * Everything waiting on a human: work in review plus agent proposals.
+ * First-page honest — cursor pagination can't give exact totals, so past
+ * one page the count gets a "+". Query keys match the review screen's tab
+ * counts, so both refresh together off the existing task invalidations.
  */
 function ReviewBadge({ projectId }: { projectId: string }) {
-  const { data } = useListTasks(projectId, { status: "in_review", limit: 25 });
-  if (!data || data.items.length === 0) return null;
+  const inReview = useListTasks(projectId, { status: "in_review", limit: 25 });
+  const proposed = useListTasks(projectId, { status: "proposed", limit: 25 });
+  const count = (inReview.data?.items.length ?? 0) + (proposed.data?.items.length ?? 0);
+  if (count === 0) return null;
+  const hedged = inReview.data?.has_more === true || proposed.data?.has_more === true;
   return (
     <span className={styles.badge}>
-      {data.has_more ? `${data.items.length}+` : data.items.length}
+      {count}
+      {hedged ? "+" : ""}
     </span>
   );
 }

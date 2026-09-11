@@ -5,6 +5,7 @@ import type { Task } from "../../api/generated/model";
 import {
   useApproveTask,
   useCancelTask,
+  useListTasks,
   useListTasksInfinite,
   useRejectTask,
 } from "../../api/generated/tasks/tasks";
@@ -36,6 +37,18 @@ export function ReviewQueueScreen() {
   return <ReviewQueue projectId={projectId} />;
 }
 
+/** First-page-honest tab count — same query key as the sidebar badge. */
+function TabCount({ projectId, status }: { projectId: string; status: "in_review" | "proposed" }) {
+  const { data } = useListTasks(projectId, { status, limit: 25 });
+  if (!data || data.items.length === 0) return null;
+  return (
+    <span className={styles.tabCount} aria-hidden="true">
+      {data.items.length}
+      {data.has_more ? "+" : ""}
+    </span>
+  );
+}
+
 function ReviewQueue({ projectId }: { projectId: string }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: Tab = searchParams.get("tab") === "proposals" ? "proposals" : "in_review";
@@ -62,6 +75,7 @@ function ReviewQueue({ projectId }: { projectId: string }) {
           onClick={() => setTab("in_review")}
         >
           In review
+          <TabCount projectId={projectId} status="in_review" />
         </button>
         <button
           type="button"
@@ -71,6 +85,7 @@ function ReviewQueue({ projectId }: { projectId: string }) {
           onClick={() => setTab("proposals")}
         >
           Proposals
+          <TabCount projectId={projectId} status="proposed" />
         </button>
       </div>
       {tab === "in_review" ? (

@@ -71,3 +71,16 @@
   display: flex;
   gap: var(--space-2);
 }
+
+.tabCount {
+  display: inline-block;
+  margin-left: var(--space-2);
+  min-width: 18px;
+  text-align: center;
+  padding: 0 var(--space-1);
+  border-radius: 999px;
+  background: var(--color-attention-soft);
+  color: var(--color-attention);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
