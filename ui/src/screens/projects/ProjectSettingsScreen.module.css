@@ -1,9 +1,7 @@
 .wrap {
-  /* Two-column card layout on wide screens; the form column stays a
-     readable width, utility cards fill the right. Capped only for
-     ultra-wide monitors. */
+  /* Two-column card layout, flush against the sidebar like every other
+     screen; capped only so ultra-wide monitors don't stretch the forms. */
   max-width: 1360px;
-  margin-inline: auto;
 }
 
 .columns {
