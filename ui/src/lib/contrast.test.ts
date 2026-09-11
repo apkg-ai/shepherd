@@ -98,6 +98,8 @@ const PAIRS: Pair[] = [
   { fg: "success", bg: "success-soft", min: AA_TEXT, note: "success accents on soft fill" },
   { fg: "warning", bg: "warning-soft", min: AA_TEXT, note: "blocked badge, waits-on chip" },
   { fg: "attention", bg: "attention-soft", min: AA_TEXT, note: "in_review badge, tab counts" },
+  { fg: "pink", bg: "pink-soft", min: AA_TEXT, note: "proposed badge" },
+  { fg: "teal", bg: "teal-soft", min: AA_TEXT, note: "approved badge" },
   { fg: "bg", bg: "attention", min: AA_TEXT, note: "sidebar review badge (inverted)" },
   // Toast messages inherit --color-text over soft fills
   { fg: "text", bg: "success-soft", min: AA_TEXT, note: "toast success message" },
