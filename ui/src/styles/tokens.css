@@ -1,0 +1,82 @@
+/*
+ * Design tokens (S7). Single source for color/spacing/typography and the
+ * per-status visual language from docs/04-ui.md — S8's graph view reuses the
+ * same --status-* variables, so keep status styling here, not in components.
+ */
+:root {
+  /* Palette */
+  --color-bg: #ffffff;
+  --color-surface: #f6f7f9;
+  --color-surface-raised: #ffffff;
+  --color-border: #d7dbe0;
+  --color-border-strong: #aeb4bd;
+  --color-text: #1a1d21;
+  --color-text-muted: #5c6470;
+  --color-text-faint: #8b929c;
+
+  --color-accent: #2563eb;
+  --color-accent-soft: #dbe7fe;
+  --color-success: #15803d;
+  --color-success-soft: #dcf2e3;
+  --color-warning: #b45309;
+  --color-warning-soft: #fdedd3;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fde3e3;
+  --color-attention: #7c3aed;
+  --color-attention-soft: #ece3fd;
+
+  /* Status language (04-ui.md): proposed dashed, ready highlighted,
+     in_progress claimed, in_review flagged, done dimmed, blocked warning. */
+  --status-proposed-fg: var(--color-text-muted);
+  --status-proposed-bg: var(--color-bg);
+  --status-proposed-border: 1px dashed var(--color-border-strong);
+
+  --status-approved-fg: var(--color-text);
+  --status-approved-bg: var(--color-surface);
+  --status-approved-border: 1px solid var(--color-border);
+
+  --status-ready-fg: var(--color-accent);
+  --status-ready-bg: var(--color-accent-soft);
+  --status-ready-border: 1px solid var(--color-accent);
+
+  --status-in_progress-fg: #ffffff;
+  --status-in_progress-bg: var(--color-accent);
+  --status-in_progress-border: 1px solid var(--color-accent);
+
+  --status-in_review-fg: var(--color-attention);
+  --status-in_review-bg: var(--color-attention-soft);
+  --status-in_review-border: 1px solid var(--color-attention);
+
+  --status-done-fg: var(--color-text-faint);
+  --status-done-bg: var(--color-surface);
+  --status-done-border: 1px solid var(--color-border);
+
+  --status-blocked-fg: var(--color-warning);
+  --status-blocked-bg: var(--color-warning-soft);
+  --status-blocked-border: 1px solid var(--color-warning);
+
+  --status-cancelled-fg: var(--color-text-faint);
+  --status-cancelled-bg: var(--color-bg);
+  --status-cancelled-border: 1px solid var(--color-border);
+
+  /* Spacing / shape */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-1: 4px;
+  --radius-2: 8px;
+  --shadow-1: 0 1px 3px rgb(0 0 0 / 12%);
+  --shadow-2: 0 8px 30px rgb(0 0 0 / 18%);
+
+  /* Typography */
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+}

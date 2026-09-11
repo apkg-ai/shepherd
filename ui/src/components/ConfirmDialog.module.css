@@ -1,0 +1,10 @@
+.body {
+  margin-bottom: var(--space-5);
+  color: var(--color-text-muted);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}

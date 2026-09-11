@@ -1,0 +1,44 @@
+.topBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.brand {
+  font-size: var(--text-lg);
+}
+
+.brandLink {
+  color: var(--color-text);
+}
+
+.projectNav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.projectName {
+  font-weight: 600;
+  margin-right: var(--space-2);
+}
+
+.navLink {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  padding: var(--space-1) 0;
+}
+
+.navLinkActive {
+  color: var(--color-accent);
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: var(--space-5);
+}

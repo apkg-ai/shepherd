@@ -16,6 +16,18 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: [["text"], ["lcovonly", { file: "ui-unit.lcov" }]],
+      // Explicit include so untested src files count against the gate instead
+      // of silently missing from the report (and CSS stays out of the lcov).
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        // Spec-derived code is gated by ui-generated-drift, not coverage —
+        // mirrors core ignoring src/generated/ in llvm-cov.
+        "src/api/generated/**",
+        // Entry point is exercised by scripts/smoke.sh, mirroring main.rs.
+        "src/main.tsx",
+        "src/test/**",
+        "src/test-setup.ts",
+      ],
     },
   },
 });
