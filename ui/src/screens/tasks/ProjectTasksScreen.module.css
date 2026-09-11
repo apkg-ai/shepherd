@@ -70,13 +70,22 @@
   background: none;
   cursor: pointer;
   color: var(--color-text-muted);
-  font-size: var(--text-xs);
-  width: 18px;
+  font-size: var(--text-md);
+  line-height: 1;
+  width: 22px;
+  height: 22px;
   padding: 0;
+  border-radius: var(--radius-1);
+  flex-shrink: 0;
+}
+
+.collapse:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
 }
 
 .collapseSpacer {
-  width: 18px;
+  width: 22px;
   flex-shrink: 0;
 }
 

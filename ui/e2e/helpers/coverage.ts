@@ -1,3 +1,5 @@
+/* oxlint-disable react-hooks/rules-of-hooks -- Playwright fixtures name their
+   continuation `use`; nothing React-y happens in this file. */
 /**
  * Coverage-aware `test`: with E2E_COVERAGE set (CI does), every page collects
  * Chromium V8 coverage and feeds it to monocart, which unpacks sourcemaps and
