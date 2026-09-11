@@ -113,13 +113,15 @@
    alone reads too weak inside a table. Decorative (structure is also
    conveyed by indent, chevron, and the subtask chip). */
 .elbow {
-  width: 12px;
-  height: 16px;
-  margin-top: -14px;
+  width: 14px;
+  height: 18px;
+  margin-top: -16px;
   margin-right: 2px;
-  border-left: 2px solid var(--color-border-strong);
-  border-bottom: 2px solid var(--color-border-strong);
-  border-bottom-left-radius: 7px;
+  /* text-faint, not border-strong: this is an informational structure marker
+     and border-strong sat near 2:1 — the AA-gated faint token stays ~5:1. */
+  border-left: 2px solid var(--color-text-faint);
+  border-bottom: 2px solid var(--color-text-faint);
+  border-bottom-left-radius: 8px;
   flex-shrink: 0;
 }
 
