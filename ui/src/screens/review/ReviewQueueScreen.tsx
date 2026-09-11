@@ -96,6 +96,7 @@ function ReviewQueue({ projectId }: { projectId: string }) {
     "aria-controls": `review-panel-${value}`,
     tabIndex: tab === value ? 0 : -1,
     className: tab === value ? styles.tabActive : styles.tab,
+    onKeyDown: onTablistKeyDown,
     ref: (el: HTMLButtonElement | null) => {
       if (el) tabRefs.current.set(value, el);
       else tabRefs.current.delete(value);
@@ -109,12 +110,10 @@ function ReviewQueue({ projectId }: { projectId: string }) {
         title="Review"
         description="Everything waiting on a human: agent work to approve or reject, and proposals to triage."
       />
-      <div
-        role="tablist"
-        aria-label="Review queues"
-        className={styles.tabs}
-        onKeyDown={onTablistKeyDown}
-      >
+      {/* Keyboard handling lives on the tab buttons (roving tabindex);
+          tabIndex={-1} satisfies interactive-supports-focus without adding
+          the container to the tab order. */}
+      <div role="tablist" aria-label="Review queues" className={styles.tabs} tabIndex={-1}>
         <button {...tabProps("in_review")}>
           In review
           <TabCount projectId={projectId} status="in_review" />

@@ -191,3 +191,40 @@ describe("Tab counts", () => {
     expect(within(inReviewTab).queryByText(/\d/)).not.toBeInTheDocument();
   });
 });
+
+describe("Tab keyboard navigation", () => {
+  it("moves selection and focus with arrows, Home, and End", async () => {
+    const proj = project({ name: "Kbd" });
+    renderRoute(`/projects/${proj.id}/review`, {
+      handlers: [getGetProjectMockHandler(proj), getListTasksMockHandler(page([]))],
+    });
+    const inReview = await screen.findByRole("tab", { name: /^In review/ });
+    inReview.focus();
+
+    await userEvent.keyboard("{ArrowRight}");
+    const proposals = screen.getByRole("tab", { name: /^Proposals/ });
+    expect(proposals).toHaveFocus();
+    expect(proposals).toHaveAttribute("aria-selected", "true");
+    // Roving tabindex: the unselected tab leaves the tab order.
+    expect(screen.getByRole("tab", { name: /^In review/ })).toHaveAttribute("tabindex", "-1");
+
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(screen.getByRole("tab", { name: /^In review/ })).toHaveFocus();
+
+    await userEvent.keyboard("{End}");
+    expect(screen.getByRole("tab", { name: /^Proposals/ })).toHaveFocus();
+    await userEvent.keyboard("{Home}");
+    expect(screen.getByRole("tab", { name: /^In review/ })).toHaveFocus();
+  });
+
+  it("links tabs to the visible tabpanel", async () => {
+    const proj = project({ name: "Panel" });
+    renderRoute(`/projects/${proj.id}/review`, {
+      handlers: [getGetProjectMockHandler(proj), getListTasksMockHandler(page([]))],
+    });
+    const tab = await screen.findByRole("tab", { name: /^In review/ });
+    const panel = screen.getByRole("tabpanel");
+    expect(tab).toHaveAttribute("aria-controls", panel.id);
+    expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+  });
+});
