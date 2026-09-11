@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./helpers/coverage";
 
 test.describe("dark theme", () => {
   test("manual toggle applies and survives reload", async ({ page }) => {

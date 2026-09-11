@@ -8,6 +8,7 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e",
+  globalTeardown: "./e2e/helpers/global-teardown",
   outputDir: "./e2e-artifacts/test-results",
   fullyParallel: false,
   // One worker: specs share a server and seed real data — determinism over speed.

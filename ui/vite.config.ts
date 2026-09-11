@@ -5,6 +5,9 @@ import { defineConfig } from "vite";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // Sourcemaps let the E2E coverage collector (monocart) map Chromium's V8
+  // coverage back to src/ files; harmless in a local tool's dist.
+  build: { sourcemap: true },
   server: {
     proxy: {
       "/api": "http://127.0.0.1:7437",

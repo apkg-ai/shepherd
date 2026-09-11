@@ -36,6 +36,7 @@
     "@vitejs/plugin-react": "^6.1.0",
     "@vitest/coverage-v8": "^5.0.0",
     "jsdom": "^30.0.1",
+    "monocart-coverage-reports": "^2.13.0",
     "msw": "^2.15.0",
     "orval": "^8.31.0",
     "oxfmt": "^0.66.0",

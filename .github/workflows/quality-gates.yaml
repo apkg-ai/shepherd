@@ -360,6 +360,7 @@ jobs:
       - core-test-unit
       - core-test-integration
       - ui-test-unit
+      - test-e2e
     if: ${{ !cancelled() }}
     permissions:
       contents: read
@@ -695,6 +696,14 @@ jobs:
 
       - name: Run E2E suite
         run: scripts/playwright-e2e.sh
+        env:
+          E2E_COVERAGE: "1"
+
+      - name: Upload Coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-e2e
+          path: ui/coverage/e2e.lcov
 
       - name: Upload traces on failure
         if: failure()

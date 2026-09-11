@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./helpers/coverage";
 import { createProject, createTask, exportProject } from "./helpers/api";
 
 test.describe("project registry", () => {
