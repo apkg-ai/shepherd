@@ -1,0 +1,139 @@
+/*
+ * Design tokens (S7). Single source for color/spacing/typography and the
+ * per-status visual language from docs/04-ui.md — S8's graph view reuses the
+ * same --status-* variables, so keep status styling here, not in components.
+ *
+ * Every fg/bg pairing is WCAG-AA gated by src/lib/contrast.test.ts (4.5:1
+ * text, 3:1 non-text) in BOTH themes — change a value here and that test
+ * tells you exactly which pairing broke.
+ */
+:root {
+  color-scheme: light;
+
+  /* Palette */
+  --color-bg: #ffffff;
+  --color-surface: #f6f7f9;
+  --color-surface-raised: #ffffff;
+  --color-border: #d7dbe0;
+  --color-border-strong: #aeb4bd;
+  --color-text: #1a1d21;
+  --color-text-muted: #4b5563;
+  --color-text-faint: #646d7a;
+
+  --color-accent: #1d4ed8;
+  --color-accent-soft: #dbe7fe;
+  --color-success: #166534;
+  --color-success-soft: #dcf2e3;
+  --color-warning: #92400e;
+  --color-warning-soft: #fdedd3;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fde3e3;
+  --color-attention: #6d28d9;
+  --color-attention-soft: #ece3fd;
+
+  /* Status-only hue families (see the status language below). */
+  --color-teal: #115e59;
+  --color-teal-soft: #ccfbf1;
+  --color-pink: #9d174d;
+  --color-pink-soft: #fce7f3;
+
+  /* Text on accent-filled surfaces (primary buttons, in_progress chip). */
+  --color-on-accent: #ffffff;
+
+  /* Status language (04-ui.md): one hue per status so lists speed-scan —
+     proposed pink+dashed, approved teal, ready blue, in_progress solid blue
+     (the only filled badge, + claimant chip), in_review violet+flag, done
+     green, blocked amber; cancelled is the only grey (+ strikethrough). */
+  --status-proposed-fg: var(--color-pink);
+  --status-proposed-bg: var(--color-pink-soft);
+  --status-proposed-border: 1px dashed var(--color-pink);
+
+  --status-approved-fg: var(--color-teal);
+  --status-approved-bg: var(--color-teal-soft);
+  --status-approved-border: 1px solid var(--color-teal);
+
+  --status-ready-fg: var(--color-accent);
+  --status-ready-bg: var(--color-accent-soft);
+  --status-ready-border: 1px solid var(--color-accent);
+
+  --status-in_progress-fg: var(--color-on-accent);
+  --status-in_progress-bg: var(--color-accent);
+  --status-in_progress-border: 1px solid var(--color-accent);
+
+  --status-in_review-fg: var(--color-attention);
+  --status-in_review-bg: var(--color-attention-soft);
+  --status-in_review-border: 1px solid var(--color-attention);
+
+  --status-done-fg: var(--color-success);
+  --status-done-bg: var(--color-success-soft);
+  --status-done-border: 1px solid var(--color-success);
+
+  --status-blocked-fg: var(--color-warning);
+  --status-blocked-bg: var(--color-warning-soft);
+  --status-blocked-border: 1px solid var(--color-warning);
+
+  --status-cancelled-fg: var(--color-text-faint);
+  --status-cancelled-bg: var(--color-bg);
+  --status-cancelled-border: 1px solid var(--color-border);
+
+  /* Spacing / shape */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-1: 4px;
+  --radius-2: 8px;
+  --shadow-1: 0 1px 3px rgb(0 0 0 / 12%);
+  --shadow-2: 0 8px 30px rgb(0 0 0 / 18%);
+
+  /* Typography */
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+}
+
+/* Dark theme. `data-theme` on <html> always holds the RESOLVED theme —
+   "system" is a stored preference resolved in src/lib/theme.ts (and the
+   pre-paint script in index.html), so one block serves both explicit dark
+   and system-dark. Status tokens derive from the palette and retheme
+   automatically. */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #0f1216;
+  --color-surface: #171b21;
+  --color-surface-raised: #1d232b;
+  --color-border: #2a313b;
+  --color-border-strong: #4b5563;
+  --color-text: #e6e9ed;
+  --color-text-muted: #a8b1bc;
+  --color-text-faint: #87919e;
+
+  --color-accent: #60a5fa;
+  --color-accent-soft: #1c2f4d;
+  --color-success: #34d399;
+  --color-success-soft: #12291f;
+  --color-warning: #e8a33d;
+  --color-warning-soft: #2e2412;
+  --color-danger: #f87171;
+  --color-danger-soft: #341a1a;
+  --color-attention: #a78bfa;
+  --color-attention-soft: #251b3a;
+
+  --color-teal: #2dd4bf;
+  --color-teal-soft: #10312b;
+  --color-pink: #f472b6;
+  --color-pink-soft: #331522;
+
+  /* Accent is light in dark mode — dark text keeps the chip legible. */
+  --color-on-accent: #0c1220;
+
+  --shadow-1: 0 1px 3px rgb(0 0 0 / 45%);
+  --shadow-2: 0 8px 30px rgb(0 0 0 / 60%);
+}

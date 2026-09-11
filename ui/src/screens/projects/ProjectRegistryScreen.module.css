@@ -1,0 +1,16 @@
+.card {
+  composes: card from "../../styles/surfaces.module.css";
+  overflow: hidden;
+}
+
+.table {
+  composes: table from "../../styles/surfaces.module.css";
+}
+
+.description {
+  color: var(--color-text-muted);
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

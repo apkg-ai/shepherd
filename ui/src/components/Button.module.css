@@ -1,0 +1,39 @@
+.button {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-1);
+  border: 1px solid transparent;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.button:disabled {
+  /* Below AA on purpose — WCAG 1.4.3 exempts inactive controls, and the
+     reduced contrast IS the disabled affordance. Not covered by the gate. */
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.secondary {
+  background: var(--color-bg);
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.danger {
+  background: var(--color-bg);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-accent);
+}

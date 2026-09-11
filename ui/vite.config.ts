@@ -5,6 +5,9 @@ import { defineConfig } from "vite";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // Sourcemaps let the E2E coverage collector (monocart) map Chromium's V8
+  // coverage back to src/ files; harmless in a local tool's dist.
+  build: { sourcemap: true },
   server: {
     proxy: {
       "/api": "http://127.0.0.1:7437",
@@ -13,9 +16,24 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["src/test-setup.ts"],
+    // Vitest owns src/**/*.test.* only — Playwright specs live in e2e/ and
+    // would otherwise match vitest's default *.spec.* include.
+    include: ["src/**/*.test.{ts,tsx}"],
     coverage: {
       provider: "v8",
       reporter: [["text"], ["lcovonly", { file: "ui-unit.lcov" }]],
+      // Explicit include so untested src files count against the gate instead
+      // of silently missing from the report (and CSS stays out of the lcov).
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        // Spec-derived code is gated by ui-generated-drift, not coverage —
+        // mirrors core ignoring src/generated/ in llvm-cov.
+        "src/api/generated/**",
+        // Entry point is exercised by scripts/smoke.sh, mirroring main.rs.
+        "src/main.tsx",
+        "src/test/**",
+        "src/test-setup.ts",
+      ],
     },
   },
 });

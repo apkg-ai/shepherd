@@ -27,8 +27,8 @@ const REPORTS = {
     title: "Coverage — UI (TypeScript)",
     suites: {
       "ui-unit": { label: "Unit", threshold: 95 },
-      // Enforced automatically once the suite's lcov exists (Playwright, S9).
-      "e2e": { label: "E2E", threshold: 50, pending: "S9" },
+      // Playwright suite (test-e2e job) — monocart emits coverage/e2e.lcov.
+      "e2e": { label: "E2E", threshold: 50 },
     },
     total: 92,
   },

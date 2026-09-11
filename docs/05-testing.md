@@ -13,7 +13,7 @@
 | **Contract** | Every live response conforms to `openapi/shepherd.yaml`; spec drift fails CI. The spec is the coupling point for bbq/CLI/MCP — this layer is critical. | Spectral (static) + dynamic conformance in integration tests |
 | **Migration** | Every `sqlx` migration applies cleanly on seeded fixture DBs; existing data survives. A long-lived local hub makes data loss the worst failure mode. | `sqlx` test harness |
 | **API E2E** | The REST contract over a real socket: a booted server on a fresh DB driven by plain HTTP scripts — CRUD, lifecycle actions, relations, error shapes. Complements the in-process integration layer by exercising the real binary and wire bytes. | `hurl` (`scripts/hurl-e2e.sh`, `tests/hurl/*.hurl`) |
-| **E2E** | Browser driving the real UI against a real server: register → create/approve → both graph lenses → live SSE update → review queue. | Playwright |
+| **E2E** | Browser driving the real UI against a real server: register → create/approve → both graph lenses → live SSE update → review queue. Includes an axe WCAG AA audit of every screen in both themes and keyboard-navigation checks. | Playwright |
 | **Smoke** | Seconds-fast boot sanity: server starts on a fresh DB, `/health` OK, spec served, UI index loads. Gates every PR and release artifact. | Minimal CI script |
 | **Fuzz** | Untrusted input boundaries: task `metadata` JSON, graph mutation payloads, query params, import documents. | `cargo-fuzz` — short per PR, deep nightly |
 
@@ -36,7 +36,7 @@ lifecycle invariants are where logic bugs live; fuzz earns its keep on the parse
 Coverage is gated in CI (`cargo-llvm-cov`, vitest coverage), scoped so each suite measures the code it
 owns (unit → `shepherd-core` + `ui/src`, integration → server lib; `main.rs` is smoke-covered). Two
 sticky PR reports — Core (Rust) and UI (TypeScript) — each union-merged. Thresholds on lines:
-unit ≥ 95%, integration ≥ 70%, e2e ≥ 50% (enforced from S9), per-report total ≥ 92%.
+unit ≥ 95%, integration ≥ 70%, e2e ≥ 50%, per-report total ≥ 92%.
 
 The CI skeleton lands in **S1** and every subsequent session ends green — no session merges red
 ([06-roadmap.md](06-roadmap.md)).
@@ -45,4 +45,3 @@ The CI skeleton lands in **S1** and every subsequent session ends green — no s
 
 - Load/envelope test: seed low-thousands of tasks, endpoints and graph stay responsive.
 - Visual regression on the graph lenses.
-- Accessibility checks (axe in Playwright).

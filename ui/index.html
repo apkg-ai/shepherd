@@ -5,6 +5,22 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>shepherd</title>
+    <script>
+      // Pre-paint theme resolution (mirrors src/lib/theme.ts) — sets the
+      // resolved theme before first paint so dark mode never flashes light.
+      (function () {
+        var preference = null;
+        try {
+          preference = localStorage.getItem("shepherd-theme");
+        } catch (e) {}
+        var dark =
+          preference === "dark" ||
+          (preference !== "light" &&
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

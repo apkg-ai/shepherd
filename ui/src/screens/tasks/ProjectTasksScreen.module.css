@@ -1,0 +1,156 @@
+.newTask {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-1);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.newTask:hover {
+  text-decoration: none;
+}
+
+.filters {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.card {
+  composes: card from "../../styles/surfaces.module.css";
+  overflow: hidden;
+}
+
+.table {
+  composes: table from "../../styles/surfaces.module.css";
+}
+
+.row {
+  /* Status-tinted accent along the row edge, driven by data-status. */
+  box-shadow: inset 3px 0 0 var(--row-accent, transparent);
+}
+
+.row[data-status="ready"] {
+  --row-accent: var(--color-accent);
+}
+
+.row[data-status="in_progress"] {
+  --row-accent: var(--color-accent);
+}
+
+.row[data-status="in_review"] {
+  --row-accent: var(--color-attention);
+}
+
+.row[data-status="blocked"] {
+  --row-accent: var(--color-warning);
+}
+
+.statusCell {
+  width: 110px;
+}
+
+.titleCell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-left: calc(var(--depth, 0) * var(--space-5));
+}
+
+.collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-1);
+  flex-shrink: 0;
+}
+
+.collapse:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.chevron,
+.chevronOpen {
+  transition: transform 120ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.collapseSpacer {
+  width: 24px;
+  flex-shrink: 0;
+}
+
+/* Child rows sit on a faint band between raised and surface so nested
+   items read as a group; hover still steps up to the full surface tint. */
+.childRow {
+  background: color-mix(in srgb, var(--color-surface) 60%, transparent);
+}
+
+.childRow:hover {
+  background: var(--color-surface);
+}
+
+/* └ connector marking a row as belonging to the one above — indentation
+   alone reads too weak inside a table. Decorative (structure is also
+   conveyed by indent, chevron, and the subtask chip). */
+.elbow {
+  width: 14px;
+  height: 18px;
+  margin-top: -16px;
+  margin-right: 2px;
+  /* text-faint, not border-strong: this is an informational structure marker
+     and border-strong sat near 2:1 — the AA-gated faint token stays ~5:1. */
+  border-left: 2px solid var(--color-text-faint);
+  border-bottom: 2px solid var(--color-text-faint);
+  border-bottom-left-radius: 8px;
+  flex-shrink: 0;
+}
+
+.chip {
+  font-size: var(--text-xs);
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+  white-space: nowrap;
+}
+
+.chipWaiting {
+  composes: chip;
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.parentCrumb {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.muted {
+  color: var(--color-text-muted);
+}

@@ -1,0 +1,59 @@
+.badge {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge[data-status="proposed"] {
+  color: var(--status-proposed-fg);
+  background: var(--status-proposed-bg);
+  border: var(--status-proposed-border);
+}
+
+.badge[data-status="approved"] {
+  color: var(--status-approved-fg);
+  background: var(--status-approved-bg);
+  border: var(--status-approved-border);
+}
+
+.badge[data-status="ready"] {
+  color: var(--status-ready-fg);
+  background: var(--status-ready-bg);
+  border: var(--status-ready-border);
+}
+
+.badge[data-status="in_progress"] {
+  color: var(--status-in_progress-fg);
+  background: var(--status-in_progress-bg);
+  border: var(--status-in_progress-border);
+}
+
+.badge[data-status="in_review"] {
+  color: var(--status-in_review-fg);
+  background: var(--status-in_review-bg);
+  border: var(--status-in_review-border);
+}
+
+.badge[data-status="done"] {
+  /* No opacity here: stacking it under the faint token broke WCAG AA
+     (effective 2.29:1). --color-text-faint alone carries the dimmed look. */
+  color: var(--status-done-fg);
+  background: var(--status-done-bg);
+  border: var(--status-done-border);
+}
+
+.badge[data-status="blocked"] {
+  color: var(--status-blocked-fg);
+  background: var(--status-blocked-bg);
+  border: var(--status-blocked-border);
+}
+
+.badge[data-status="cancelled"] {
+  color: var(--status-cancelled-fg);
+  background: var(--status-cancelled-bg);
+  border: var(--status-cancelled-border);
+  text-decoration: line-through;
+}

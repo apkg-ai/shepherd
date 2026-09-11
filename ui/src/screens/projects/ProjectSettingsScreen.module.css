@@ -1,0 +1,135 @@
+.wrap {
+  /* Two-column card layout, flush against the sidebar like every other
+     screen; capped only so ultra-wide monitors don't stretch the forms. */
+  max-width: 1360px;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.card {
+  composes: card from "../../styles/surfaces.module.css";
+  padding: var(--space-5);
+}
+
+.cardDanger {
+  composes: card;
+  border-color: var(--color-danger);
+}
+
+.cardHeader {
+  margin-bottom: var(--space-4);
+}
+
+.cardHeader h3 {
+  margin-bottom: var(--space-1);
+}
+
+.gateRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  background: var(--color-surface);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
+}
+
+.cardFooter {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-4);
+}
+
+.actionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+
+.actionRow h3 {
+  margin-bottom: var(--space-1);
+}
+
+.actionRow > div {
+  max-width: 460px;
+}
+
+.dangerTitle {
+  color: var(--color-danger);
+}
+
+.formError {
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.metaLine {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
+.accessList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.accessList dt {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  margin-top: var(--space-2);
+}
+
+.accessList dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  padding: var(--space-1) var(--space-2);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.actionRow button {
+  white-space: nowrap;
+}
