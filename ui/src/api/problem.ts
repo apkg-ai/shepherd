@@ -61,7 +61,7 @@ export function errorSlug(err: ShepherdError): string {
 export function fieldErrors(err: ShepherdError): Record<string, string> {
   const map: Record<string, string> = {};
   for (const e of err.errors ?? []) {
-    const key = e.field.replace(/^\//, "").replaceAll("/", ".");
+    const key = e.field.replace(/^\//, "").replace(/\//g, ".");
     if (!(key in map)) map[key] = e.message;
   }
   return map;

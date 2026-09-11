@@ -48,8 +48,13 @@ jobs:
           # a paid feature for private repos. The artifact is the audit
           # trail; pull it from the run page when triaging.
           # Security packs (rust/js/ts/owasp) plus code-quality packs
-          # (best-practices). The jsx-not-internationalized rule is excluded:
-          # shepherd's v1 UI is a local, English-only tool — no i18n planned.
+          # (best-practices). Two rules are excluded, both from the
+          # code-quality packs:
+          # - jsx-not-internationalized: shepherd's v1 UI is a local,
+          #   English-only tool — no i18n planned.
+          # - react-props-spreading: the UI forwards rest props on wrapper
+          #   components (Button, FormField, tabProps) — the standard React
+          #   wrapper pattern, not an injection risk.
           docker run --rm \
             -v "$PWD:/src" \
             -w /src \
@@ -62,7 +67,8 @@ jobs:
               --config p/owasp-top-ten \
               --config p/r2c-best-practices \
               --config p/react-best-practices \
-              --exclude-rule typescript.react.portability.i18next.jsx-not-internationalized.jsx-not-internationalized
+              --exclude-rule typescript.react.portability.i18next.jsx-not-internationalized.jsx-not-internationalized \
+              --exclude-rule typescript.react.best-practice.react-props-spreading.react-props-spreading
 
       - name: Upload SARIF artifact
         if: always()
