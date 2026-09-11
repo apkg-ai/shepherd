@@ -292,6 +292,38 @@ jobs:
         run: |
           npm run build
 
+  ui-generated-drift:
+    name: UI / Generated code drift
+    runs-on: ubuntu-24.04-arm
+    # Regenerates src/api/generated from openapi/shepherd.yaml (orval + oxfmt,
+    # both pinned by ui/package-lock.json) and fails on any diff, so spec edits
+    # cannot leave the committed TypeScript client stale. Mirrors
+    # core-generated-drift for the Rust side.
+
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          npm ci --prefer-offline
+
+      - name: Regenerate and check for drift
+        run: |
+          npm run generate:api
+          git diff --exit-code -- src/api/generated
+
   spec-lint:
     name: Spec / Lint
     runs-on: ubuntu-24.04-arm
