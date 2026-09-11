@@ -47,10 +47,16 @@ function ReviewBadge({ projectId }: { projectId: string }) {
   if (count === 0) return null;
   const hedged = inReview.data?.has_more === true || proposed.data?.has_more === true;
   return (
-    <span className={styles.badge}>
-      {count}
-      {hedged ? "+" : ""}
-    </span>
+    <>
+      <span className={styles.badge} aria-hidden="true">
+        {count}
+        {hedged ? "+" : ""}
+      </span>
+      <span className="sr-only">
+        , {count}
+        {hedged ? " or more" : ""} waiting
+      </span>
+    </>
   );
 }
 

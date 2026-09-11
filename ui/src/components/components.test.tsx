@@ -327,3 +327,144 @@ describe("ThemeToggle", () => {
     delete document.documentElement.dataset["theme"];
   });
 });
+
+describe("Dialog focus management", () => {
+  function Host() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          opener
+        </button>
+        <Dialog open={open} title="Trapped" onClose={() => setOpen(false)}>
+          <input type="text" aria-label="First field" />
+          <button type="button">Last action</button>
+        </Dialog>
+      </>
+    );
+  }
+
+  it("traps Tab inside the panel and wraps around", async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    await user.click(screen.getByRole("button", { name: "opener" }));
+    const dialog = screen.getByRole("dialog", { name: "Trapped" });
+    expect(dialog).toHaveFocus();
+
+    // Panel DOM order: header Close button, then the children.
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByLabelText("First field")).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Last action" })).toHaveFocus();
+    // Tab from the last focusable wraps back to the first — never escapes.
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
+  });
+
+  it("wraps backwards with Shift+Tab from the first element", async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    await user.click(screen.getByRole("button", { name: "opener" }));
+    await user.tab(); // first focusable
+    await user.tab({ shift: true }); // back past the start → wraps to last
+    expect(screen.getByRole("button", { name: "Last action" })).toHaveFocus();
+  });
+
+  it("returns focus to the opener on close", async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    const opener = screen.getByRole("button", { name: "opener" });
+    await user.click(opener);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
+
+  it("closes on outside mousedown but not inside", async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    await user.click(screen.getByRole("button", { name: "opener" }));
+    await user.click(screen.getByLabelText("First field"));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await user.click(document.body);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("Toast pause (WCAG 2.2.1)", () => {
+  function Probe() {
+    const { toast } = useToast();
+    return (
+      <button type="button" onClick={() => toast("Hold me", "info")}>
+        fire
+      </button>
+    );
+  }
+
+  it("pauses auto-dismiss on hover and restarts on leave", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <ToastProvider>
+          <Probe />
+        </ToastProvider>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "fire" }));
+      const toast = screen.getByRole("status");
+
+      fireEvent.mouseEnter(toast);
+      act(() => vi.advanceTimersByTime(20000));
+      expect(screen.getByRole("status")).toBeInTheDocument();
+
+      fireEvent.mouseLeave(toast);
+      act(() => vi.advanceTimersByTime(5000));
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pauses while the dismiss button is focused", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <ToastProvider>
+          <Probe />
+        </ToastProvider>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "fire" }));
+      fireEvent.focus(screen.getByRole("button", { name: "Dismiss" }));
+      act(() => vi.advanceTimersByTime(20000));
+      expect(screen.getByRole("status")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("FormField hint exposure", () => {
+  it("links the hint via aria-describedby when no error", () => {
+    render(
+      <FormField label="Name" hint="Keep it short">
+        {(props) => <input {...props} type="text" />}
+      </FormField>,
+    );
+    const input = screen.getByLabelText("Name");
+    const hintId = input.getAttribute("aria-describedby");
+    expect(hintId).toBeTruthy();
+    expect(document.getElementById(hintId!)).toHaveTextContent("Keep it short");
+  });
+
+  it("prefers the error id when an error is shown", () => {
+    render(
+      <FormField label="Name" hint="Keep it short" error="required">
+        {(props) => <input {...props} type="text" />}
+      </FormField>,
+    );
+    const input = screen.getByLabelText("Name");
+    const describedBy = input.getAttribute("aria-describedby");
+    expect(document.getElementById(describedBy!)).toHaveTextContent("required");
+  });
+});

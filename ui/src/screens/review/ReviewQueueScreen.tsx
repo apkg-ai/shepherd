@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import type { Task } from "../../api/generated/model";
 import {
@@ -37,21 +37,34 @@ export function ReviewQueueScreen() {
   return <ReviewQueue projectId={projectId} />;
 }
 
-/** First-page-honest tab count — same query key as the sidebar badge. */
+/**
+ * First-page-honest tab count — same query key as the sidebar badge. The
+ * visible chip is aria-hidden; a screen-reader sibling announces the count
+ * as part of the tab's accessible name ("In review, 3 waiting").
+ */
 function TabCount({ projectId, status }: { projectId: string; status: "in_review" | "proposed" }) {
   const { data } = useListTasks(projectId, { status, limit: 25 });
   if (!data || data.items.length === 0) return null;
   return (
-    <span className={styles.tabCount} aria-hidden="true">
-      {data.items.length}
-      {data.has_more ? "+" : ""}
-    </span>
+    <>
+      <span className={styles.tabCount} aria-hidden="true">
+        {data.items.length}
+        {data.has_more ? "+" : ""}
+      </span>
+      <span className="sr-only">
+        , {data.items.length}
+        {data.has_more ? " or more" : ""} waiting
+      </span>
+    </>
   );
 }
+
+const TABS: Tab[] = ["in_review", "proposals"];
 
 function ReviewQueue({ projectId }: { projectId: string }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: Tab = searchParams.get("tab") === "proposals" ? "proposals" : "in_review";
+  const tabRefs = useRef(new Map<Tab, HTMLButtonElement>());
 
   const setTab = (next: Tab) => {
     setSearchParams((params) => {
@@ -60,39 +73,64 @@ function ReviewQueue({ projectId }: { projectId: string }) {
     });
   };
 
+  // WAI-ARIA tabs pattern, automatic activation: arrows move selection AND
+  // focus; the inactive tab leaves the tab order via roving tabindex.
+  const onTablistKeyDown = (event: React.KeyboardEvent) => {
+    const index = TABS.indexOf(tab);
+    let next: Tab | undefined;
+    if (event.key === "ArrowRight") next = TABS[(index + 1) % TABS.length];
+    else if (event.key === "ArrowLeft") next = TABS[(index - 1 + TABS.length) % TABS.length];
+    else if (event.key === "Home") next = TABS[0];
+    else if (event.key === "End") next = TABS[TABS.length - 1];
+    if (next === undefined || next === tab) return;
+    event.preventDefault();
+    setTab(next);
+    tabRefs.current.get(next)?.focus();
+  };
+
+  const tabProps = (value: Tab) => ({
+    type: "button" as const,
+    role: "tab",
+    id: `review-tab-${value}`,
+    "aria-selected": tab === value,
+    "aria-controls": `review-panel-${value}`,
+    tabIndex: tab === value ? 0 : -1,
+    className: tab === value ? styles.tabActive : styles.tab,
+    ref: (el: HTMLButtonElement | null) => {
+      if (el) tabRefs.current.set(value, el);
+      else tabRefs.current.delete(value);
+    },
+    onClick: () => setTab(value),
+  });
+
   return (
     <section>
       <PageHeader
         title="Review"
         description="Everything waiting on a human: agent work to approve or reject, and proposals to triage."
       />
-      <div role="tablist" className={styles.tabs}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "in_review"}
-          className={tab === "in_review" ? styles.tabActive : styles.tab}
-          onClick={() => setTab("in_review")}
-        >
+      <div
+        role="tablist"
+        aria-label="Review queues"
+        className={styles.tabs}
+        onKeyDown={onTablistKeyDown}
+      >
+        <button {...tabProps("in_review")}>
           In review
           <TabCount projectId={projectId} status="in_review" />
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "proposals"}
-          className={tab === "proposals" ? styles.tabActive : styles.tab}
-          onClick={() => setTab("proposals")}
-        >
+        <button {...tabProps("proposals")}>
           Proposals
           <TabCount projectId={projectId} status="proposed" />
         </button>
       </div>
-      {tab === "in_review" ? (
-        <InReviewTab projectId={projectId} />
-      ) : (
-        <ProposalsTab projectId={projectId} />
-      )}
+      <div role="tabpanel" id={`review-panel-${tab}`} aria-labelledby={`review-tab-${tab}`}>
+        {tab === "in_review" ? (
+          <InReviewTab projectId={projectId} />
+        ) : (
+          <ProposalsTab projectId={projectId} />
+        )}
+      </div>
     </section>
   );
 }

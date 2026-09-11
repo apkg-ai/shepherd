@@ -28,18 +28,40 @@ const AUTO_DISMISS_MS = 5000;
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const nextId = useRef(0);
+  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
   const dismiss = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer !== undefined) clearTimeout(timer);
+    timers.current.delete(id);
     setItems((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const startTimer = useCallback(
+    (id: number) => {
+      timers.current.set(
+        id,
+        setTimeout(() => dismiss(id), AUTO_DISMISS_MS),
+      );
+    },
+    [dismiss],
+  );
+
+  // WCAG 2.2.1: hovering or focusing a toast pauses auto-dismiss; leaving
+  // restarts the full window (restart, not resume — strictly more generous).
+  const pauseTimer = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer !== undefined) clearTimeout(timer);
+    timers.current.delete(id);
   }, []);
 
   const toast = useCallback(
     (message: string, kind: ToastKind = "info") => {
       const id = nextId.current++;
       setItems((prev) => [...prev, { id, kind, message }]);
-      setTimeout(() => dismiss(id), AUTO_DISMISS_MS);
+      startTimer(id);
     },
-    [dismiss],
+    [startTimer],
   );
 
   const value = useMemo(() => ({ toast }), [toast]);
@@ -53,6 +75,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             key={t.id}
             role={t.kind === "error" ? "alert" : "status"}
             className={`${styles.toast} ${styles[t.kind]}`}
+            onMouseEnter={() => pauseTimer(t.id)}
+            onMouseLeave={() => startTimer(t.id)}
+            onFocusCapture={() => pauseTimer(t.id)}
+            onBlurCapture={() => startTimer(t.id)}
           >
             <span>{t.message}</span>
             <button

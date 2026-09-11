@@ -73,7 +73,7 @@ export function RelationsPanel({ projectId, taskId }: { projectId: string; taskI
       <button
         type="button"
         className={styles.remove}
-        aria-label="Remove relation"
+        aria-label={`Remove relation to ${titles.get(otherId) ?? otherId}`}
         onClick={() => setPendingDelete(relation)}
       >
         ×

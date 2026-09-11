@@ -31,7 +31,7 @@ describe("App shell", () => {
 
     // → Review
     await userEvent.click(within(nav).getByRole("link", { name: /^Review/ }));
-    expect(await screen.findByRole("tab", { name: "In review" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: /^In review/ })).toBeInTheDocument();
 
     // → Settings
     await userEvent.click(within(nav).getByRole("link", { name: "Settings" }));

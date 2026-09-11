@@ -461,7 +461,7 @@ describe("Task detail", () => {
       ],
     });
 
-    await userEvent.click(await screen.findByRole("button", { name: "Remove relation" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Remove relation/ }));
     const dialog = screen.getByRole("dialog", { name: "Remove relation" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(deletedRelationId).toBe(rel.id));

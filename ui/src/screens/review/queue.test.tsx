@@ -43,7 +43,10 @@ describe("Review queue", () => {
   it("defaults to the in-review tab and lists waiting work", async () => {
     renderQueue();
     expect(await screen.findByText("Needs review")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "In review" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /^In review/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(screen.getByText("Agent A")).toBeInTheDocument();
     expect(screen.getByText("1 attempt")).toBeInTheDocument();
   });
@@ -51,9 +54,12 @@ describe("Review queue", () => {
   it("switches tabs via the search param", async () => {
     renderQueue([], "?tab=proposals");
     expect(await screen.findByText("Agent suggestion")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Proposals" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /^Proposals/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
 
-    await userEvent.click(screen.getByRole("tab", { name: "In review" }));
+    await userEvent.click(screen.getByRole("tab", { name: /^In review/ }));
     expect(await screen.findByText("Needs review")).toBeInTheDocument();
   });
 
@@ -151,7 +157,7 @@ describe("Review queue", () => {
     });
     expect(await screen.findByText("Nothing waiting on you")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("tab", { name: "Proposals" }));
+    await userEvent.click(screen.getByRole("tab", { name: /^Proposals/ }));
     expect(await screen.findByText("No proposals waiting")).toBeInTheDocument();
   });
 });
@@ -171,9 +177,9 @@ describe("Tab counts", () => {
         }),
       ],
     });
-    const inReviewTab = await screen.findByRole("tab", { name: "In review" });
+    const inReviewTab = await screen.findByRole("tab", { name: /^In review/ });
     expect(await within(inReviewTab).findByText("1")).toBeInTheDocument();
-    const proposalsTab = screen.getByRole("tab", { name: "Proposals" });
+    const proposalsTab = screen.getByRole("tab", { name: /^Proposals/ });
     expect(await within(proposalsTab).findByText("1")).toBeInTheDocument();
   });
 
@@ -181,7 +187,7 @@ describe("Tab counts", () => {
     renderRoute(`/projects/${project().id}/review`, {
       handlers: [getListTasksMockHandler(page([]))],
     });
-    const inReviewTab = await screen.findByRole("tab", { name: "In review" });
+    const inReviewTab = await screen.findByRole("tab", { name: /^In review/ });
     expect(within(inReviewTab).queryByText(/\d/)).not.toBeInTheDocument();
   });
 });
