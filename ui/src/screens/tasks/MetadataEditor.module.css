@@ -1,0 +1,10 @@
+.wrap {
+  position: relative;
+}
+
+.editor {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  width: 100%;
+  box-sizing: border-box;
+}
