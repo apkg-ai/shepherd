@@ -196,3 +196,40 @@ describe("Project registry", () => {
     expect(await screen.findByText("Choose an export file first.")).toBeInTheDocument();
   });
 });
+
+describe("Import dialog state isolation", () => {
+  it("forgets the picked file after close and reopen", async () => {
+    let imported = false;
+    renderRoute("/", {
+      handlers: [
+        getListProjectsMockHandler(page([])),
+        getImportProjectMockHandler(() => {
+          imported = true;
+          return {
+            project_id: uuid(),
+            task_count: 0,
+            relation_count: 0,
+            session_count: 0,
+            knowledge_count: 0,
+          };
+        }),
+      ],
+    });
+
+    // Pick a file, then cancel.
+    await userEvent.click(await screen.findByRole("button", { name: "Import" }));
+    let dialog = screen.getByRole("dialog", { name: "Import project" });
+    await userEvent.upload(
+      screen.getByLabelText("Export file"),
+      new File(['{"version":"1.0.0"}'], "old-export.json", { type: "application/json" }),
+    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    // Reopen and submit without picking anything: the old file must be gone.
+    await userEvent.click(screen.getByRole("button", { name: "Import" }));
+    dialog = screen.getByRole("dialog", { name: "Import project" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Import" }));
+    expect(await screen.findByText("Choose an export file first.")).toBeInTheDocument();
+    expect(imported).toBe(false);
+  });
+});

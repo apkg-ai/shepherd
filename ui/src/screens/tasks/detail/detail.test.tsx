@@ -512,3 +512,48 @@ describe("Task detail", () => {
     await waitFor(() => expect(deletedId).toBe(existing.id));
   });
 });
+
+describe("Add-relation dialog state isolation", () => {
+  it("resets the kind picker on reopen", async () => {
+    const main = task({ title: "Kind reset" });
+    const other = task({ title: "Other task" });
+    renderRoute(`/projects/${project().id}/tasks/${main.id}`, {
+      handlers: [
+        getGetTaskMockHandler(main),
+        getListTaskRelationsMockHandler({ items: [] }),
+        getListTaskSessionsMockHandler(page([])),
+        getListKnowledgeMockHandler(page([])),
+        getListTasksMockHandler(page([main, other])),
+      ],
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add relation" }));
+    let dialog = screen.getByRole("dialog", { name: "Add relation" });
+    await userEvent.selectOptions(within(dialog).getByLabelText("Kind"), "parent");
+    expect(within(dialog).getByLabelText("Kind")).toHaveValue("parent");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Add relation" }));
+    dialog = screen.getByRole("dialog", { name: "Add relation" });
+    expect(within(dialog).getByLabelText("Kind")).toHaveValue("depends_on");
+  });
+});
+
+describe("Partial attempt history", () => {
+  it("hedges the failure count while more session pages exist", async () => {
+    const main = task({ title: "Many attempts", status: "ready", attempt_count: 30 });
+    renderRoute(`/projects/${project().id}/tasks/${main.id}`, {
+      handlers: [
+        getGetTaskMockHandler(main),
+        getListTaskRelationsMockHandler({ items: [] }),
+        getListTaskSessionsMockHandler(
+          page([session({ outcome: "failed", failure_reason: "nope" })], "older-pages"),
+        ),
+        getListKnowledgeMockHandler(page([])),
+      ],
+    });
+    expect(await screen.findByText("30 attempts, ≥1 failed")).toBeInTheDocument();
+    // More pages exist, so a Load more control is offered for sessions.
+    expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument();
+  });
+});

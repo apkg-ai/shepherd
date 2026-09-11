@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -143,5 +143,37 @@ describe("Project settings", () => {
       ],
     });
     expect((await screen.findAllByText("Project not found")).length).toBeGreaterThan(0);
+  });
+});
+
+describe("Settings state isolation", () => {
+  it("resets form state when navigating between cached projects", async () => {
+    const alpha = project({ name: "Alpha proj", description: "a" });
+    const beta = project({ name: "Beta proj", description: "b" });
+    const byId = new Map([
+      [alpha.id, alpha],
+      [beta.id, beta],
+    ]);
+    const { router } = renderRoute(`/projects/${beta.id}/settings`, {
+      handlers: [
+        getGetProjectMockHandler(({ params }) => byId.get(String(params["projectId"])) ?? alpha),
+      ],
+    });
+
+    // Beta loads (and is now cached), then we visit Alpha…
+    await waitFor(async () =>
+      expect(await screen.findByLabelText("Name")).toHaveValue("Beta proj"),
+    );
+    await act(async () => {
+      await router.navigate(`/projects/${alpha.id}/settings`);
+    });
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Alpha proj"));
+
+    // …and back to Beta, which is cached (no loading remount). Without the
+    // project key, the form would still hold Alpha's values here.
+    await act(async () => {
+      await router.navigate(`/projects/${beta.id}/settings`);
+    });
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Beta proj"));
   });
 });

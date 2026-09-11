@@ -38,14 +38,15 @@ function TestQueryProvider({ children }: { children: ReactNode }) {
 export function renderRoute(
   path: string,
   { handlers = [] }: { handlers?: RequestHandler[] } = {},
-): RenderResult {
+): RenderResult & { router: ReturnType<typeof createMemoryRouter> } {
   if (handlers.length > 0) server.use(...handlers);
   const router = createMemoryRouter(routes, { initialEntries: [path] });
-  return render(
+  const result = render(
     <ToastProvider>
       <TestQueryProvider>
         <RouterProvider router={router} />
       </TestQueryProvider>
     </ToastProvider>,
   );
+  return { ...result, router };
 }

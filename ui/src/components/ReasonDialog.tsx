@@ -18,9 +18,18 @@ interface ReasonDialogProps {
 }
 
 /** Modal asking for a required reason (reject, block). */
-export function ReasonDialog({
-  open,
-  title,
+export function ReasonDialog({ open, title, ...formProps }: ReasonDialogProps) {
+  return (
+    <Dialog open={open} title={title} onClose={formProps.onCancel}>
+      {/* Dialog unmounts its children when closed, so the form's state
+          (reason/error) resets on every open instead of leaking across
+          targets — e.g. task A's rejection reason pre-filled for task B. */}
+      <ReasonForm {...formProps} />
+    </Dialog>
+  );
+}
+
+function ReasonForm({
   label,
   confirmLabel,
   danger = false,
@@ -28,7 +37,7 @@ export function ReasonDialog({
   validate,
   onSubmit,
   onCancel,
-}: ReasonDialogProps) {
+}: Omit<ReasonDialogProps, "open" | "title">) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -44,25 +53,23 @@ export function ReasonDialog({
   };
 
   return (
-    <Dialog open={open} title={title} onClose={onCancel}>
-      <form onSubmit={submit} noValidate>
-        <FormField label={label} error={error}>
-          {(props) => (
-            <textarea
-              {...props}
-              rows={3}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          )}
-        </FormField>
-        <div className={styles.actions}>
-          <Button onClick={onCancel}>Cancel</Button>
-          <Button type="submit" variant={danger ? "danger" : "primary"} busy={busy}>
-            {confirmLabel}
-          </Button>
-        </div>
-      </form>
-    </Dialog>
+    <form onSubmit={submit} noValidate>
+      <FormField label={label} error={error}>
+        {(props) => (
+          <textarea
+            {...props}
+            rows={3}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        )}
+      </FormField>
+      <div className={styles.actions}>
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button type="submit" variant={danger ? "danger" : "primary"} busy={busy}>
+          {confirmLabel}
+        </Button>
+      </div>
+    </form>
   );
 }

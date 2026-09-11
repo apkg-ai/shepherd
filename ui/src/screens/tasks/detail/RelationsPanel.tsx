@@ -180,13 +180,43 @@ function AddRelationDialog({
   onClose: () => void;
   onAdded: () => void;
 }) {
+  return (
+    <Dialog open={open} title="Add relation" onClose={onClose}>
+      {/* Unmounts on close (state resets) and remounts when the option set
+          changes, so a stale "parent" kind can't be submitted after the
+          "Set parent…" option disappeared. */}
+      <AddRelationForm
+        key={String(hasParent)}
+        projectId={projectId}
+        taskId={taskId}
+        hasParent={hasParent}
+        onClose={onClose}
+        onAdded={onAdded}
+      />
+    </Dialog>
+  );
+}
+
+function AddRelationForm({
+  projectId,
+  taskId,
+  hasParent,
+  onClose,
+  onAdded,
+}: {
+  projectId: string;
+  taskId: string;
+  hasParent: boolean;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
   const { toast } = useToast();
   const [kind, setKind] = useState<RelationKind>("depends_on");
   const [targetId, setTargetId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   // First page of project tasks as the picker source — v1-honest.
-  const candidatesQuery = useListTasks(projectId, { limit: 100 }, { query: { enabled: open } });
+  const candidatesQuery = useListTasks(projectId, { limit: 100 });
   const candidates = (candidatesQuery.data?.items ?? []).filter((t) => t.id !== taskId);
 
   const createRelation = useCreateTaskRelation({
@@ -227,47 +257,39 @@ function AddRelationDialog({
   };
 
   return (
-    <Dialog open={open} title="Add relation" onClose={onClose}>
-      <form onSubmit={submit} noValidate>
-        <FormField label="Kind">
-          {(props) => (
-            <select
-              {...props}
-              value={kind}
-              onChange={(e) => setKind(e.target.value as RelationKind)}
-            >
-              <option value="depends_on">This task depends on…</option>
-              <option value="subtask">Add subtask…</option>
-              {!hasParent ? <option value="parent">Set parent…</option> : null}
-            </select>
-          )}
-        </FormField>
-        <FormField label="Task">
-          {(props) => (
-            <select {...props} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
-              <option value="">
-                {candidatesQuery.isPending ? "Loading tasks…" : "Pick a task"}
+    <form onSubmit={submit} noValidate>
+      <FormField label="Kind">
+        {(props) => (
+          <select {...props} value={kind} onChange={(e) => setKind(e.target.value as RelationKind)}>
+            <option value="depends_on">This task depends on…</option>
+            <option value="subtask">Add subtask…</option>
+            {!hasParent ? <option value="parent">Set parent…</option> : null}
+          </select>
+        )}
+      </FormField>
+      <FormField label="Task">
+        {(props) => (
+          <select {...props} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+            <option value="">{candidatesQuery.isPending ? "Loading tasks…" : "Pick a task"}</option>
+            {candidates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title}
               </option>
-              {candidates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-            </select>
-          )}
-        </FormField>
-        {error ? (
-          <p className={styles.formError} role="alert">
-            {error}
-          </p>
-        ) : null}
-        <div className={styles.dialogActions}>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" busy={createRelation.isPending}>
-            Add relation
-          </Button>
-        </div>
-      </form>
-    </Dialog>
+            ))}
+          </select>
+        )}
+      </FormField>
+      {error ? (
+        <p className={styles.formError} role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className={styles.dialogActions}>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button type="submit" variant="primary" busy={createRelation.isPending}>
+          Add relation
+        </Button>
+      </div>
+    </form>
   );
 }

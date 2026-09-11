@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import type { TaskStatus } from "../api/generated/model";
 import { ShepherdError } from "../api/problem";
 import { AttemptBadge } from "./AttemptBadge";
@@ -10,6 +11,7 @@ import { Dialog } from "./Dialog";
 import { FormField } from "./FormField";
 import { IdentityChip } from "./IdentityChip";
 import { LoadMore } from "./LoadMore";
+import { ReasonDialog } from "./ReasonDialog";
 import { StatusBadge } from "./StatusBadge";
 import { EmptyState, ErrorState, LoadingState } from "./states";
 import { ToastProvider, useToast } from "./Toast";
@@ -249,5 +251,57 @@ describe("Toast", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(() => render(<Probe />)).toThrow(/within ToastProvider/);
     spy.mockRestore();
+  });
+});
+
+describe("ReasonDialog", () => {
+  it("resets reason and error state on every open", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    function Host() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            open
+          </button>
+          <ReasonDialog
+            open={open}
+            title="Reject work"
+            label="Reason"
+            confirmLabel="Reject"
+            validate={(reason) => (reason ? null : "required")}
+            onSubmit={onSubmit}
+            onCancel={() => setOpen(false)}
+          />
+        </>
+      );
+    }
+    render(<Host />);
+
+    // First open: trigger a validation error, then type a reason, then cancel.
+    await user.click(screen.getByRole("button", { name: "open" }));
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    expect(screen.getByText("required")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Reason"), "task A's reason");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    // Reopen (e.g. for a different task): both reason and error are gone.
+    await user.click(screen.getByRole("button", { name: "open" }));
+    expect(screen.getByLabelText("Reason")).toHaveValue("");
+    expect(screen.queryByText("required")).not.toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe("AttemptBadge atLeast", () => {
+  it("marks partially counted failures with ≥", () => {
+    render(<AttemptBadge attempts={30} failures={4} atLeast />);
+    expect(screen.getByText("30 attempts, ≥4 failed")).toBeInTheDocument();
+  });
+
+  it("claims exact counts when fully loaded", () => {
+    render(<AttemptBadge attempts={5} failures={2} atLeast={false} />);
+    expect(screen.getByText("5 attempts, 2 failed")).toBeInTheDocument();
   });
 });

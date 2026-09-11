@@ -51,7 +51,13 @@ function TaskDetail({ projectId, taskId }: { projectId: string; taskId: string }
             </span>
           ))}
           {task.assignee ? <IdentityChip identity={task.assignee} /> : null}
-          <AttemptBadge attempts={task.attempt_count} failures={failedAttempts} />
+          <AttemptBadge
+            attempts={task.attempt_count}
+            failures={failedAttempts}
+            // Failures are counted from loaded session pages only — say "≥"
+            // rather than understate while more pages exist.
+            atLeast={sessionsQuery.hasNextPage === true}
+          />
           <span className={styles.muted}>
             Created {formatDateTime(task.created_at)} · updated {formatDateTime(task.updated_at)}
           </span>

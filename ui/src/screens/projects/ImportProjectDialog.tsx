@@ -16,6 +16,16 @@ import styles from "./dialogs.module.css";
  * docs/02-domain-model.md).
  */
 export function ImportProjectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <Dialog open={open} title="Import project" onClose={onClose}>
+      {/* Dialog unmounts children when closed, so the picked file/error reset
+          on every open — a stale File must never be imported silently. */}
+      <ImportForm onClose={onClose} />
+    </Dialog>
+  );
+}
+
+function ImportForm({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -61,33 +71,31 @@ export function ImportProjectDialog({ open, onClose }: { open: boolean; onClose:
   };
 
   return (
-    <Dialog open={open} title="Import project" onClose={onClose}>
-      <form onSubmit={(e) => void submit(e)} noValidate>
-        <FormField
-          label="Export file"
-          hint="A shepherd export document (.json). Import always creates a new project."
-        >
-          {(props) => (
-            <input
-              {...props}
-              type="file"
-              accept=".json,application/json"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          )}
-        </FormField>
-        {error ? (
-          <p className={styles.formError} role="alert">
-            {error}
-          </p>
-        ) : null}
-        <div className={styles.actions}>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" busy={importProject.isPending}>
-            Import
-          </Button>
-        </div>
-      </form>
-    </Dialog>
+    <form onSubmit={(e) => void submit(e)} noValidate>
+      <FormField
+        label="Export file"
+        hint="A shepherd export document (.json). Import always creates a new project."
+      >
+        {(props) => (
+          <input
+            {...props}
+            type="file"
+            accept=".json,application/json"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+        )}
+      </FormField>
+      {error ? (
+        <p className={styles.formError} role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className={styles.actions}>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button type="submit" variant="primary" busy={importProject.isPending}>
+          Import
+        </Button>
+      </div>
+    </form>
   );
 }

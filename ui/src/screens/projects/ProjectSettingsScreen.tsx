@@ -36,7 +36,9 @@ function Settings({ projectId }: { projectId: string }) {
   if (projectQuery.isError) {
     return <ErrorState error={projectQuery.error} onRetry={() => void projectQuery.refetch()} />;
   }
-  return <SettingsForm project={projectQuery.data} />;
+  // Keyed by project so form state never bleeds when navigating between
+  // projects whose data is already cached (isPending stays false).
+  return <SettingsForm key={projectId} project={projectQuery.data} />;
 }
 
 function SettingsForm({ project }: { project: Project }) {

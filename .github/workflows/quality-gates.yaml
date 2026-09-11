@@ -322,6 +322,8 @@ jobs:
       - name: Regenerate and check for drift
         run: |
           npm run generate:api
+          # add -N so newly generated (untracked) files also fail the diff
+          git add -N src/api/generated
           git diff --exit-code -- src/api/generated
 
   spec-lint:
@@ -628,6 +630,8 @@ jobs:
       - name: Regenerate and check for drift
         run: |
           "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+          # add -N so newly generated (untracked) files also fail the diff
+          git add -N core/shepherd-server/src/generated
           git diff --exit-code -- core/shepherd-server/src/generated
 
   core-test-fuzz:
