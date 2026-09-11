@@ -18,6 +18,7 @@ import { IdentityChip } from "../../components/IdentityChip";
 import { LoadMore } from "../../components/LoadMore";
 import { ReasonDialog } from "../../components/ReasonDialog";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
+import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/Toast";
 import { validateReason } from "../tasks/detail/TaskActions";
 import styles from "./ReviewQueueScreen.module.css";
@@ -48,7 +49,10 @@ function ReviewQueue({ projectId }: { projectId: string }) {
 
   return (
     <section>
-      <h2 className={styles.heading}>Review</h2>
+      <PageHeader
+        title="Review"
+        description="Everything waiting on a human: agent work to approve or reject, and proposals to triage."
+      />
       <div role="tablist" className={styles.tabs}>
         <button
           type="button"

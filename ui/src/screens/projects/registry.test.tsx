@@ -25,7 +25,8 @@ describe("Project registry", () => {
       handlers: [getListProjectsMockHandler(page([p1, p2]))],
     });
 
-    expect(await screen.findByRole("link", { name: "Alpha" })).toHaveAttribute(
+    const main = screen.getByRole("main");
+    expect(await within(main).findByRole("link", { name: "Alpha" })).toHaveAttribute(
       "href",
       `/projects/${p1.id}`,
     );
@@ -54,8 +55,9 @@ describe("Project registry", () => {
 
     server.use(getListProjectsMockHandler(page([project({ name: "Recovered" })])));
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("Recovered")).toBeInTheDocument();
-    expect(calls).toBe(1);
+    expect(await within(screen.getByRole("main")).findByText("Recovered")).toBeInTheDocument();
+    // Registry list + sidebar switcher both hit the endpoint once — no retries.
+    expect(calls).toBe(2);
   });
 
   it("pages through the cursor", async () => {
@@ -69,10 +71,11 @@ describe("Project registry", () => {
     );
     renderRoute("/");
 
-    expect(await screen.findByText("Page one")).toBeInTheDocument();
+    const main = screen.getByRole("main");
+    expect(await within(main).findByText("Page one")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Load more" }));
-    expect(await screen.findByText("Page two")).toBeInTheDocument();
-    expect(screen.getByText("Page one")).toBeInTheDocument();
+    expect(await within(main).findByText("Page two")).toBeInTheDocument();
+    expect(within(main).getByText("Page one")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   });
 

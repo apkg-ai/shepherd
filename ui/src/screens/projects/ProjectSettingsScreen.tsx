@@ -15,6 +15,7 @@ import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { FormField } from "../../components/FormField";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
+import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/Toast";
 import { downloadJson, slugify } from "../../lib/download";
 import { zodFieldErrors } from "../../lib/forms";
@@ -117,7 +118,10 @@ function SettingsForm({ project }: { project: Project }) {
 
   return (
     <section className={styles.wrap}>
-      <h2>Project settings</h2>
+      <PageHeader
+        title="Project settings"
+        description="Name, review gate, portability, and the danger zone."
+      />
 
       <form onSubmit={submit} noValidate className={styles.form}>
         <FormField label="Name" error={errors["name"]}>

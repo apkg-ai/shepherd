@@ -104,7 +104,10 @@ describe("task list edge cases", () => {
       handlers: [
         getGetProjectMockHandler(proj),
         getListTasksMockHandler(({ request }) => {
-          urls.push(request.url);
+          // Ignore the sidebar ReviewBadge query (limit=25).
+          if (!new URL(request.url).searchParams.has("limit")) {
+            urls.push(request.url);
+          }
           return page([]);
         }),
       ],

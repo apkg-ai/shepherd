@@ -43,65 +43,95 @@ function TaskDetail({ projectId, taskId }: { projectId: string; taskId: string }
           <StatusBadge status={task.status} />
           <h2 className={styles.title}>{task.title}</h2>
         </div>
-        <div className={styles.meta}>
-          <span className={styles.metaItem}>{task.type}</span>
-          {task.graph_role.map((role) => (
-            <span key={role} className={styles.metaItem}>
-              {role}
-            </span>
-          ))}
-          {task.assignee ? <IdentityChip identity={task.assignee} /> : null}
-          <AttemptBadge
-            attempts={task.attempt_count}
-            failures={failedAttempts}
-            // Failures are counted from loaded session pages only — say "≥"
-            // rather than understate while more pages exist.
-            atLeast={sessionsQuery.hasNextPage === true}
-          />
-          <span className={styles.muted}>
-            Created {formatDateTime(task.created_at)} · updated {formatDateTime(task.updated_at)}
-          </span>
-        </div>
         <TaskActions projectId={projectId} task={task} />
       </header>
 
-      <section className={styles.section}>
-        <h3>Description</h3>
-        {task.description ? (
-          <p className={styles.description}>{task.description}</p>
-        ) : (
-          <p className={styles.muted}>No description.</p>
-        )}
-      </section>
+      <div className={styles.columns}>
+        <div className={styles.mainColumn}>
+          <section className={styles.section}>
+            <h3>Description</h3>
+            {task.description ? (
+              <p className={styles.description}>{task.description}</p>
+            ) : (
+              <p className={styles.muted}>No description.</p>
+            )}
+          </section>
 
-      {metadataEntries > 0 ? (
-        <section className={styles.section}>
-          <h3>Metadata</h3>
-          <pre className={styles.metadata}>{JSON.stringify(task.metadata, null, 2)}</pre>
-        </section>
-      ) : null}
+          {metadataEntries > 0 ? (
+            <section className={styles.section}>
+              <h3>Metadata</h3>
+              <pre className={styles.metadata}>{JSON.stringify(task.metadata, null, 2)}</pre>
+            </section>
+          ) : null}
 
-      <RelationsPanel projectId={projectId} taskId={taskId} />
+          <section className={styles.section}>
+            <h3>Sessions</h3>
+            {sessionsQuery.isPending ? (
+              <LoadingState label="Loading sessions…" />
+            ) : sessionsQuery.isError ? (
+              <ErrorState
+                error={sessionsQuery.error}
+                onRetry={() => void sessionsQuery.refetch()}
+              />
+            ) : (
+              <>
+                <SessionsTimeline sessions={sessions} />
+                <LoadMore
+                  hasNextPage={sessionsQuery.hasNextPage}
+                  isFetchingNextPage={sessionsQuery.isFetchingNextPage}
+                  onLoadMore={() => void sessionsQuery.fetchNextPage()}
+                />
+              </>
+            )}
+          </section>
 
-      <section className={styles.section}>
-        <h3>Sessions</h3>
-        {sessionsQuery.isPending ? (
-          <LoadingState label="Loading sessions…" />
-        ) : sessionsQuery.isError ? (
-          <ErrorState error={sessionsQuery.error} onRetry={() => void sessionsQuery.refetch()} />
-        ) : (
-          <>
-            <SessionsTimeline sessions={sessions} />
-            <LoadMore
-              hasNextPage={sessionsQuery.hasNextPage}
-              isFetchingNextPage={sessionsQuery.isFetchingNextPage}
-              onLoadMore={() => void sessionsQuery.fetchNextPage()}
-            />
-          </>
-        )}
-      </section>
+          <TaskKnowledgePanel projectId={projectId} taskId={taskId} />
+        </div>
 
-      <TaskKnowledgePanel projectId={projectId} taskId={taskId} />
+        <aside className={styles.sideColumn}>
+          <section className={styles.facts}>
+            <h3>Details</h3>
+            <dl className={styles.factList}>
+              <dt>Type</dt>
+              <dd>{task.type}</dd>
+              {task.graph_role.length > 0 ? (
+                <>
+                  <dt>Graph role</dt>
+                  <dd>{task.graph_role.join(", ")}</dd>
+                </>
+              ) : null}
+              {task.assignee ? (
+                <>
+                  <dt>Assignee</dt>
+                  <dd>
+                    <IdentityChip identity={task.assignee} />
+                  </dd>
+                </>
+              ) : null}
+              {task.attempt_count > 0 ? (
+                <>
+                  <dt>Attempts</dt>
+                  <dd>
+                    <AttemptBadge
+                      attempts={task.attempt_count}
+                      failures={failedAttempts}
+                      // Failures are counted from loaded session pages only —
+                      // say "≥" rather than understate while more pages exist.
+                      atLeast={sessionsQuery.hasNextPage === true}
+                    />
+                  </dd>
+                </>
+              ) : null}
+              <dt>Created</dt>
+              <dd>{formatDateTime(task.created_at)}</dd>
+              <dt>Updated</dt>
+              <dd>{formatDateTime(task.updated_at)}</dd>
+            </dl>
+          </section>
+
+          <RelationsPanel projectId={projectId} taskId={taskId} />
+        </aside>
+      </div>
     </article>
   );
 }

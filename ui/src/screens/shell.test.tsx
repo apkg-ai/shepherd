@@ -21,7 +21,8 @@ describe("App shell", () => {
     });
 
     // Registry → project
-    await userEvent.click(await screen.findByRole("link", { name: "Alpha" }));
+    const main = screen.getByRole("main");
+    await userEvent.click(await within(main).findByRole("link", { name: "Alpha" }));
     expect(await screen.findByText("A task")).toBeInTheDocument();
 
     // Project nav is visible with the project name
@@ -29,7 +30,7 @@ describe("App shell", () => {
     expect(within(nav).getByText("Alpha")).toBeInTheDocument();
 
     // → Review
-    await userEvent.click(within(nav).getByRole("link", { name: "Review" }));
+    await userEvent.click(within(nav).getByRole("link", { name: /^Review/ }));
     expect(await screen.findByRole("tab", { name: "In review" })).toBeInTheDocument();
 
     // → Settings
@@ -38,7 +39,9 @@ describe("App shell", () => {
 
     // Brand goes home; nav disappears without a project
     await userEvent.click(screen.getByRole("link", { name: "Shepherd" }));
-    expect(await screen.findByRole("link", { name: "Alpha" })).toBeInTheDocument();
+    expect(
+      await within(screen.getByRole("main")).findByRole("link", { name: "Alpha" }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Project" })).not.toBeInTheDocument();
   });
 
@@ -54,5 +57,67 @@ describe("App shell", () => {
     renderRoute("/nowhere/at/all");
     expect(await screen.findByText("Page not found")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to projects" })).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar", () => {
+  const proj = project({ name: "Alpha" });
+
+  it("shows the project switcher, review badge, and theme toggle", async () => {
+    renderRoute(`/projects/${proj.id}`, {
+      handlers: [
+        getGetProjectMockHandler(proj),
+        getListProjectsMockHandler(page([proj])),
+        getListTasksMockHandler(({ request }) => {
+          const url = new URL(request.url);
+          return url.searchParams.get("status") === "in_review"
+            ? page([task({ status: "in_review" }), task({ status: "in_review" })])
+            : page([]);
+        }),
+      ],
+    });
+
+    const switcher = await screen.findByRole("navigation", { name: "Projects" });
+    expect(await within(switcher).findByRole("link", { name: "Alpha" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(within(switcher).getByRole("link", { name: "All projects" })).toBeInTheDocument();
+
+    // Review badge counts the in_review page
+    const reviewLink = await screen.findByRole("link", { name: /^Review/ });
+    expect(await within(reviewLink).findByText("2")).toBeInTheDocument();
+
+    // Theme toggle lives in the sidebar footer
+    expect(screen.getByRole("group", { name: "Theme" })).toBeInTheDocument();
+  });
+
+  it("hedges the review badge past one page", async () => {
+    renderRoute(`/projects/${proj.id}`, {
+      handlers: [
+        getGetProjectMockHandler(proj),
+        getListProjectsMockHandler(page([proj])),
+        getListTasksMockHandler(({ request }) => {
+          const url = new URL(request.url);
+          return url.searchParams.get("status") === "in_review"
+            ? page([task({ status: "in_review" })], "next-cursor")
+            : page([]);
+        }),
+      ],
+    });
+    const reviewLink = await screen.findByRole("link", { name: /^Review/ });
+    expect(await within(reviewLink).findByText("1+")).toBeInTheDocument();
+  });
+
+  it("hides the review badge when nothing is in review", async () => {
+    renderRoute(`/projects/${proj.id}`, {
+      handlers: [
+        getGetProjectMockHandler(proj),
+        getListProjectsMockHandler(page([proj])),
+        getListTasksMockHandler(page([])),
+      ],
+    });
+    const reviewLink = await screen.findByRole("link", { name: /^Review/ });
+    expect(reviewLink).toHaveTextContent(/^Review$/);
   });
 });

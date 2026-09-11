@@ -45,7 +45,10 @@ describe("Project task list", () => {
     renderList({
       handlers: [
         getListTasksMockHandler(({ request }) => {
-          requests.push(request.url);
+          // The sidebar ReviewBadge queries with limit=25 — count list fetches only.
+          if (!new URL(request.url).searchParams.has("limit")) {
+            requests.push(request.url);
+          }
           return page([task({ title: "Filtered" })]);
         }),
       ],

@@ -9,6 +9,7 @@ import { fieldErrors, isShepherdError } from "../../api/problem";
 import { Button } from "../../components/Button";
 import { FormField } from "../../components/FormField";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
+import { PageHeader } from "../../components/PageHeader";
 import { zodFieldErrors } from "../../lib/forms";
 import { MetadataEditor, validateMetadata } from "./MetadataEditor";
 import styles from "./TaskFormScreen.module.css";
@@ -151,7 +152,7 @@ function TaskFormFields({
 
   return (
     <section className={styles.wrap}>
-      <h2>{isEdit ? "Edit task" : "New task"}</h2>
+      <PageHeader title={isEdit ? "Edit task" : "New task"} />
       <form onSubmit={submit} noValidate>
         <FormField label="Title" error={errors["title"]}>
           {(props) => (
