@@ -74,15 +74,18 @@ function ReviewQueue({ projectId }: { projectId: string }) {
   };
 
   // WAI-ARIA tabs pattern, automatic activation: arrows move selection AND
-  // focus; the inactive tab leaves the tab order via roving tabindex.
-  const onTablistKeyDown = (event: React.KeyboardEvent) => {
-    const index = TABS.indexOf(tab);
+  // focus; the inactive tab leaves the tab order via roving tabindex. The
+  // current tab comes from the focused button's id, not render state — rapid
+  // keypresses can outrun the search-param commit.
+  const onTablistKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    const current = event.currentTarget.id.replace("review-tab-", "") as Tab;
+    const index = TABS.indexOf(current);
     let next: Tab | undefined;
     if (event.key === "ArrowRight") next = TABS[(index + 1) % TABS.length];
     else if (event.key === "ArrowLeft") next = TABS[(index - 1 + TABS.length) % TABS.length];
     else if (event.key === "Home") next = TABS[0];
     else if (event.key === "End") next = TABS[TABS.length - 1];
-    if (next === undefined || next === tab) return;
+    if (next === undefined || next === current) return;
     event.preventDefault();
     setTab(next);
     tabRefs.current.get(next)?.focus();
