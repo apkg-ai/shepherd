@@ -66,14 +66,15 @@
 }
 
 .collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: none;
   cursor: pointer;
   color: var(--color-text-muted);
-  font-size: var(--text-md);
-  line-height: 1;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border-radius: var(--radius-1);
   flex-shrink: 0;
@@ -84,8 +85,41 @@
   color: var(--color-accent);
 }
 
+.chevron,
+.chevronOpen {
+  transition: transform 120ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
 .collapseSpacer {
-  width: 22px;
+  width: 24px;
+  flex-shrink: 0;
+}
+
+/* Child rows sit on a faint band between raised and surface so nested
+   items read as a group; hover still steps up to the full surface tint. */
+.childRow {
+  background: color-mix(in srgb, var(--color-surface) 60%, transparent);
+}
+
+.childRow:hover {
+  background: var(--color-surface);
+}
+
+/* └ connector marking a row as belonging to the one above — indentation
+   alone reads too weak inside a table. Decorative (structure is also
+   conveyed by indent, chevron, and the subtask chip). */
+.elbow {
+  width: 12px;
+  height: 16px;
+  margin-top: -14px;
+  margin-right: 2px;
+  border-left: 2px solid var(--color-border-strong);
+  border-bottom: 2px solid var(--color-border-strong);
+  border-bottom-left-radius: 7px;
   flex-shrink: 0;
 }
 

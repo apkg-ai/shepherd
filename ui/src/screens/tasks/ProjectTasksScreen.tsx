@@ -142,12 +142,16 @@ function TaskList({ projectId }: { projectId: string }) {
     const dependencyHint = describeDependencies(node, statusById);
     return (
       <Fragment key={task.id}>
-        <tr data-status={task.status} className={styles.row}>
+        <tr
+          data-status={task.status}
+          className={depth > 0 ? `${styles.row} ${styles.childRow}` : styles.row}
+        >
           <td className={styles.statusCell}>
             <StatusBadge status={task.status} />
           </td>
           <td>
             <div className={styles.titleCell} style={{ "--depth": depth } as CSSProperties}>
+              {depth > 0 ? <span className={styles.elbow} aria-hidden="true" /> : null}
               {hasChildren ? (
                 <button
                   type="button"
@@ -156,7 +160,22 @@ function TaskList({ projectId }: { projectId: string }) {
                   aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${task.title}`}
                   onClick={() => toggleCollapse(task.id)}
                 >
-                  {isCollapsed ? "▸" : "▾"}
+                  <svg
+                    viewBox="0 0 16 16"
+                    width="14"
+                    height="14"
+                    aria-hidden="true"
+                    className={isCollapsed ? styles.chevron : styles.chevronOpen}
+                  >
+                    <path
+                      d="M6 4l4 4-4 4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 </button>
               ) : (
                 <span className={styles.collapseSpacer} />
