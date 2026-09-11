@@ -2,6 +2,10 @@
  * Design tokens (S7). Single source for color/spacing/typography and the
  * per-status visual language from docs/04-ui.md — S8's graph view reuses the
  * same --status-* variables, so keep status styling here, not in components.
+ *
+ * Every fg/bg pairing is WCAG-AA gated by src/lib/contrast.test.ts (4.5:1
+ * text, 3:1 non-text) in BOTH themes — change a value here and that test
+ * tells you exactly which pairing broke.
  */
 :root {
   color-scheme: light;
@@ -13,18 +17,18 @@
   --color-border: #d7dbe0;
   --color-border-strong: #aeb4bd;
   --color-text: #1a1d21;
-  --color-text-muted: #5c6470;
-  --color-text-faint: #8b929c;
+  --color-text-muted: #4b5563;
+  --color-text-faint: #646d7a;
 
-  --color-accent: #2563eb;
+  --color-accent: #1d4ed8;
   --color-accent-soft: #dbe7fe;
-  --color-success: #15803d;
+  --color-success: #166534;
   --color-success-soft: #dcf2e3;
-  --color-warning: #b45309;
+  --color-warning: #92400e;
   --color-warning-soft: #fdedd3;
   --color-danger: #b91c1c;
   --color-danger-soft: #fde3e3;
-  --color-attention: #7c3aed;
+  --color-attention: #6d28d9;
   --color-attention-soft: #ece3fd;
 
   /* Text on accent-filled surfaces (primary buttons, in_progress chip). */
@@ -100,8 +104,8 @@
   --color-border: #2a313b;
   --color-border-strong: #4b5563;
   --color-text: #e6e9ed;
-  --color-text-muted: #9aa3af;
-  --color-text-faint: #6b7482;
+  --color-text-muted: #a8b1bc;
+  --color-text-faint: #87919e;
 
   --color-accent: #60a5fa;
   --color-accent-soft: #1c2f4d;

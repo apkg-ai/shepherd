@@ -8,6 +8,8 @@
 }
 
 .button:disabled {
+  /* Below AA on purpose — WCAG 1.4.3 exempts inactive controls, and the
+     reduced contrast IS the disabled affordance. Not covered by the gate. */
   opacity: 0.55;
   cursor: not-allowed;
 }

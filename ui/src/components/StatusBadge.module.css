@@ -38,10 +38,11 @@
 }
 
 .badge[data-status="done"] {
+  /* No opacity here: stacking it under the faint token broke WCAG AA
+     (effective 2.29:1). --color-text-faint alone carries the dimmed look. */
   color: var(--status-done-fg);
   background: var(--status-done-bg);
   border: var(--status-done-border);
-  opacity: 0.8;
 }
 
 .badge[data-status="blocked"] {
