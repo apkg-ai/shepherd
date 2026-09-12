@@ -16,7 +16,7 @@ describe("Project task list", () => {
   const proj = project({ name: "Alpha" });
 
   function renderList(extra: Parameters<typeof renderRoute>[1] = {}, path = "") {
-    return renderRoute(`/projects/${proj.id}${path}`, {
+    return renderRoute(`/projects/${proj.id}/tasks${path}`, {
       handlers: [getGetProjectMockHandler(proj), ...(extra.handlers ?? [])],
     });
   }
@@ -114,7 +114,7 @@ describe("Project task list", () => {
   });
 
   it("shows an error state on 500", async () => {
-    renderRoute(`/projects/${uuid()}`, {
+    renderRoute(`/projects/${uuid()}/tasks`, {
       handlers: [
         http.get("/api/v1/projects/:projectId/tasks", () =>
           problemResponse(500, "internal-error", { title: "Storage failure" }),
@@ -154,7 +154,7 @@ describe("Task hierarchy", () => {
 
   it("groups children under parents with subtask counts and collapse", async () => {
     const { parent, child, dep, edge, depEdge } = seedFamily();
-    renderRoute(`/projects/${proj.id}`, {
+    renderRoute(`/projects/${proj.id}/tasks`, {
       handlers: [
         getGetProjectMockHandler(proj),
         getListTasksMockHandler(page([parent, child, dep])),
@@ -190,7 +190,7 @@ describe("Task hierarchy", () => {
       source_task_id: farParent.id,
       target_task_id: child.id,
     });
-    renderRoute(`/projects/${proj.id}`, {
+    renderRoute(`/projects/${proj.id}/tasks`, {
       handlers: [
         getGetProjectMockHandler(proj),
         getListTasksMockHandler(page([child])),
@@ -205,7 +205,7 @@ describe("Task hierarchy", () => {
 
   it("flattens with breadcrumbs when filters are active", async () => {
     const { parent, child, edge } = seedFamily();
-    renderRoute(`/projects/${proj.id}?status=approved`, {
+    renderRoute(`/projects/${proj.id}/tasks?status=approved`, {
       handlers: [
         getGetProjectMockHandler(proj),
         getListTasksMockHandler(({ request }) => {
@@ -238,7 +238,7 @@ describe("Task hierarchy", () => {
       source_task_id: dependent.id,
       target_task_id: "00000000-0000-4000-8000-bbbbbbbbbbbb",
     });
-    renderRoute(`/projects/${proj.id}`, {
+    renderRoute(`/projects/${proj.id}/tasks`, {
       handlers: [
         getGetProjectMockHandler(proj),
         getListTasksMockHandler(page([dependent])),

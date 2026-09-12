@@ -5,29 +5,35 @@ import {
   getGetProjectMockHandler,
   getListProjectsMockHandler,
 } from "../api/generated/projects/projects.msw";
+import { getListProjectRelationsMockHandler } from "../api/generated/relations/relations.msw";
 import { getListTasksMockHandler } from "../api/generated/tasks/tasks.msw";
 import { page, project, task } from "../test/fixtures";
 import { renderRoute } from "../test/test-utils";
 
 describe("App shell", () => {
-  it("navigates registry → project tasks → review → settings", async () => {
+  it("navigates registry → graph → tasks → review → settings", async () => {
     const proj = project({ name: "Alpha" });
     renderRoute("/", {
       handlers: [
         getListProjectsMockHandler(page([proj])),
         getGetProjectMockHandler(proj),
         getListTasksMockHandler(page([task({ title: "A task" })])),
+        getListProjectRelationsMockHandler(page([])),
       ],
     });
 
-    // Registry → project
+    // Registry → project (lands on the graph, the project's home screen)
     const main = screen.getByRole("main");
     await userEvent.click(await within(main).findByRole("link", { name: "Alpha" }));
-    expect(await screen.findByText("A task")).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "Decomposition" })).toBeInTheDocument();
 
     // Project nav is visible with the project name
     const nav = screen.getByRole("navigation", { name: "Project" });
     expect(within(nav).getByText("Alpha")).toBeInTheDocument();
+
+    // → Tasks table
+    await userEvent.click(within(nav).getByRole("link", { name: "Tasks" }));
+    expect(await screen.findByText("A task")).toBeInTheDocument();
 
     // → Review
     await userEvent.click(within(nav).getByRole("link", { name: /^Review/ }));
@@ -74,6 +80,7 @@ describe("Sidebar", () => {
             ? page([task({ status: "in_review" }), task({ status: "in_review" })])
             : page([]);
         }),
+        getListProjectRelationsMockHandler(page([])),
       ],
     });
 
@@ -103,6 +110,7 @@ describe("Sidebar", () => {
             ? page([task({ status: "in_review" })], "next-cursor")
             : page([]);
         }),
+        getListProjectRelationsMockHandler(page([])),
       ],
     });
     const reviewLink = await screen.findByRole("link", { name: /^Review/ });
@@ -115,6 +123,7 @@ describe("Sidebar", () => {
         getGetProjectMockHandler(proj),
         getListProjectsMockHandler(page([proj])),
         getListTasksMockHandler(page([])),
+        getListProjectRelationsMockHandler(page([])),
       ],
     });
     const reviewLink = await screen.findByRole("link", { name: /^Review/ });
@@ -138,6 +147,7 @@ describe("Combined review badge", () => {
           if (status === "proposed") return page([task({ status: "proposed" })]);
           return page([]);
         }),
+        getListProjectRelationsMockHandler(page([])),
       ],
     });
     const reviewLink = await screen.findByRole("link", { name: /^Review/ });

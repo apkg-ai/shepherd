@@ -1,0 +1,39 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  /* Fill the scrollable main column so the canvas gets real height. */
+  height: 100%;
+  min-height: 480px;
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tab,
+.tabActive {
+  border: none;
+  background: none;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  border-bottom: 2px solid transparent;
+}
+
+.tabActive {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+.canvas {
+  flex: 1;
+  min-height: 320px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  overflow: hidden;
+  background: var(--color-surface);
+}

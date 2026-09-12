@@ -100,7 +100,7 @@ describe("settings error paths", () => {
 describe("task list edge cases", () => {
   it("clears a filter back to All", async () => {
     const urls: string[] = [];
-    renderRoute(`/projects/${proj.id}?status=done`, {
+    renderRoute(`/projects/${proj.id}/tasks?status=done`, {
       handlers: [
         getGetProjectMockHandler(proj),
         getListTasksMockHandler(({ request }) => {

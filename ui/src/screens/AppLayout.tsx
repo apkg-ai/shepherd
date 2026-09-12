@@ -68,6 +68,9 @@ function ProjectNav({ projectId }: { projectId: string }) {
     <nav className={styles.projectNav} aria-label="Project">
       <div className={styles.projectName}>{project?.name ?? "…"}</div>
       <NavLink to={`/projects/${projectId}`} end className={linkClass}>
+        Graph
+      </NavLink>
+      <NavLink to={`/projects/${projectId}/tasks`} className={linkClass}>
         Tasks
       </NavLink>
       <NavLink to={`/projects/${projectId}/review`} className={linkClass}>
