@@ -21,6 +21,7 @@ const DIR = "e2e-artifacts/screens";
 
 let project: SeededProject;
 let detailTaskId: string;
+let epicId: string;
 
 test.beforeAll(async () => {
   mkdirSync(DIR, { recursive: true });
@@ -31,6 +32,7 @@ test.beforeAll(async () => {
     description: "Parent epic for the showcase — decomposed into the pieces below.",
     metadata: { milestone: "v1", theme: "graph" },
   });
+  epicId = epic.id;
   const lens = await createTask(project.id, "Decomposition lens", {
     description: "Tree lens of parent/child structure",
   });
@@ -98,6 +100,7 @@ test("captures every key screen in both themes", async ({ page }) => {
   await capture(page, "/#/", "registry");
   await capture(page, `/#/projects/${project.id}`, "graph-tree-lens");
   await capture(page, `/#/projects/${project.id}?lens=flow`, "graph-flow-lens");
+  await capture(page, `/#/projects/${project.id}?selected=${epicId}`, "graph-side-panel");
   await capture(page, `/#/projects/${project.id}/tasks`, "task-tree");
   await capture(page, `/#/projects/${project.id}/tasks?status=in_review`, "task-list-filtered");
   await capture(page, `/#/projects/${project.id}/knowledge`, "knowledge");

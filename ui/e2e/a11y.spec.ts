@@ -80,6 +80,14 @@ test.describe("axe WCAG AA audit", () => {
     await auditRoute(page, `/#/projects/${project.id}?lens=flow`, "graph flow lens");
   });
 
+  test("graph with the side panel open", async ({ page }) => {
+    await auditRoute(
+      page,
+      `/#/projects/${project.id}?selected=${detailTaskId}`,
+      "graph side panel",
+    );
+  });
+
   test("task tree", async ({ page }) => {
     await auditRoute(page, `/#/projects/${project.id}/tasks`, "task tree");
   });

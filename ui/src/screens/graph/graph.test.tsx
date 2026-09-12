@@ -89,7 +89,8 @@ describe("Graph screen", () => {
   it("mirrors node selection to ?selected= so it survives a lens switch", async () => {
     const { router } = renderGraph();
 
-    const title = await screen.findByText("Step two");
+    // The node title button (getByTitle) — the side panel repeats the text.
+    const title = await screen.findByTitle("Step two");
     // fireEvent, not userEvent: userEvent's mousedown carries a null
     // event.view in jsdom, which crashes d3-zoom's pan handler.
     fireEvent.click(title.closest("article")!);
@@ -100,18 +101,45 @@ describe("Graph screen", () => {
 
     await userEvent.click(screen.getByRole("tab", { name: "Dependency flow" }));
     await waitFor(() =>
-      expect(screen.getByText("Step two").closest("article")).toHaveAttribute(
+      expect(screen.getByTitle("Step two").closest("article")).toHaveAttribute(
         "data-selected",
         "true",
       ),
     );
   });
 
-  it("links node titles to task detail", async () => {
+  it("opens a side panel on selection with the task's context", async () => {
     renderGraph();
 
-    const title = await screen.findByRole("link", { name: "Epic" });
-    expect(title).toHaveAttribute("href", `/projects/${proj.id}/tasks/${parent.id}`);
+    fireEvent.click((await screen.findByTitle("Step two")).closest("article")!);
+
+    const panel = await screen.findByRole("complementary", { name: "Selected task: Step two" });
+    expect(within(panel).getByText("In progress")).toBeInTheDocument();
+    expect(within(panel).getByText("Agent A")).toBeInTheDocument();
+    expect(within(panel).getByText("2 attempts")).toBeInTheDocument();
+    // Relations resolve against the loaded graph.
+    expect(within(panel).getByText("Parent")).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "Epic" })).toBeInTheDocument();
+    expect(within(panel).getByText("Depends on")).toBeInTheDocument();
+    // Full detail is one link away.
+    expect(within(panel).getByRole("link", { name: "Open full detail" })).toHaveAttribute(
+      "href",
+      `/projects/${proj.id}/tasks/${step2.id}`,
+    );
+
+    // Relation entries jump the selection across the graph.
+    await userEvent.click(within(panel).getByRole("button", { name: "Step one" }));
+    expect(
+      await screen.findByRole("complementary", { name: "Selected task: Step one" }),
+    ).toBeInTheDocument();
+
+    // Close clears ?selected= and the panel.
+    await userEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: /Selected task/ }),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it("marks real flow boundaries but not edge-less tasks", async () => {

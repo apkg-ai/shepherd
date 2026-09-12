@@ -16,6 +16,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import { decompositionGraph, dependencyGraph, type TaskNodeType } from "../../lib/graphLayout";
 import styles from "./GraphScreen.module.css";
+import { GraphSidePanel } from "./GraphSidePanel";
 import { TaskNode } from "./TaskNode";
 
 type Lens = "tree" | "flow";
@@ -99,17 +100,21 @@ function ProjectGraph({ projectId }: { projectId: string }) {
     onClick: () => setLens(value),
   });
 
-  const onNodeClick: NodeMouseHandler<TaskNodeType> = (_event, node) => {
+  const select = (taskId: string) => {
     setSearchParams(
       (params) => {
-        params.set("selected", node.id);
+        params.set("selected", taskId);
         return params;
       },
       { replace: true },
     );
   };
 
-  const onPaneClick = () => {
+  const onNodeClick: NodeMouseHandler<TaskNodeType> = (_event, node) => {
+    select(node.id);
+  };
+
+  const clearSelection = () => {
     if (selectedId === null) return;
     setSearchParams(
       (params) => {
@@ -148,6 +153,7 @@ function ProjectGraph({ projectId }: { projectId: string }) {
 
     const graph = lens === "tree" ? decompositionGraph : dependencyGraph;
     const { nodes, edges } = graph(tasks, relations);
+    const selectedTask = selectedId !== null ? tasks.find((t) => t.id === selectedId) : undefined;
     const nodesWithSelection =
       selectedId === null
         ? nodes
@@ -158,28 +164,40 @@ function ProjectGraph({ projectId }: { projectId: string }) {
         role="tabpanel"
         id={`graph-panel-${lens}`}
         aria-labelledby={`graph-tab-${lens}`}
-        className={styles.canvas}
+        className={styles.layout}
       >
-        {/* key={lens} remounts the canvas per lens so fitView reframes the
-            new layout; live data updates never re-fit. */}
-        <ReactFlow
-          key={lens}
-          aria-label={`Task graph, ${LENS_LABELS[lens]} lens`}
-          nodes={nodesWithSelection}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
-          minZoom={0.1}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          deleteKeyCode={null}
-          onNodeClick={onNodeClick}
-          onPaneClick={onPaneClick}
-        >
-          <Background variant={BackgroundVariant.Dots} gap={24} />
-          <Controls showInteractive={false} />
-        </ReactFlow>
+        <div className={styles.canvas}>
+          {/* key={lens} remounts the canvas per lens so fitView reframes the
+              new layout; live data updates never re-fit. */}
+          <ReactFlow
+            key={lens}
+            aria-label={`Task graph, ${LENS_LABELS[lens]} lens`}
+            nodes={nodesWithSelection}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+            minZoom={0.1}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            deleteKeyCode={null}
+            onNodeClick={onNodeClick}
+            onPaneClick={clearSelection}
+          >
+            <Background variant={BackgroundVariant.Dots} gap={24} />
+            <Controls showInteractive={false} />
+          </ReactFlow>
+        </div>
+        {selectedTask !== undefined ? (
+          <GraphSidePanel
+            task={selectedTask}
+            projectId={projectId}
+            tasks={tasks}
+            relations={relations}
+            onSelect={select}
+            onClose={clearSelection}
+          />
+        ) : null}
       </div>
     );
   };

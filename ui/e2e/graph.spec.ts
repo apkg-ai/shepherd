@@ -38,7 +38,7 @@ test.describe("graph lenses", () => {
       "true",
     );
     for (const title of ["Graph epic", "First step", "Second step"]) {
-      await expect(page.getByRole("link", { name: title })).toBeVisible();
+      await expect(page.getByRole("button", { name: title })).toBeVisible();
     }
     // Two decomposition edges, no dependency edge in this lens.
     await expect(page.locator(".react-flow__edge")).toHaveCount(2);
@@ -46,7 +46,7 @@ test.describe("graph lenses", () => {
 
   test("toggling lenses swaps the edge set and keeps selection", async ({ page }) => {
     await page.goto(`/#/projects/${project.id}`);
-    await expect(page.getByRole("link", { name: "Graph epic" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Graph epic" })).toBeVisible();
 
     // Select a node (body click), then switch lens: selection survives
     // because node ids are task ids in both lenses.
@@ -78,19 +78,31 @@ test.describe("graph lenses", () => {
     expect(first!.x).toBeLessThan(second!.x);
   });
 
-  test("node titles open task detail", async ({ page }) => {
+  test("selecting a node opens the side panel; full detail is a link away", async ({ page }) => {
     await page.goto(`/#/projects/${project.id}`);
 
-    await page.getByRole("link", { name: "Graph epic" }).click();
-    await expect(page).toHaveURL(new RegExp(`/projects/${project.id}/tasks/${epic.id}`));
-    await expect(page.getByRole("heading", { name: "Graph epic" })).toBeVisible();
+    await page.getByRole("button", { name: "Graph epic" }).click();
+    const panel = page.getByRole("complementary", { name: "Selected task: Graph epic" });
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText("Subtasks")).toBeVisible();
+
+    // Relation entries jump the selection without leaving the graph.
+    await panel.getByRole("button", { name: "First step" }).click();
+    await expect(
+      page.getByRole("complementary", { name: "Selected task: First step" }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`selected=${lens.id}`));
+
+    await page.getByRole("link", { name: "Open full detail" }).click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${project.id}/tasks/${lens.id}`));
+    await expect(page.getByRole("heading", { name: "First step" })).toBeVisible();
   });
 
   test("updates live while an agent works via REST", async ({ page }) => {
     const live = await createProject(`Graph live ${Date.now()}`);
     const start = await createTask(live.id, "Live start");
     await page.goto(`/#/projects/${live.id}?lens=flow`);
-    await expect(page.getByRole("link", { name: "Live start" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Live start" })).toBeVisible();
 
     // An agent claims the task: the node restyles as in_progress with the
     // claimant chip — no reload.
@@ -104,7 +116,9 @@ test.describe("graph lenses", () => {
     // A new task + dependency appear as they're created.
     const next = await createTask(live.id, "Live next");
     await createRelation(live.id, next.id, "depends_on", start.id);
-    await expect(page.getByRole("link", { name: "Live next" })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("button", { name: "Live next" })).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(page.locator(".react-flow__edge")).toHaveCount(1, { timeout: 10_000 });
   });
 });

@@ -71,12 +71,25 @@
 }
 
 .title {
+  /* Button reset — it reads as the node's label, not a control. */
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  display: block;
+  max-width: 100%;
   color: var(--color-text);
+  font-family: inherit;
   font-size: var(--text-sm);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.title:hover {
+  text-decoration: underline;
 }
 
 .meta {
