@@ -1693,6 +1693,12 @@ impl Store {
         let new_project_id = ProjectId::new();
         let now = Utc::now();
 
+        // All import writes run in one transaction so the data appears
+        // atomically to other connections. Without this, WAL-mode readers
+        // on a different pool connection can see a stale snapshot and miss
+        // the newly-inserted rows (GitHub issue #41).
+        let mut tx = self.pool.begin().await?;
+
         sqlx::query(
             "INSERT INTO projects (id, name, description, review_gate, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?)",
@@ -1703,7 +1709,7 @@ impl Store {
         .bind(doc.project.settings.review_gate)
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         // Build old → new ID mappings.
@@ -1779,7 +1785,7 @@ impl Store {
             .bind(task.block_reason.as_deref())
             .bind(now.to_rfc3339())
             .bind(now.to_rfc3339())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         }
 
@@ -1800,7 +1806,7 @@ impl Store {
             .bind(new_source.to_string())
             .bind(new_target.to_string())
             .bind(now.to_rfc3339())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         }
 
@@ -1827,7 +1833,7 @@ impl Store {
             .bind(serde_json::to_string(&session.decisions).unwrap())
             .bind(serde_json::to_string(&session.artifacts).unwrap())
             .bind(now.to_rfc3339())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         }
 
@@ -1850,15 +1856,16 @@ impl Store {
             .bind(new_session_id.map(|id| id.to_string()))
             .bind(new_project_id.to_string())
             .bind(now.to_rfc3339())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         }
 
-        // Events: the import materializes a full project in one mutation.
-        // Emitted only after every insert succeeded — no events for a
-        // failed import. Clients refetch on project.created per the v1
-        // recovery model; the per-entity events give project-filtered
-        // streams the same information.
+        tx.commit().await?;
+
+        // Events emitted AFTER commit — no phantom events on rollback.
+        // Clients refetch on project.created per the v1 recovery model;
+        // the per-entity events give project-filtered streams the same
+        // information.
         self.emit(DomainEvent::ProjectCreated {
             project_id: new_project_id,
             name: doc.project.name.clone(),
