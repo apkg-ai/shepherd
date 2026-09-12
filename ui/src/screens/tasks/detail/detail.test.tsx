@@ -177,9 +177,7 @@ describe("Task detail", () => {
     ).toBeInTheDocument();
     // Non-http link content renders as text, not a clickable anchor.
     expect(screen.getByText("javascript:alert(1)")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: "javascript:alert(1)" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "javascript:alert(1)" })).not.toBeInTheDocument();
   });
 
   it("shows a full error state when the task is missing", async () => {

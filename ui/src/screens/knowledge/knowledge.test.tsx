@@ -74,9 +74,7 @@ describe("Project knowledge screen", () => {
     expect(screen.getByRole("link", { name: "https://example.test/pr/1" })).toBeInTheDocument();
     // Non-http link content renders as text, never as a clickable anchor.
     expect(screen.getByText("javascript:alert(1)")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: "javascript:alert(1)" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "javascript:alert(1)" })).not.toBeInTheDocument();
     expect(screen.getByText("data:text/html,<script>alert(1)</script>")).toBeInTheDocument();
     expect(
       screen.queryByRole("link", { name: "data:text/html,<script>alert(1)</script>" }),
