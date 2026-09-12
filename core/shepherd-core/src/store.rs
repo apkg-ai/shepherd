@@ -502,9 +502,13 @@ impl Store {
         }
 
         // Find dependents BEFORE soft-deleting (so edges are still visible).
+        // Deleted dependents are skipped: their edges linger until purge, and
+        // auto-readying one would 404 — which used to abort project deletion
+        // whenever a dependent was cascaded away before its prerequisite.
         let dependent_ids: Vec<String> = sqlx::query_scalar(
-            "SELECT source_task_id FROM relations
-             WHERE type = 'depends_on' AND target_task_id = ?",
+            "SELECT r.source_task_id FROM relations r
+             JOIN tasks t ON t.id = r.source_task_id AND t.deleted_at IS NULL
+             WHERE r.type = 'depends_on' AND r.target_task_id = ?",
         )
         .bind(id.to_string())
         .fetch_all(&self.pool)
@@ -2088,8 +2092,9 @@ impl Store {
     ) -> Result<()> {
         // Find tasks that depend on the completed task.
         let rows = sqlx::query(
-            "SELECT source_task_id FROM relations
-             WHERE type = 'depends_on' AND target_task_id = ?",
+            "SELECT r.source_task_id FROM relations r
+             JOIN tasks t ON t.id = r.source_task_id AND t.deleted_at IS NULL
+             WHERE r.type = 'depends_on' AND r.target_task_id = ?",
         )
         .bind(completed_task_id.to_string())
         .fetch_all(&self.pool)
@@ -3232,6 +3237,61 @@ mod tests {
         // list_tasks should not include it.
         let page = store.list_tasks(p.id, None, 25, None, None).await.unwrap();
         assert!(page.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_prerequisite_after_deleted_dependent() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let prereq = proposed_task(&store, p.id, "prerequisite").await;
+        let dependent = proposed_task(&store, p.id, "dependent").await;
+        store
+            .create_relation(
+                p.id,
+                dependent.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: prereq.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Deleting the dependent first leaves a dangling edge; deleting the
+        // prerequisite must not trip auto-ready on the deleted dependent.
+        store.delete_task(p.id, dependent.id).await.unwrap();
+        store.delete_task(p.id, prereq.id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_project_with_dependency_chain() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+        let a = proposed_task(&store, p.id, "a").await;
+        let b = proposed_task(&store, p.id, "b").await;
+        let c = proposed_task(&store, p.id, "c").await;
+        let d = proposed_task(&store, p.id, "d").await;
+        // Edges in both creation directions: whatever scan order the cascade
+        // walks, some dependent is deleted before its prerequisite.
+        for (dependent, prereq) in [(a.id, b.id), (d.id, c.id)] {
+            store
+                .create_relation(
+                    p.id,
+                    dependent,
+                    &RelationCreate {
+                        relation_type: RelationType::DependsOn,
+                        target_task_id: prereq,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        // The cascade deletes tasks in listing order — dependents may go
+        // before their prerequisites and must not abort the delete.
+        store.delete_project(p.id).await.unwrap();
+        let err = store.get_project(p.id).await.unwrap_err();
+        assert_eq!(err.urn(), "urn:shepherd:error:not-found");
     }
 
     // ── list_projects ───────────────────────────────────────────────────
