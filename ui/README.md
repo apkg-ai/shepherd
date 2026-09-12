@@ -29,6 +29,21 @@ Never edit generated files. After changing the spec, run:
 npm run generate:api
 ```
 
+## Graph view (S8)
+
+`/#/projects/:id` is the graph — two lenses over the task graph on one
+[React Flow](https://reactflow.dev) canvas (decision recorded in
+[#11](https://github.com/apkg-ai/shepherd/issues/11) and docs/04-ui.md):
+`src/lib/graphLayout.ts` is the pure tasks+relations → nodes/edges assembly
+(dagre lays out both lenses), `src/screens/graph/` renders it with the
+`--status-*` tokens; React Flow's chrome themes through `--xy-*` variables in
+`src/styles/reactflow.css`. Liveness comes from one SSE subscription per
+active project (`src/lib/events.ts`, mounted in the shell): each catalog
+event maps to the query paths it stales, coalesced on a trailing timer, with
+a full project refetch on reconnect. The tasks table lives at
+`/#/projects/:id/tasks`; project-wide knowledge (with client-side search) at
+`/#/projects/:id/knowledge`.
+
 The committed output is exactly regen + `oxfmt` — the `ui-generated-drift`
 CI job (quality-gates.yaml) regenerates and fails on any diff, mirroring
 `core-generated-drift` / `scripts/regen-generated.sh` on the Rust side.
@@ -42,3 +57,9 @@ shared route table in `src/router.tsx`) against MSW: generated handlers serve
 spec-shaped faker noise, and each test seeds the deterministic fixtures it
 asserts on (`src/test/fixtures.ts`, `server.use(...)` — handlers registered
 first win). Coverage gate: ≥95% lines on `ui/src` (`scripts/coverage-report.mjs`).
+
+`src/test-setup.ts` carries React Flow's documented jsdom shims (a
+ResizeObserver that fires, `offsetWidth`/`offsetHeight` from inline styles,
+`DOMMatrixReadOnly`, `getBBox`) so graph screens render nodes *and* edges
+under vitest; canvas clicks in tests use `fireEvent` because userEvent's
+mousedown carries a null `event.view`, which crashes d3-zoom in jsdom.
