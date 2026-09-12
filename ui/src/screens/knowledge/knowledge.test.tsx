@@ -55,6 +55,34 @@ describe("Project knowledge screen", () => {
     );
   });
 
+  it("renders non-http link content as inert text", async () => {
+    const scripty = knowledgeItem({
+      project_id: proj.id,
+      type: "link",
+      title: "Suspicious",
+      content: "javascript:alert(1)",
+    });
+    const datay = knowledgeItem({
+      project_id: proj.id,
+      type: "link",
+      title: "Data payload",
+      content: "data:text/html,<script>alert(1)</script>",
+    });
+    renderKnowledge("", [link, scripty, datay]);
+
+    expect(await screen.findByText("The PR")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "https://example.test/pr/1" })).toBeInTheDocument();
+    // Non-http link content renders as text, never as a clickable anchor.
+    expect(screen.getByText("javascript:alert(1)")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "javascript:alert(1)" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("data:text/html,<script>alert(1)</script>")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "data:text/html,<script>alert(1)</script>" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("searches across title and content, case-insensitively", async () => {
     renderKnowledge();
     await screen.findByText("House conventions");

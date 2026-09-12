@@ -18,6 +18,7 @@ import { LoadMore } from "../../../components/LoadMore";
 import { ErrorState, LoadingState } from "../../../components/states";
 import { useToast } from "../../../components/Toast";
 import { zodFieldErrors } from "../../../lib/forms";
+import { isHttpUrl } from "../../../lib/links";
 import styles from "./TaskKnowledgePanel.module.css";
 
 const KNOWLEDGE_TYPES: KnowledgeItemCreateType[] = ["note", "link", "decision", "transcript"];
@@ -67,7 +68,7 @@ export function TaskKnowledgePanel({ projectId, taskId }: { projectId: string; t
                     ×
                   </button>
                 </div>
-                {item.type === "link" ? (
+                {item.type === "link" && isHttpUrl(item.content) ? (
                   <a href={item.content} target="_blank" rel="noreferrer">
                     {item.content}
                   </a>

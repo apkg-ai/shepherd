@@ -5,6 +5,7 @@ import { cursorPaging, flattenPages, useAllPages } from "../../api/paging";
 import { PageHeader } from "../../components/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import { formatDateTime } from "../../lib/format";
+import { isHttpUrl } from "../../lib/links";
 import styles from "./ProjectKnowledgeScreen.module.css";
 
 const SCOPES: ListKnowledgeScope[] = ["project", "task", "session"];
@@ -92,7 +93,7 @@ function KnowledgeList({ projectId }: { projectId: string }) {
                 <strong>{item.title}</strong>
                 <span className={styles.scope}>{item.scope}</span>
               </div>
-              {item.type === "link" ? (
+              {item.type === "link" && isHttpUrl(item.content) ? (
                 <a href={item.content} target="_blank" rel="noreferrer">
                   {item.content}
                 </a>
