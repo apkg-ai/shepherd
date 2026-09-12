@@ -78,6 +78,9 @@ function ProjectNav({ projectId }: { projectId: string }) {
         Review
         <ReviewBadge projectId={projectId} />
       </NavLink>
+      <NavLink to={`/projects/${projectId}/knowledge`} className={linkClass}>
+        Knowledge
+      </NavLink>
       <NavLink to={`/projects/${projectId}/settings`} className={linkClass}>
         Settings
       </NavLink>
