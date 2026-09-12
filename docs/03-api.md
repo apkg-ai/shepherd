@@ -32,6 +32,7 @@
 │       ├── /context                 the context bundle
 │       ├── /sessions                report work episodes (outcome, decisions, knowledge)
 │       └── /relations               decomposition + depends_on (cycle-rejecting)
+├── /projects/{project}/relations    bulk read of every relation — the graph view's feed
 ├── /projects/{project}/next-task    "what's next" query for agents (ready, unclaimed, priority order)
 ├── /projects/{project}/knowledge    project-wide knowledge (incl. project-scoped set)
 ├── /events                          SSE stream (see catalog)
