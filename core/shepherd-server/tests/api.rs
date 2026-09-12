@@ -1954,6 +1954,54 @@ async fn export_import_roundtrip_with_normalization() {
     assert_eq!(body["type"], "urn:shepherd:error:import-schema-mismatch");
 }
 
+// ── S5: import-then-delete must not 404 (issue #41) ────────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn import_then_delete_does_not_404() {
+    // File-backed store: the 4-connection pool reproduces the WAL visibility
+    // race that the in-memory single-connection pool would hide.
+    let dir = tempfile::tempdir().unwrap();
+    let store = shepherd_core::Store::open(dir.path().join("import-del.db"))
+        .await
+        .unwrap();
+    let state = shepherd_server::AppState { store };
+    let app = shepherd_server::router(state, "does-not-exist");
+
+    // Seed a pre-existing project (unrelated to the import).
+    let pre_pid = create_project(&app, "pre-existing").await;
+
+    // Build a minimal exportable project with a task, export it.
+    let src_pid = create_project(&app, "to-export").await;
+    let _tid = create_task(&app, &src_pid, "importable task", "approved").await;
+
+    let (_, doc) = get(&app, &format!("/api/v1/projects/{src_pid}/export")).await;
+    let (status, result) = post(&app, "/api/v1/projects/import", doc).await;
+    assert_eq!(status, StatusCode::CREATED, "import must succeed: {result}");
+    let imported_pid = result["project_id"].as_str().unwrap().to_string();
+
+    // Immediately delete the IMPORTED project → must be 204, not 404.
+    let (status, body) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/projects/{imported_pid}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "delete of just-imported project must not 404: {body}"
+    );
+
+    // Immediately delete the UNRELATED pre-existing project → must also be 204.
+    let (status, body) = send(&app, "DELETE", &format!("/api/v1/projects/{pre_pid}"), None).await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "delete of unrelated project after import must not 404: {body}"
+    );
+}
+
 // ── S5: concurrency — N parallel claims, exactly one winner ─────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
