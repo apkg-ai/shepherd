@@ -114,6 +114,40 @@ describe("Graph screen", () => {
     expect(title).toHaveAttribute("href", `/projects/${proj.id}/tasks/${parent.id}`);
   });
 
+  it("marks real flow boundaries but not edge-less tasks", async () => {
+    const start = task({ project_id: proj.id, title: "Starter", graph_role: ["start"] });
+    const milestone = task({
+      project_id: proj.id,
+      title: "Milestone",
+      graph_role: ["milestone"],
+    });
+    const isolated = task({
+      project_id: proj.id,
+      title: "Floater",
+      status: "cancelled",
+      graph_role: ["start", "end"],
+    });
+    renderRoute(`/projects/${proj.id}`, {
+      handlers: [
+        getGetProjectMockHandler(proj),
+        getListTasksMockHandler(page([start, milestone, isolated])),
+        getListProjectRelationsMockHandler(page([])),
+      ],
+    });
+
+    const startNode = (await screen.findByText("Starter")).closest("article")!;
+    expect(within(startNode).getByText("start")).toBeInTheDocument();
+    expect(
+      within(screen.getByText("Milestone").closest("article")!).getByText("milestone"),
+    ).toBeInTheDocument();
+
+    // start+end together is the derived default for edge-less tasks — no chips.
+    const floater = screen.getByText("Floater").closest("article")!;
+    expect(within(floater).queryByText("start")).not.toBeInTheDocument();
+    expect(within(floater).queryByText("end")).not.toBeInTheDocument();
+    expect(floater).toHaveAttribute("data-status", "cancelled");
+  });
+
   it("shows an empty state with a create link when the project has no tasks", async () => {
     renderRoute(`/projects/${proj.id}`, {
       handlers: [

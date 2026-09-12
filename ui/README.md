@@ -60,6 +60,6 @@ first win). Coverage gate: ≥95% lines on `ui/src` (`scripts/coverage-report.mj
 
 `src/test-setup.ts` carries React Flow's documented jsdom shims (a
 ResizeObserver that fires, `offsetWidth`/`offsetHeight` from inline styles,
-`DOMMatrixReadOnly`, `getBBox`) so graph screens render nodes *and* edges
+`DOMMatrixReadOnly`, `getBBox`) so graph screens render nodes _and_ edges
 under vitest; canvas clicks in tests use `fireEvent` because userEvent's
 mousedown carries a null `event.view`, which crashes d3-zoom in jsdom.
