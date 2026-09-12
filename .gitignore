@@ -95,3 +95,4 @@ coverage/
 
 # Asciinema terminal recordings
 *.cast
+*.mp4
