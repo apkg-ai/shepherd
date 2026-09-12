@@ -40,7 +40,7 @@ export function decompositionGraph(
   tasks: readonly Task[],
   relations: readonly Relation[],
 ): GraphModel {
-  return layout(tasks, lensEdges(tasks, relations, "decomposition"), "TB");
+  return treeLayout(tasks, lensEdges(tasks, relations, "decomposition"));
 }
 
 /** Dependency lens: prerequisite before dependent, start→end left→right. */
@@ -93,11 +93,10 @@ interface Block {
 }
 
 /**
- * Dagre lays a forest side-by-side in one endless rank, so a project with
- * many disconnected components (every epic is one, in the tree lens) becomes
- * an unreadable strip. Instead: dagre per connected component, edge-less
- * tasks gathered into one compact grid, then the blocks shelf-packed into
- * rows — the canvas stays near-viewport-shaped at any project size.
+ * Flow-lens layout. Dagre lays disconnected components side-by-side in one
+ * endless rank, so: dagre per connected component, edge-less tasks gathered
+ * into one compact grid, then the blocks shelf-packed into rows — the canvas
+ * stays near-viewport-shaped at any project size.
  */
 function layout(
   tasks: readonly Task[],
@@ -145,13 +144,81 @@ function layout(
   }
   if (singles.length > 0) blocks.push(gridBlock(singles));
 
-  // Shelf-pack the blocks into rows.
+  return assemble(tasks, edges, packBlocks(blocks, MAX_ROW_WIDTH), rankdir === "LR", edgeExtras);
+}
+
+/**
+ * Decomposition-only layout: a recursive tidy tree where a parent's child
+ * blocks WRAP into rows instead of forming one endless rank — dagre can't do
+ * this, and it's what keeps a shallow-wide tree (one root, many epics, many
+ * leaves) viewport-shaped. Parents sit centered above their child area.
+ */
+function treeLayout(tasks: readonly Task[], edges: readonly LensEdge[]): GraphModel {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const childrenOf = new Map<string, string[]>();
+  const hasParent = new Set<string>();
+  for (const edge of edges) {
+    // Decomposition orientation: source is the parent, target the child.
+    const siblings = childrenOf.get(edge.source);
+    if (siblings === undefined) childrenOf.set(edge.source, [edge.target]);
+    else siblings.push(edge.target);
+    hasParent.add(edge.target);
+  }
+
+  const visited = new Set<string>();
+  const subtree = (id: string): Block => {
+    visited.add(id);
+    const kids = (childrenOf.get(id) ?? []).filter((k) => !visited.has(k) && byId.has(k));
+    const kidBlocks = kids.map(subtree);
+    if (kidBlocks.length === 0) {
+      return {
+        positions: new Map([[id, { x: 0, y: 0 }]]),
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+      };
+    }
+    const childArea = packBlocks(kidBlocks, MAX_ROW_WIDTH);
+    let width = NODE_WIDTH;
+    let height = 0;
+    for (const p of childArea.values()) {
+      width = Math.max(width, p.x + NODE_WIDTH);
+      height = Math.max(height, p.y + NODE_HEIGHT);
+    }
+    const positions = new Map<string, { x: number; y: number }>();
+    // Parent centered over its children, children one level down.
+    positions.set(id, { x: (width - NODE_WIDTH) / 2, y: 0 });
+    for (const [childId, p] of childArea) {
+      positions.set(childId, { x: p.x, y: p.y + NODE_HEIGHT + 48 });
+    }
+    return { positions, width, height: height + NODE_HEIGHT + 48 };
+  };
+
+  const blocks: Block[] = [];
+  const singles: Task[] = [];
+  for (const task of tasks) {
+    if (hasParent.has(task.id)) continue;
+    if (childrenOf.has(task.id)) blocks.push(subtree(task.id));
+    else singles.push(task);
+  }
+  // Defensive: anything unreachable (malformed parent cycles) still renders.
+  const stranded = tasks.filter((t) => !visited.has(t.id) && !singles.includes(t));
+  if (stranded.length > 0) singles.push(...stranded);
+  if (singles.length > 0) blocks.push(gridBlock(singles));
+
+  return assemble(tasks, edges, packBlocks(blocks, MAX_ROW_WIDTH), false);
+}
+
+/** Shelf-packs blocks into rows capped at `maxWidth`; returns merged positions. */
+function packBlocks(
+  blocks: readonly Block[],
+  maxWidth: number,
+): Map<string, { x: number; y: number }> {
   const positions = new Map<string, { x: number; y: number }>();
   let x = 0;
   let y = 0;
   let rowHeight = 0;
   for (const block of blocks) {
-    if (x > 0 && x + block.width > MAX_ROW_WIDTH) {
+    if (x > 0 && x + block.width > maxWidth) {
       x = 0;
       y += rowHeight + BLOCK_GAP;
       rowHeight = 0;
@@ -162,9 +229,18 @@ function layout(
     x += block.width + BLOCK_GAP;
     rowHeight = Math.max(rowHeight, block.height);
   }
+  return positions;
+}
 
+/** Positions + lens edges → React Flow nodes/edges. */
+function assemble(
+  tasks: readonly Task[],
+  edges: readonly LensEdge[],
+  positions: ReadonlyMap<string, { x: number; y: number }>,
+  horizontal: boolean,
+  edgeExtras: Partial<Edge> = {},
+): GraphModel {
   const statusById = new Map(tasks.map((t) => [t.id, t.status]));
-  const horizontal = rankdir === "LR";
 
   const nodes: TaskNodeType[] = tasks.map((task) => ({
     id: task.id,

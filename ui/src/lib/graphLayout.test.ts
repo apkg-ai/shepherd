@@ -146,6 +146,44 @@ describe("both lenses", () => {
     expect(ys.size).toBe(3);
   });
 
+  it("keeps a single-root mega-tree viewport-shaped by wrapping child rows", () => {
+    // One root → 7 epics → 6 children each: a single component that a rank
+    // layout would render as a ~11000px strip.
+    const root = task({ title: "root" });
+    const tasks = [root];
+    const relations = [];
+    for (let e = 0; e < 7; e++) {
+      const epic = task({ title: `epic ${e}` });
+      tasks.push(epic);
+      relations.push(
+        relation({ type: "decomposition", source_task_id: root.id, target_task_id: epic.id }),
+      );
+      for (let c = 0; c < 6; c++) {
+        const child = task({ title: `child ${e}.${c}` });
+        tasks.push(child);
+        relations.push(
+          relation({ type: "decomposition", source_task_id: epic.id, target_task_id: child.id }),
+        );
+      }
+    }
+
+    const { nodes } = decompositionGraph(tasks, relations);
+
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const maxX = Math.max(...nodes.map((n) => n.position.x + NODE_WIDTH));
+    expect(maxX).toBeLessThanOrEqual(2400);
+    // Root centered above its child area, not pinned to the left edge.
+    const rootNode = byId.get(root.id)!;
+    expect(rootNode.position.y).toBe(0);
+    expect(rootNode.position.x).toBeGreaterThan(0);
+    // Depth still reads top → bottom.
+    for (const rel of relations) {
+      expect(byId.get(rel.target_task_id)!.position.y).toBeGreaterThan(
+        byId.get(rel.source_task_id)!.position.y,
+      );
+    }
+  });
+
   it("wraps disconnected components into rows, bounding the canvas width", () => {
     // 8 parent→(3 children) components: side-by-side they'd be ~8000px wide.
     const tasks = [];
