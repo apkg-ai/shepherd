@@ -5,16 +5,20 @@
  * Local-first hub for agent-driven project work. Maps projects as typed task graphs and acts as persistent shared memory across agent and human sessions. The spec is the product boundary — anything not in this contract does not exist. Design rules in docs/03-api.md.
  * OpenAPI spec version: 0.1.0
  */
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import type {
   DataTag,
   DefinedInitialDataOptions,
+  DefinedUseInfiniteQueryResult,
   DefinedUseQueryResult,
+  InfiniteData,
   MutationFunction,
   QueryClient,
   QueryFunction,
   QueryKey,
   UndefinedInitialDataOptions,
+  UseInfiniteQueryOptions,
+  UseInfiniteQueryResult,
   UseMutationOptions,
   UseMutationResult,
   UseQueryOptions,
@@ -24,7 +28,9 @@ import type {
 import type {
   ConflictResponse,
   InternalErrorResponse,
+  ListProjectRelationsParams,
   NotFoundResponse,
+  ProjectRelationList,
   Relation,
   RelationCreate,
   RelationList,
@@ -51,6 +57,419 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getListProjectRelationsUrl = (
+  projectId: string,
+  params?: ListProjectRelationsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${projectId}/relations?${stringifiedParams}`
+    : `/api/v1/projects/${projectId}/relations`;
+};
+
+/**
+ * Returns a paginated list of every relation in the project — both decomposition and depends_on edges. This is the bulk feed for the graph view; the per-task endpoint remains for task-scoped reads.
+ * @summary List all relations in a project
+ */
+export const listProjectRelations = async (
+  projectId: string,
+  params?: ListProjectRelationsParams,
+  options?: Parameters<typeof shepherdFetch>[1],
+): Promise<ProjectRelationList> => {
+  return shepherdFetch<ProjectRelationList>(getListProjectRelationsUrl(projectId, params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListProjectRelationsInfiniteQueryKey = (
+  projectId: string,
+  params?: ListProjectRelationsParams,
+) => {
+  return [
+    "infinite",
+    `/api/v1/projects/${projectId}/relations`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListProjectRelationsQueryKey = (
+  projectId: string,
+  params?: ListProjectRelationsParams,
+) => {
+  return [`/api/v1/projects/${projectId}/relations`, ...(params ? [params] : [])] as const;
+};
+
+export const getListProjectRelationsInfiniteQueryOptions = <
+  TData = InfiniteData<
+    Awaited<ReturnType<typeof listProjectRelations>>,
+    ListProjectRelationsParams["cursor"]
+  >,
+  TError =
+    | UnauthorizedResponse
+    | NotFoundResponse
+    | ValidationErrorResponse
+    | TooManyRequestsResponse
+    | InternalErrorResponse,
+>(
+  projectId: string,
+  params?: ListProjectRelationsParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listProjectRelations>>,
+        TError,
+        TData,
+        QueryKey,
+        ListProjectRelationsParams["cursor"]
+      >
+    >;
+    request?: SecondParameter<typeof shepherdFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListProjectRelationsInfiniteQueryKey(projectId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listProjectRelations>>,
+    QueryKey,
+    ListProjectRelationsParams["cursor"]
+  > = ({ signal, pageParam }) =>
+    listProjectRelations(
+      projectId,
+      { ...params, cursor: pageParam ?? params?.["cursor"] },
+      { signal, ...requestOptions },
+    );
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: projectId !== null && projectId !== undefined,
+    ...queryOptions,
+  } as UseInfiniteQueryOptions<
+    Awaited<ReturnType<typeof listProjectRelations>>,
+    TError,
+    TData,
+    QueryKey,
+    ListProjectRelationsParams["cursor"]
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListProjectRelationsInfiniteQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listProjectRelations>>
+>;
+export type ListProjectRelationsInfiniteQueryError =
+  | UnauthorizedResponse
+  | NotFoundResponse
+  | ValidationErrorResponse
+  | TooManyRequestsResponse
+  | InternalErrorResponse;
+
+export function useListProjectRelationsInfinite<
+  TData = InfiniteData<
+    Awaited<ReturnType<typeof listProjectRelations>>,
+    ListProjectRelationsParams["cursor"]
+  >,
+  TError =
+    | UnauthorizedResponse
+    | NotFoundResponse
+    | ValidationErrorResponse
+    | TooManyRequestsResponse
+    | InternalErrorResponse,
+>(
+  projectId: string,
+  params: undefined | ListProjectRelationsParams,
+  options: {
+    query: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listProjectRelations>>,
+        TError,
+        TData,
+        QueryKey,
+        ListProjectRelationsParams["cursor"]
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listProjectRelations>>,
+          TError,
+          Awaited<ReturnType<typeof listProjectRelations>>,
+          QueryKey
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof shepherdFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useListProjectRelationsInfinite<
+  TData = InfiniteData<
+    Awaited<ReturnType<typeof listProjectRelations>>,
+    ListProjectRelationsParams["cursor"]
+  >,
+  TError =
+    | UnauthorizedResponse
+    | NotFoundResponse
+    | ValidationErrorResponse
+    | TooManyRequestsResponse
+    | InternalErrorResponse,
+>(
+  projectId: string,
+  params?: ListProjectRelationsParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listProjectRelations>>,
+        TError,
+        TData,
+        QueryKey,
+        ListProjectRelationsParams["cursor"]
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listProjectRelations>>,
+          TError,
+          Awaited<ReturnType<typeof listProjectRelations>>,
+          QueryKey
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof shepherdFetch>;
+  },
+  queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useListProjectRelationsInfinite<
+  TData = InfiniteData<
+    Awaited<ReturnType<typeof listProjectRelations>>,
+    ListProjectRelationsParams["cursor"]
+  >,
+  TError =
+    | UnauthorizedResponse
+    | NotFoundResponse
+    | ValidationErrorResponse
+    | TooManyRequestsResponse
+    | InternalErrorResponse,
+>(
+  projectId: string,
+  params?: ListProjectRelationsParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listProjectRelations>>,
+        TError,
+        TData,
+        QueryKey,
+        ListProjectRelationsParams["cursor"]
+      >
+    >;
+    request?: SecondParameter<typeof shepherdFetch>;
+  },
+  queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+/**
+ * @summary List all relations in a project
+ */
+
+export function useListProjectRelationsInfinite<
+  TData = InfiniteData<
+    Awaited<ReturnType<typeof listProjectRelations>>,
+    ListProjectRelationsParams["cursor"]
+  >,
+  TError =
+    | UnauthorizedResponse
+    | NotFoundResponse
+    | ValidationErrorResponse
+    | TooManyRequestsResponse
+    | InternalErrorResponse,
+>(
+  projectId: string,
+  params?: ListProjectRelationsParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listProjectRelations>>,
+        TError,
+        TData,
+        QueryKey,
+        ListProjectRelationsParams["cursor"]
+      >
+    >;
+    request?: SecondParameter<typeof shepherdFetch>;
+  },
+  queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+  const queryOptions = getListProjectRelationsInfiniteQueryOptions(projectId, params, options);
+
+  const query = useInfiniteQuery(queryOptions, queryClient) as UseInfiniteQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getListProjectRelationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listProjectRelations>>,
+  TError =
+    | UnauthorizedResponse
+    | NotFoundResponse
+    | ValidationErrorResponse
+    | TooManyRequestsResponse
+    | InternalErrorResponse,
+>(
+  projectId: string,
+  params?: ListProjectRelationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listProjectRelations>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof shepherdFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListProjectRelationsQueryKey(projectId, params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listProjectRelations>>> = ({ signal }) =>
+    listProjectRelations(projectId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: projectId !== null && projectId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<Awaited<ReturnType<typeof listProjectRelations>>, TError, TData> & {
+    queryKey: DataTag<QueryKey, TData, TError>;
+  };
+};
+
+export type ListProjectRelationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listProjectRelations>>
+>;
+export type ListProjectRelationsQueryError =
+  | UnauthorizedResponse
+  | NotFoundResponse
+  | ValidationErrorResponse
+  | TooManyRequestsResponse
+  | InternalErrorResponse;
+
+export function useListProjectRelations<
+  TData = Awaited<ReturnType<typeof listProjectRelations>>,
+  TError =
+    | UnauthorizedResponse
+    | NotFoundResponse
+    | ValidationErrorResponse
+    | TooManyRequestsResponse
+    | InternalErrorResponse,
+>(
+  projectId: string,
+  params: undefined | ListProjectRelationsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listProjectRelations>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listProjectRelations>>,
+          TError,
+          Awaited<ReturnType<typeof listProjectRelations>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof shepherdFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useListProjectRelations<
+  TData = Awaited<ReturnType<typeof listProjectRelations>>,
+  TError =
+    | UnauthorizedResponse
+    | NotFoundResponse
+    | ValidationErrorResponse
+    | TooManyRequestsResponse
+    | InternalErrorResponse,
+>(
+  projectId: string,
+  params?: ListProjectRelationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listProjectRelations>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listProjectRelations>>,
+          TError,
+          Awaited<ReturnType<typeof listProjectRelations>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof shepherdFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+export function useListProjectRelations<
+  TData = Awaited<ReturnType<typeof listProjectRelations>>,
+  TError =
+    | UnauthorizedResponse
+    | NotFoundResponse
+    | ValidationErrorResponse
+    | TooManyRequestsResponse
+    | InternalErrorResponse,
+>(
+  projectId: string,
+  params?: ListProjectRelationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listProjectRelations>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof shepherdFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+/**
+ * @summary List all relations in a project
+ */
+
+export function useListProjectRelations<
+  TData = Awaited<ReturnType<typeof listProjectRelations>>,
+  TError =
+    | UnauthorizedResponse
+    | NotFoundResponse
+    | ValidationErrorResponse
+    | TooManyRequestsResponse
+    | InternalErrorResponse,
+>(
+  projectId: string,
+  params?: ListProjectRelationsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listProjectRelations>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof shepherdFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+  const queryOptions = getListProjectRelationsQueryOptions(projectId, params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
 
 export const getListTaskRelationsUrl = (projectId: string, taskId: string) => {
   return `/api/v1/projects/${projectId}/tasks/${taskId}/relations`;
