@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./helpers/coverage";
 import {
+  createKnowledge,
   createProject,
   createRelation,
   createTask,
@@ -38,6 +39,10 @@ test.beforeAll(async () => {
   });
   await seedInReviewTask(project.id, "Audit review item");
   await createTask(project.id, "Audit proposal", { status: "proposed" });
+  await createKnowledge(project.id, {
+    title: "Audit convention",
+    content: "Seeded for the knowledge screen audit",
+  });
   detailTaskId = dep.id;
 });
 
@@ -70,12 +75,21 @@ test.describe("axe WCAG AA audit", () => {
     await auditRoute(page, "/#/", "registry");
   });
 
+  test("graph, both lenses", async ({ page }) => {
+    await auditRoute(page, `/#/projects/${project.id}`, "graph tree lens");
+    await auditRoute(page, `/#/projects/${project.id}?lens=flow`, "graph flow lens");
+  });
+
   test("task tree", async ({ page }) => {
-    await auditRoute(page, `/#/projects/${project.id}`, "task tree");
+    await auditRoute(page, `/#/projects/${project.id}/tasks`, "task tree");
   });
 
   test("filtered task list", async ({ page }) => {
-    await auditRoute(page, `/#/projects/${project.id}?status=in_review`, "filtered list");
+    await auditRoute(page, `/#/projects/${project.id}/tasks?status=in_review`, "filtered list");
+  });
+
+  test("knowledge", async ({ page }) => {
+    await auditRoute(page, `/#/projects/${project.id}/knowledge`, "knowledge");
   });
 
   test("task detail", async ({ page }) => {

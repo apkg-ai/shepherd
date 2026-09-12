@@ -18,7 +18,7 @@ import type { Relation, Task } from "../api/generated/model";
  * the relation id.
  */
 
-export const NODE_WIDTH = 220;
+export const NODE_WIDTH = 248;
 export const NODE_HEIGHT = 76;
 
 export type TaskNodeType = Node<{ task: Task }, "task">;

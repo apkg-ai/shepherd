@@ -24,6 +24,12 @@ export function TaskNode({
   targetPosition,
 }: NodeProps<TaskNodeType>) {
   const { task } = data;
+  // "start" AND "end" is the derived default for tasks with no dependency
+  // edges at all — as chips it's noise, so only real boundaries get marked.
+  const roles =
+    task.graph_role.includes("start") && task.graph_role.includes("end")
+      ? task.graph_role.filter((role) => role === "milestone")
+      : task.graph_role;
   return (
     <article
       className={styles.node}
@@ -44,7 +50,7 @@ export function TaskNode({
           <IdentityChip identity={task.assignee} />
         ) : null}
         <AttemptBadge attempts={task.attempt_count} />
-        {task.graph_role.map((role) => (
+        {roles.map((role) => (
           <span key={role} className={styles.role}>
             {role}
             <span className="sr-only"> of the dependency flow</span>

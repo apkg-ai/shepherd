@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./helpers/coverage";
 import {
+  createKnowledge,
   createProject,
   createRelation,
   createTask,
@@ -52,6 +53,18 @@ test.beforeAll(async () => {
 
   await seedInReviewTask(project.id, "Review the palette");
   await createTask(project.id, "Proposed: live cursors", { status: "proposed" });
+  await createKnowledge(project.id, {
+    title: "Graph library decision",
+    content: "React Flow + dagre under the minimal-deps rule.",
+    type: "decision",
+  });
+  await createKnowledge(project.id, {
+    title: "The PR",
+    content: "https://example.test/pr/1",
+    type: "link",
+    scope: "task",
+    taskId: detailTaskId,
+  });
   const blocked = await createTask(project.id, "Blocked on infra");
   await fetch(
     `${process.env["PLAYWRIGHT_BASE_URL"] ?? "http://127.0.0.1:7543"}/api/v1/projects/${project.id}/tasks/${blocked.id}/block`,
@@ -83,8 +96,11 @@ async function capture(page: Page, path: string, name: string) {
 test("captures every key screen in both themes", async ({ page }) => {
   test.setTimeout(120_000);
   await capture(page, "/#/", "registry");
-  await capture(page, `/#/projects/${project.id}`, "task-tree");
-  await capture(page, `/#/projects/${project.id}?status=in_review`, "task-list-filtered");
+  await capture(page, `/#/projects/${project.id}`, "graph-tree-lens");
+  await capture(page, `/#/projects/${project.id}?lens=flow`, "graph-flow-lens");
+  await capture(page, `/#/projects/${project.id}/tasks`, "task-tree");
+  await capture(page, `/#/projects/${project.id}/tasks?status=in_review`, "task-list-filtered");
+  await capture(page, `/#/projects/${project.id}/knowledge`, "knowledge");
   await capture(page, `/#/projects/${project.id}/tasks/${detailTaskId}`, "task-detail");
   await capture(page, `/#/projects/${project.id}/tasks/new`, "task-form");
   await capture(page, `/#/projects/${project.id}/review`, "review-queue");

@@ -120,6 +120,17 @@ const PAIRS: Pair[] = [
   },
   { fg: "attention", bg: "surface-raised", min: AA_NON_TEXT, note: "in_review row accent bar" },
   { fg: "warning", bg: "surface-raised", min: AA_NON_TEXT, note: "blocked row accent bar" },
+  // Graph canvas (S8): status node borders on the canvas surface, edge
+  // strokes, and node text on the raised node fill. Cancelled borders and
+  // edges use text-faint — --color-border misses this bar.
+  { fg: "pink", bg: "surface", min: AA_NON_TEXT, note: "graph proposed node border" },
+  { fg: "teal", bg: "surface", min: AA_NON_TEXT, note: "graph approved node border" },
+  { fg: "success", bg: "surface", min: AA_NON_TEXT, note: "graph done node border" },
+  { fg: "warning", bg: "surface", min: AA_NON_TEXT, note: "graph blocked node border" },
+  { fg: "attention", bg: "surface", min: AA_NON_TEXT, note: "graph in_review node border" },
+  { fg: "text-faint", bg: "surface", min: AA_NON_TEXT, note: "graph edges, cancelled border" },
+  { fg: "on-accent", bg: "accent", min: AA_TEXT, note: "graph in_progress node title" },
+  { fg: "text", bg: "surface-raised", min: AA_TEXT, note: "graph node titles" },
 ];
 
 describe("WCAG AA token gate", () => {
