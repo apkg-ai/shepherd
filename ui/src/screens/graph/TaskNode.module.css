@@ -1,7 +1,7 @@
 /*
- * Node dimensions are fixed by the layout (graphLayout.ts NODE_WIDTH/HEIGHT)
- * so dagre never needs a measure pass — keep width/height in sync with those
- * constants.
+ * Node dimensions come from the layout constants (graphLayout.ts
+ * NODE_WIDTH/HEIGHT) via an inline style on the component — dagre never
+ * needs a measure pass and there is a single source of truth.
  *
  * Status styling flows entirely through the --status-* tokens (tokens.css).
  * The border repeats the status hue; the cancelled border steps up to
@@ -10,8 +10,6 @@
  */
 .node {
   box-sizing: border-box;
-  width: 248px;
-  height: 76px;
   display: flex;
   flex-direction: column;
   justify-content: center;

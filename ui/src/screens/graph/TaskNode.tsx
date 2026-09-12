@@ -2,7 +2,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { AttemptBadge } from "../../components/AttemptBadge";
 import { IdentityChip } from "../../components/IdentityChip";
 import { StatusBadge } from "../../components/StatusBadge";
-import type { TaskNodeType } from "../../lib/graphLayout";
+import { NODE_HEIGHT, NODE_WIDTH, type TaskNodeType } from "../../lib/graphLayout";
 import styles from "./TaskNode.module.css";
 
 /**
@@ -33,6 +33,7 @@ export function TaskNode({
   return (
     <article
       className={styles.node}
+      style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
       data-status={task.status}
       data-selected={selected ? "true" : undefined}
     >
