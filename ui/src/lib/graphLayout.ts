@@ -80,41 +80,105 @@ function lensEdges(
     }));
 }
 
+/** Gap between packed component blocks. */
+const BLOCK_GAP = 80;
+/** Row width the component packing wraps at — bounds the canvas aspect. */
+const MAX_ROW_WIDTH = 2400;
+
+interface Block {
+  /** Positions local to the block (top-left corners, origin-normalized). */
+  positions: Map<string, { x: number; y: number }>;
+  width: number;
+  height: number;
+}
+
+/**
+ * Dagre lays a forest side-by-side in one endless rank, so a project with
+ * many disconnected components (every epic is one, in the tree lens) becomes
+ * an unreadable strip. Instead: dagre per connected component, edge-less
+ * tasks gathered into one compact grid, then the blocks shelf-packed into
+ * rows — the canvas stays near-viewport-shaped at any project size.
+ */
 function layout(
   tasks: readonly Task[],
   edges: readonly LensEdge[],
   rankdir: "TB" | "LR",
   edgeExtras: Partial<Edge> = {},
 ): GraphModel {
-  const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir, nodesep: 24, ranksep: 48 });
-  g.setDefaultEdgeLabel(() => ({}));
+  // Connected components via union-find over the lens edges.
+  const root = new Map<string, string>(tasks.map((t) => [t.id, t.id]));
+  const find = (id: string): string => {
+    let current = id;
+    while (root.get(current) !== current) current = root.get(current)!;
+    root.set(id, current);
+    return current;
+  };
+  for (const edge of edges) root.set(find(edge.source), find(edge.target));
 
-  for (const task of tasks) g.setNode(task.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
-  for (const edge of edges) g.setEdge(edge.source, edge.target);
+  const componentTasks = new Map<string, Task[]>();
+  for (const task of tasks) {
+    const key = find(task.id);
+    const group = componentTasks.get(key);
+    if (group === undefined) componentTasks.set(key, [task]);
+    else group.push(task);
+  }
 
-  dagre.layout(g);
+  // Blocks in first-task order; singletons pool into one grid block at the end.
+  const blocks: Block[] = [];
+  const singles: Task[] = [];
+  const seen = new Set<string>();
+  for (const task of tasks) {
+    const key = find(task.id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const group = componentTasks.get(key)!;
+    if (group.length === 1) singles.push(task);
+    else {
+      blocks.push(
+        dagreBlock(
+          group,
+          edges.filter((e) => find(e.source) === key),
+          rankdir,
+        ),
+      );
+    }
+  }
+  if (singles.length > 0) blocks.push(gridBlock(singles));
+
+  // Shelf-pack the blocks into rows.
+  const positions = new Map<string, { x: number; y: number }>();
+  let x = 0;
+  let y = 0;
+  let rowHeight = 0;
+  for (const block of blocks) {
+    if (x > 0 && x + block.width > MAX_ROW_WIDTH) {
+      x = 0;
+      y += rowHeight + BLOCK_GAP;
+      rowHeight = 0;
+    }
+    for (const [id, local] of block.positions) {
+      positions.set(id, { x: local.x + x, y: local.y + y });
+    }
+    x += block.width + BLOCK_GAP;
+    rowHeight = Math.max(rowHeight, block.height);
+  }
 
   const statusById = new Map(tasks.map((t) => [t.id, t.status]));
   const horizontal = rankdir === "LR";
 
-  const nodes: TaskNodeType[] = tasks.map((task) => {
-    const placed = g.node(task.id);
-    return {
-      id: task.id,
-      type: "task",
-      data: { task },
-      // dagre positions node centers; React Flow wants top-left corners.
-      position: { x: placed.x - NODE_WIDTH / 2, y: placed.y - NODE_HEIGHT / 2 },
-      // Explicit dimensions: edges render immediately, no measure pass.
-      width: NODE_WIDTH,
-      height: NODE_HEIGHT,
-      sourcePosition: horizontal ? Position.Right : Position.Bottom,
-      targetPosition: horizontal ? Position.Left : Position.Top,
-      draggable: false,
-      connectable: false,
-    };
-  });
+  const nodes: TaskNodeType[] = tasks.map((task) => ({
+    id: task.id,
+    type: "task",
+    data: { task },
+    position: positions.get(task.id)!,
+    // Explicit dimensions: edges render immediately, no measure pass.
+    width: NODE_WIDTH,
+    height: NODE_HEIGHT,
+    sourcePosition: horizontal ? Position.Right : Position.Bottom,
+    targetPosition: horizontal ? Position.Left : Position.Top,
+    draggable: false,
+    connectable: false,
+  }));
 
   const flowEdges: Edge[] = edges.map(({ relation, source, target }) => ({
     id: relation.id,
@@ -126,4 +190,55 @@ function layout(
   }));
 
   return { nodes, edges: flowEdges };
+}
+
+/** One dagre layout for a connected component, normalized to its origin. */
+function dagreBlock(
+  tasks: readonly Task[],
+  edges: readonly LensEdge[],
+  rankdir: "TB" | "LR",
+): Block {
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir, nodesep: 24, ranksep: 48 });
+  g.setDefaultEdgeLabel(() => ({}));
+  for (const task of tasks) g.setNode(task.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
+  for (const edge of edges) g.setEdge(edge.source, edge.target);
+  dagre.layout(g);
+
+  const positions = new Map<string, { x: number; y: number }>();
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const task of tasks) {
+    const placed = g.node(task.id);
+    // dagre positions node centers; React Flow wants top-left corners.
+    const x = placed.x - NODE_WIDTH / 2;
+    const y = placed.y - NODE_HEIGHT / 2;
+    positions.set(task.id, { x, y });
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + NODE_WIDTH);
+    maxY = Math.max(maxY, y + NODE_HEIGHT);
+  }
+  for (const [id, p] of positions) positions.set(id, { x: p.x - minX, y: p.y - minY });
+  return { positions, width: maxX - minX, height: maxY - minY };
+}
+
+/** Edge-less tasks as a near-square grid instead of one endless row. */
+function gridBlock(tasks: readonly Task[]): Block {
+  const columns = Math.ceil(Math.sqrt(tasks.length));
+  const positions = new Map<string, { x: number; y: number }>();
+  tasks.forEach((task, index) => {
+    positions.set(task.id, {
+      x: (index % columns) * (NODE_WIDTH + 24),
+      y: Math.floor(index / columns) * (NODE_HEIGHT + 24),
+    });
+  });
+  const rows = Math.ceil(tasks.length / columns);
+  return {
+    positions,
+    width: columns * (NODE_WIDTH + 24) - 24,
+    height: rows * (NODE_HEIGHT + 24) - 24,
+  };
 }

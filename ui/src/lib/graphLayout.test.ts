@@ -133,4 +133,41 @@ describe("both lenses", () => {
     expect(NODE_WIDTH).toBeGreaterThan(0);
     expect(NODE_HEIGHT).toBeGreaterThan(0);
   });
+
+  it("grids edge-less tasks instead of one endless row", () => {
+    const tasks = Array.from({ length: 9 }, (_, i) => task({ title: `t${i}` }));
+
+    const { nodes } = dependencyGraph(tasks, []);
+
+    const xs = new Set(nodes.map((n) => n.position.x));
+    const ys = new Set(nodes.map((n) => n.position.y));
+    // 9 singletons pack 3×3, not 9×1.
+    expect(xs.size).toBe(3);
+    expect(ys.size).toBe(3);
+  });
+
+  it("wraps disconnected components into rows, bounding the canvas width", () => {
+    // 8 parent→(3 children) components: side-by-side they'd be ~8000px wide.
+    const tasks = [];
+    const relations = [];
+    for (let i = 0; i < 8; i++) {
+      const parent = task({ title: `epic ${i}` });
+      tasks.push(parent);
+      for (let c = 0; c < 3; c++) {
+        const child = task({ title: `child ${i}.${c}` });
+        tasks.push(child);
+        relations.push(
+          relation({ type: "decomposition", source_task_id: parent.id, target_task_id: child.id }),
+        );
+      }
+    }
+
+    const { nodes } = decompositionGraph(tasks, relations);
+
+    const maxX = Math.max(...nodes.map((n) => n.position.x + NODE_WIDTH));
+    const maxY = Math.max(...nodes.map((n) => n.position.y + NODE_HEIGHT));
+    expect(maxX).toBeLessThanOrEqual(2400);
+    // More than one shelf row means the packing actually wrapped.
+    expect(maxY).toBeGreaterThan(NODE_HEIGHT * 4);
+  });
 });
