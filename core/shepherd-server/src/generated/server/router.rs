@@ -141,6 +141,27 @@ fn __decode_list_projects_query(
         .transpose()?;
     Ok(ListProjectsQuery { cursor, limit })
 }
+/// Query parameters for `GET /api/v1/projects/{project_id}/relations` (operationId `listProjectRelations`).
+#[derive(Debug, Default)]
+pub struct ListProjectRelationsQuery {
+    pub cursor: ::std::option::Option<String>,
+    pub limit: ::std::option::Option<i32>,
+}
+fn __decode_list_project_relations_query(
+    raw: ::std::option::Option<&str>,
+) -> ::std::result::Result<ListProjectRelationsQuery, String> {
+    if let Some(raw) = raw {
+        __validate_urlencoded(raw)?;
+    }
+    let __pairs = __query_pairs(raw);
+    let cursor = __query_one(&__pairs, "cursor")?
+        .map(|raw| __decode_query_scalar(&raw, "cursor"))
+        .transpose()?;
+    let limit = __query_one(&__pairs, "limit")?
+        .map(|raw| __decode_query_scalar(&raw, "limit"))
+        .transpose()?;
+    Ok(ListProjectRelationsQuery { cursor, limit })
+}
 /// Query parameters for `GET /api/v1/projects/{project_id}/tasks/{task_id}/sessions` (operationId `listTaskSessions`).
 #[derive(Debug, Default)]
 pub struct ListTaskSessionsQuery {
@@ -240,84 +261,6 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_46_PATH_0,
-                "/path/project_id",
-                true,
-            ) {
-                Ok(value) => value,
-                Err(rejection) => {
-                    return ::axum::response::IntoResponse::into_response(rejection);
-                }
-            }
-        }
-        None => {
-            return ::axum::response::IntoResponse::into_response(
-                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
-    let task_id: String = match __path_values.remove("task_id") {
-        Some(raw) => {
-            match super::validation::decode_parameter(
-                &raw,
-                super::validation::VALIDATION_TARGET_47_PATH_1,
-                "/path/task_id",
-                true,
-            ) {
-                Ok(value) => value,
-                Err(rejection) => {
-                    return ::axum::response::IntoResponse::into_response(rejection);
-                }
-            }
-        }
-        None => {
-            return ::axum::response::IntoResponse::into_response(
-                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
-    let body: ClaimRequest = match super::validation::decode_json_body::<ClaimRequest>(
-        __request,
-        super::validation::VALIDATION_TARGET_45_BODY,
-        "application/json",
-        true,
-        2097152usize,
-    )
-    .await
-    {
-        Ok(Some(body)) => body,
-        Ok(None) => {
-            return ::axum::response::IntoResponse::into_response(
-                super::validation::generated_contract_error(),
-            );
-        }
-        Err(rejection) => return ::axum::response::IntoResponse::into_response(rejection),
-    };
-    ::axum::response::IntoResponse::into_response(api.claim_task(project_id, task_id, body).await)
-}
-async fn renew_claim_handler<T>(
-    ::axum::extract::State(api): ::axum::extract::State<T>,
-    __path_result: ::std::result::Result<
-        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
-        ::axum::extract::rejection::PathRejection,
-    >,
-    __request: ::axum::extract::Request,
-) -> ::axum::response::Response
-where
-    T: super::api::ClaimsApi + Clone + Send + Sync + 'static,
-{
-    let ::axum::extract::Path(mut __path_values) = match __path_result {
-        Ok(path) => path,
-        Err(_) => {
-            return ::axum::response::IntoResponse::into_response(
-                ::axum::http::StatusCode::BAD_REQUEST,
-            );
-        }
-    };
-    let project_id: String = match __path_values.remove("project_id") {
-        Some(raw) => {
-            match super::validation::decode_parameter(
-                &raw,
                 super::validation::VALIDATION_TARGET_49_PATH_0,
                 "/path/project_id",
                 true,
@@ -354,7 +297,7 @@ where
             );
         }
     };
-    let body: ClaimRenewal = match super::validation::decode_json_body::<ClaimRenewal>(
+    let body: ClaimRequest = match super::validation::decode_json_body::<ClaimRequest>(
         __request,
         super::validation::VALIDATION_TARGET_48_BODY,
         "application/json",
@@ -371,9 +314,9 @@ where
         }
         Err(rejection) => return ::axum::response::IntoResponse::into_response(rejection),
     };
-    ::axum::response::IntoResponse::into_response(api.renew_claim(project_id, task_id, body).await)
+    ::axum::response::IntoResponse::into_response(api.claim_task(project_id, task_id, body).await)
 }
-async fn release_claim_handler<T>(
+async fn renew_claim_handler<T>(
     ::axum::extract::State(api): ::axum::extract::State<T>,
     __path_result: ::std::result::Result<
         ::axum::extract::Path<::std::collections::HashMap<String, String>>,
@@ -432,9 +375,87 @@ where
             );
         }
     };
-    let body: ClaimRelease = match super::validation::decode_json_body::<ClaimRelease>(
+    let body: ClaimRenewal = match super::validation::decode_json_body::<ClaimRenewal>(
         __request,
         super::validation::VALIDATION_TARGET_51_BODY,
+        "application/json",
+        true,
+        2097152usize,
+    )
+    .await
+    {
+        Ok(Some(body)) => body,
+        Ok(None) => {
+            return ::axum::response::IntoResponse::into_response(
+                super::validation::generated_contract_error(),
+            );
+        }
+        Err(rejection) => return ::axum::response::IntoResponse::into_response(rejection),
+    };
+    ::axum::response::IntoResponse::into_response(api.renew_claim(project_id, task_id, body).await)
+}
+async fn release_claim_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+    __request: ::axum::extract::Request,
+) -> ::axum::response::Response
+where
+    T: super::api::ClaimsApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_55_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let task_id: String = match __path_values.remove("task_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_56_PATH_1,
+                "/path/task_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let body: ClaimRelease = match super::validation::decode_json_body::<ClaimRelease>(
+        __request,
+        super::validation::VALIDATION_TARGET_54_BODY,
         "application/json",
         true,
         2097152usize,
@@ -492,7 +513,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_76_PATH_0,
+                super::validation::VALIDATION_TARGET_79_PATH_0,
                 "/path/project_id",
                 true,
             ) {
@@ -519,7 +540,7 @@ where
 {
     let body: ExportDocument = match super::validation::decode_json_body::<ExportDocument>(
         __request,
-        super::validation::VALIDATION_TARGET_77_BODY,
+        super::validation::VALIDATION_TARGET_80_BODY,
         "application/json",
         true,
         2097152usize,
@@ -584,7 +605,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_69_PATH_5,
+                super::validation::VALIDATION_TARGET_72_PATH_5,
                 "/path/project_id",
                 true,
             ) {
@@ -610,7 +631,7 @@ where
     let __raw_query_pairs = __query_pairs(__raw_query.as_deref());
     if let Ok(Some(raw)) = __query_one(&__raw_query_pairs, "cursor") {
         if let Err(rejection) = super::validation::validate_string_parameter(
-            super::validation::VALIDATION_TARGET_64_QUERY_0,
+            super::validation::VALIDATION_TARGET_67_QUERY_0,
             "/query/cursor",
             &raw,
         ) {
@@ -619,7 +640,7 @@ where
     }
     if let Ok(Some(raw)) = __query_one(&__raw_query_pairs, "scope") {
         if let Err(rejection) = super::validation::validate_string_parameter(
-            super::validation::VALIDATION_TARGET_66_QUERY_2,
+            super::validation::VALIDATION_TARGET_69_QUERY_2,
             "/query/scope",
             &raw,
         ) {
@@ -628,7 +649,7 @@ where
     }
     if let Ok(Some(raw)) = __query_one(&__raw_query_pairs, "type") {
         if let Err(rejection) = super::validation::validate_string_parameter(
-            super::validation::VALIDATION_TARGET_67_QUERY_3,
+            super::validation::VALIDATION_TARGET_70_QUERY_3,
             "/query/type",
             &raw,
         ) {
@@ -637,7 +658,7 @@ where
     }
     if let Ok(Some(raw)) = __query_one(&__raw_query_pairs, "task_id") {
         if let Err(rejection) = super::validation::validate_string_parameter(
-            super::validation::VALIDATION_TARGET_68_QUERY_4,
+            super::validation::VALIDATION_TARGET_71_QUERY_4,
             "/query/task_id",
             &raw,
         ) {
@@ -654,7 +675,7 @@ where
     };
     if let Some(value) = &__q.cursor {
         if let Err(rejection) = super::validation::validate_parameter(
-            super::validation::VALIDATION_TARGET_64_QUERY_0,
+            super::validation::VALIDATION_TARGET_67_QUERY_0,
             "/query/cursor",
             value,
         ) {
@@ -663,7 +684,7 @@ where
     }
     if let Some(value) = &__q.limit {
         if let Err(rejection) = super::validation::validate_parameter(
-            super::validation::VALIDATION_TARGET_65_QUERY_1,
+            super::validation::VALIDATION_TARGET_68_QUERY_1,
             "/query/limit",
             value,
         ) {
@@ -672,7 +693,7 @@ where
     }
     if let Some(value) = &__q.scope {
         if let Err(rejection) = super::validation::validate_parameter(
-            super::validation::VALIDATION_TARGET_66_QUERY_2,
+            super::validation::VALIDATION_TARGET_69_QUERY_2,
             "/query/scope",
             value,
         ) {
@@ -681,7 +702,7 @@ where
     }
     if let Some(value) = &__q.r#type {
         if let Err(rejection) = super::validation::validate_parameter(
-            super::validation::VALIDATION_TARGET_67_QUERY_3,
+            super::validation::VALIDATION_TARGET_70_QUERY_3,
             "/query/type",
             value,
         ) {
@@ -690,7 +711,7 @@ where
     }
     if let Some(value) = &__q.task_id {
         if let Err(rejection) = super::validation::validate_parameter(
-            super::validation::VALIDATION_TARGET_68_QUERY_4,
+            super::validation::VALIDATION_TARGET_71_QUERY_4,
             "/query/task_id",
             value,
         ) {
@@ -732,7 +753,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_71_PATH_0,
+                super::validation::VALIDATION_TARGET_74_PATH_0,
                 "/path/project_id",
                 true,
             ) {
@@ -751,7 +772,7 @@ where
     let body: KnowledgeItemCreate =
         match super::validation::decode_json_body::<KnowledgeItemCreate>(
             __request,
-            super::validation::VALIDATION_TARGET_70_BODY,
+            super::validation::VALIDATION_TARGET_73_BODY,
             "application/json",
             true,
             2097152usize,
@@ -790,7 +811,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_72_PATH_0,
+                super::validation::VALIDATION_TARGET_75_PATH_0,
                 "/path/project_id",
                 true,
             ) {
@@ -810,7 +831,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_73_PATH_1,
+                super::validation::VALIDATION_TARGET_76_PATH_1,
                 "/path/knowledge_id",
                 true,
             ) {
@@ -850,7 +871,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_74_PATH_0,
+                super::validation::VALIDATION_TARGET_77_PATH_0,
                 "/path/project_id",
                 true,
             ) {
@@ -870,7 +891,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_75_PATH_1,
+                super::validation::VALIDATION_TARGET_78_PATH_1,
                 "/path/knowledge_id",
                 true,
             ) {
@@ -1142,6 +1163,10 @@ where
 {
     ::axum::Router::new()
         .route(
+            "/api/v1/projects/{project_id}/relations",
+            ::axum::routing::get(list_project_relations_handler::<T>),
+        )
+        .route(
             "/api/v1/projects/{project_id}/tasks/{task_id}/relations",
             ::axum::routing::get(list_task_relations_handler::<T>),
         )
@@ -1156,12 +1181,13 @@ where
         .layer(::axum::extract::DefaultBodyLimit::max(2097152usize))
         .with_state(api)
 }
-async fn list_task_relations_handler<T>(
+async fn list_project_relations_handler<T>(
     ::axum::extract::State(api): ::axum::extract::State<T>,
     __path_result: ::std::result::Result<
         ::axum::extract::Path<::std::collections::HashMap<String, String>>,
         ::axum::extract::rejection::PathRejection,
     >,
+    ::axum::extract::RawQuery(__raw_query): ::axum::extract::RawQuery,
 ) -> ::axum::response::Response
 where
     T: super::api::RelationsApi + Clone + Send + Sync + 'static,
@@ -1178,7 +1204,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_37_PATH_0,
+                super::validation::VALIDATION_TARGET_39_PATH_2,
                 "/path/project_id",
                 true,
             ) {
@@ -1194,37 +1220,61 @@ where
             );
         }
     };
-    let task_id: String = match __path_values.remove("task_id") {
-        Some(raw) => {
-            match super::validation::decode_parameter(
-                &raw,
-                super::validation::VALIDATION_TARGET_38_PATH_1,
-                "/path/task_id",
-                true,
-            ) {
-                Ok(value) => value,
-                Err(rejection) => {
-                    return ::axum::response::IntoResponse::into_response(rejection);
-                }
-            }
-        }
-        None => {
+    if let Some(raw) = __raw_query.as_deref() {
+        if __validate_urlencoded(raw).is_err() {
             return ::axum::response::IntoResponse::into_response(
-                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                super::validation::malformed_parameter("/query"),
             );
         }
-    };
+    }
+    let __raw_query_pairs = __query_pairs(__raw_query.as_deref());
+    if let Ok(Some(raw)) = __query_one(&__raw_query_pairs, "cursor") {
+        if let Err(rejection) = super::validation::validate_string_parameter(
+            super::validation::VALIDATION_TARGET_37_QUERY_0,
+            "/query/cursor",
+            &raw,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    let __q: ListProjectRelationsQuery =
+        match __decode_list_project_relations_query(__raw_query.as_deref()) {
+            Ok(query) => query,
+            Err(_) => {
+                return ::axum::response::IntoResponse::into_response(
+                    super::validation::malformed_parameter("/query"),
+                );
+            }
+        };
+    if let Some(value) = &__q.cursor {
+        if let Err(rejection) = super::validation::validate_parameter(
+            super::validation::VALIDATION_TARGET_37_QUERY_0,
+            "/query/cursor",
+            value,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
+    if let Some(value) = &__q.limit {
+        if let Err(rejection) = super::validation::validate_parameter(
+            super::validation::VALIDATION_TARGET_38_QUERY_1,
+            "/query/limit",
+            value,
+        ) {
+            return ::axum::response::IntoResponse::into_response(rejection);
+        }
+    }
     ::axum::response::IntoResponse::into_response(
-        api.list_task_relations(project_id, task_id).await,
+        api.list_project_relations(project_id, __q.cursor, __q.limit)
+            .await,
     )
 }
-async fn create_task_relation_handler<T>(
+async fn list_task_relations_handler<T>(
     ::axum::extract::State(api): ::axum::extract::State<T>,
     __path_result: ::std::result::Result<
         ::axum::extract::Path<::std::collections::HashMap<String, String>>,
         ::axum::extract::rejection::PathRejection,
     >,
-    __request: ::axum::extract::Request,
 ) -> ::axum::response::Response
 where
     T: super::api::RelationsApi + Clone + Send + Sync + 'static,
@@ -1277,9 +1327,72 @@ where
             );
         }
     };
+    ::axum::response::IntoResponse::into_response(
+        api.list_task_relations(project_id, task_id).await,
+    )
+}
+async fn create_task_relation_handler<T>(
+    ::axum::extract::State(api): ::axum::extract::State<T>,
+    __path_result: ::std::result::Result<
+        ::axum::extract::Path<::std::collections::HashMap<String, String>>,
+        ::axum::extract::rejection::PathRejection,
+    >,
+    __request: ::axum::extract::Request,
+) -> ::axum::response::Response
+where
+    T: super::api::RelationsApi + Clone + Send + Sync + 'static,
+{
+    let ::axum::extract::Path(mut __path_values) = match __path_result {
+        Ok(path) => path,
+        Err(_) => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let project_id: String = match __path_values.remove("project_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_43_PATH_0,
+                "/path/project_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+    let task_id: String = match __path_values.remove("task_id") {
+        Some(raw) => {
+            match super::validation::decode_parameter(
+                &raw,
+                super::validation::VALIDATION_TARGET_44_PATH_1,
+                "/path/task_id",
+                true,
+            ) {
+                Ok(value) => value,
+                Err(rejection) => {
+                    return ::axum::response::IntoResponse::into_response(rejection);
+                }
+            }
+        }
+        None => {
+            return ::axum::response::IntoResponse::into_response(
+                ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
     let body: RelationCreate = match super::validation::decode_json_body::<RelationCreate>(
         __request,
-        super::validation::VALIDATION_TARGET_39_BODY,
+        super::validation::VALIDATION_TARGET_42_BODY,
         "application/json",
         true,
         2097152usize,
@@ -1320,7 +1433,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_42_PATH_0,
+                super::validation::VALIDATION_TARGET_45_PATH_0,
                 "/path/project_id",
                 true,
             ) {
@@ -1340,7 +1453,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_43_PATH_1,
+                super::validation::VALIDATION_TARGET_46_PATH_1,
                 "/path/task_id",
                 true,
             ) {
@@ -1360,7 +1473,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_44_PATH_2,
+                super::validation::VALIDATION_TARGET_47_PATH_2,
                 "/path/relation_id",
                 true,
             ) {
@@ -1425,7 +1538,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_56_PATH_2,
+                super::validation::VALIDATION_TARGET_59_PATH_2,
                 "/path/project_id",
                 true,
             ) {
@@ -1445,7 +1558,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_57_PATH_3,
+                super::validation::VALIDATION_TARGET_60_PATH_3,
                 "/path/task_id",
                 true,
             ) {
@@ -1471,7 +1584,7 @@ where
     let __raw_query_pairs = __query_pairs(__raw_query.as_deref());
     if let Ok(Some(raw)) = __query_one(&__raw_query_pairs, "cursor") {
         if let Err(rejection) = super::validation::validate_string_parameter(
-            super::validation::VALIDATION_TARGET_54_QUERY_0,
+            super::validation::VALIDATION_TARGET_57_QUERY_0,
             "/query/cursor",
             &raw,
         ) {
@@ -1489,7 +1602,7 @@ where
     };
     if let Some(value) = &__q.cursor {
         if let Err(rejection) = super::validation::validate_parameter(
-            super::validation::VALIDATION_TARGET_54_QUERY_0,
+            super::validation::VALIDATION_TARGET_57_QUERY_0,
             "/query/cursor",
             value,
         ) {
@@ -1498,7 +1611,7 @@ where
     }
     if let Some(value) = &__q.limit {
         if let Err(rejection) = super::validation::validate_parameter(
-            super::validation::VALIDATION_TARGET_55_QUERY_1,
+            super::validation::VALIDATION_TARGET_58_QUERY_1,
             "/query/limit",
             value,
         ) {
@@ -1533,7 +1646,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_59_PATH_0,
+                super::validation::VALIDATION_TARGET_62_PATH_0,
                 "/path/project_id",
                 true,
             ) {
@@ -1553,7 +1666,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_60_PATH_1,
+                super::validation::VALIDATION_TARGET_63_PATH_1,
                 "/path/task_id",
                 true,
             ) {
@@ -1571,7 +1684,7 @@ where
     };
     let body: SessionReport = match super::validation::decode_json_body::<SessionReport>(
         __request,
-        super::validation::VALIDATION_TARGET_58_BODY,
+        super::validation::VALIDATION_TARGET_61_BODY,
         "application/json",
         true,
         2097152usize,
@@ -1612,7 +1725,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_61_PATH_0,
+                super::validation::VALIDATION_TARGET_64_PATH_0,
                 "/path/project_id",
                 true,
             ) {
@@ -1632,7 +1745,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_62_PATH_1,
+                super::validation::VALIDATION_TARGET_65_PATH_1,
                 "/path/task_id",
                 true,
             ) {
@@ -1652,7 +1765,7 @@ where
         Some(raw) => {
             match super::validation::decode_parameter(
                 &raw,
-                super::validation::VALIDATION_TARGET_63_PATH_2,
+                super::validation::VALIDATION_TARGET_66_PATH_2,
                 "/path/session_id",
                 true,
             ) {

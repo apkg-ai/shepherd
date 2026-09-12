@@ -946,6 +946,51 @@ impl Store {
         rows.iter().map(row_to_relation).collect()
     }
 
+    /// Every relation in the project, cursor-paginated — the graph view's
+    /// bulk feed. Edges touching a soft-deleted task on either end are
+    /// excluded (deletion treats them as effectively removed).
+    pub async fn list_project_relations(
+        &self,
+        project_id: ProjectId,
+        cursor: Option<&str>,
+        limit: i64,
+    ) -> Result<Page<Relation>> {
+        let _ = self.get_project(project_id).await?;
+        let limit = limit.clamp(1, 100);
+
+        let mut sql = String::from(
+            "SELECT r.id, r.type, r.source_task_id, r.target_task_id, r.created_at
+             FROM relations r
+             JOIN tasks s ON s.id = r.source_task_id AND s.deleted_at IS NULL
+             JOIN tasks t ON t.id = r.target_task_id AND t.deleted_at IS NULL
+             WHERE s.project_id = ?",
+        );
+        let mut binds: Vec<String> = vec![project_id.to_string()];
+
+        if let Some(c) = cursor {
+            let c = Cursor::decode(c)?;
+            sql.push_str(" AND (r.created_at, r.id) < (?, ?)");
+            binds.push(c.created_at.to_rfc3339());
+            binds.push(c.id.to_string());
+        }
+
+        sql.push_str(" ORDER BY r.created_at DESC, r.id DESC LIMIT ?");
+        binds.push((limit + 1).to_string());
+
+        let mut query = sqlx::query(&sql);
+        for b in &binds {
+            query = query.bind(b);
+        }
+
+        let rows = query.fetch_all(&self.pool).await?;
+        let items: Vec<Relation> = rows.iter().map(row_to_relation).collect::<Result<_>>()?;
+
+        Ok(Page::from_rows(items, limit as usize, |r| Cursor {
+            created_at: r.created_at,
+            id: r.id.0,
+        }))
+    }
+
     // ── Claims ───────────────────────────────────────────────────────────
 
     pub async fn claim_task(
@@ -3638,6 +3683,137 @@ mod tests {
         // t1 is involved in both relations (as source of one, target of another).
         let rels = store.list_relations(p.id, t1.id).await.unwrap();
         assert_eq!(rels.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_project_relations_returns_both_types() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+
+        let parent = proposed_task(&store, p.id, "parent").await;
+        let child = proposed_task(&store, p.id, "child").await;
+        let dep = proposed_task(&store, p.id, "dep").await;
+
+        store
+            .create_relation(
+                p.id,
+                parent.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: child.id,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .create_relation(
+                p.id,
+                child.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: dep.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        let page = store.list_project_relations(p.id, None, 25).await.unwrap();
+        assert_eq!(page.items.len(), 2);
+        assert!(!page.has_more);
+        assert!(
+            page.items
+                .iter()
+                .any(|r| r.relation_type == RelationType::Decomposition)
+        );
+        assert!(
+            page.items
+                .iter()
+                .any(|r| r.relation_type == RelationType::DependsOn)
+        );
+    }
+
+    #[tokio::test]
+    async fn list_project_relations_pagination() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+
+        let hub = proposed_task(&store, p.id, "hub").await;
+        for i in 0..3 {
+            let t = proposed_task(&store, p.id, &format!("t{i}")).await;
+            store
+                .create_relation(
+                    p.id,
+                    hub.id,
+                    &RelationCreate {
+                        relation_type: RelationType::DependsOn,
+                        target_task_id: t.id,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        let page1 = store.list_project_relations(p.id, None, 2).await.unwrap();
+        assert_eq!(page1.items.len(), 2);
+        assert!(page1.has_more);
+
+        let page2 = store
+            .list_project_relations(p.id, page1.next_cursor.as_deref(), 2)
+            .await
+            .unwrap();
+        assert_eq!(page2.items.len(), 1);
+        assert!(!page2.has_more);
+    }
+
+    #[tokio::test]
+    async fn list_project_relations_excludes_deleted_task_edges() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = project_no_gate(&store).await;
+
+        let a = proposed_task(&store, p.id, "a").await;
+        let b = proposed_task(&store, p.id, "b").await;
+        let c = proposed_task(&store, p.id, "c").await;
+
+        // a depends on b, b depends on c — deleting b kills both edges
+        // (as source of one, target of the other).
+        store
+            .create_relation(
+                p.id,
+                a.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: b.id,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .create_relation(
+                p.id,
+                b.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: c.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        store.delete_task(p.id, b.id).await.unwrap();
+
+        let page = store.list_project_relations(p.id, None, 25).await.unwrap();
+        assert!(page.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_project_relations_unknown_project() {
+        let store = Store::new_in_memory().await.unwrap();
+
+        let err = store
+            .list_project_relations(ProjectId::new(), None, 25)
+            .await
+            .unwrap_err();
+        assert_eq!(err.urn(), "urn:shepherd:error:not-found");
     }
 
     // ── renew_claim ─────────────────────────────────────────────────────

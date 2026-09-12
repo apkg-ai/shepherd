@@ -838,6 +838,27 @@ impl ExportImportApi for AppState {
 
 #[async_trait::async_trait]
 impl RelationsApi for AppState {
+    async fn list_project_relations(
+        &self,
+        project_id: String,
+        cursor: Option<String>,
+        limit: Option<i32>,
+    ) -> ListProjectRelationsResponse {
+        let pid = match parse_project_id(&project_id) {
+            Ok(id) => id,
+            Err(e) => return map_err_no_conflict!(ListProjectRelationsResponse, e),
+        };
+        let limit = limit.map(|l| l as i64).unwrap_or(25);
+        match self
+            .store
+            .list_project_relations(pid, cursor.as_deref(), limit)
+            .await
+        {
+            Ok(page) => ListProjectRelationsResponse::Ok(page.into()),
+            Err(e) => map_err_no_conflict!(ListProjectRelationsResponse, e),
+        }
+    }
+
     async fn list_task_relations(
         &self,
         project_id: String,

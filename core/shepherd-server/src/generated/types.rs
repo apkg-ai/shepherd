@@ -530,6 +530,23 @@ pub struct ProjectUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<ProjectSettings>,
 }
+///Paginated list of every relation in a project — the bulk feed for the graph view.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProjectRelationList {
+    ///Whether more pages exist after this one.
+    pub has_more: bool,
+    ///Array of relation resources.
+    ///Constraint: minItems=0, maxItems=100
+    pub items: Vec<Relation>,
+    ///Cursor for fetching the next page. Null if no more pages.
+    ///Constraint: minLength=1, maxLength=256, pattern=`^[a-zA-Z0-9_=-]+$`
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "tri_state_serde::deserialize"
+    )]
+    pub next_cursor: Option<Option<String>>,
+}
 ///Paginated list of projects.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProjectList {
