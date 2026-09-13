@@ -58,9 +58,10 @@ pub fn transition(current: TaskStatus, trigger: &Trigger) -> Result<TaskStatus, 
         // Ready demotion: new dependency not done
         (Ready, DependencyAdded) => Approved,
 
-        // Epic auto-completion: all decomposition children are Done.
-        // Epics skip the normal claim/session/review flow.
-        (Proposed, EpicAutoComplete) => Done,
+        // Epic auto-completion: all decomposition children and depends_on
+        // prerequisites are Done. Epics skip the claim/session/review flow
+        // (they are not claimable), but approval is still required — a
+        // proposed epic does not auto-complete.
         (Approved, EpicAutoComplete) => Done,
         (Ready, EpicAutoComplete) => Done,
         (InProgress, EpicAutoComplete) => Done,
@@ -107,7 +108,6 @@ pub fn allowed_triggers(status: TaskStatus) -> Vec<Trigger> {
     match status {
         Proposed => {
             triggers.push(Approve);
-            triggers.push(EpicAutoComplete);
             triggers.push(Block);
             triggers.push(Cancel);
         }
@@ -276,8 +276,8 @@ mod tests {
     }
 
     #[test]
-    fn epic_auto_complete_from_any_active_status() {
-        for status in [Proposed, Approved, Ready, InProgress, InReview] {
+    fn epic_auto_complete_from_any_approved_status() {
+        for status in [Approved, Ready, InProgress, InReview] {
             assert_eq!(
                 transition(status, &EpicAutoComplete).unwrap(),
                 Done,
@@ -291,6 +291,8 @@ mod tests {
         assert!(transition(Done, &EpicAutoComplete).is_err());
         assert!(transition(Cancelled, &EpicAutoComplete).is_err());
         assert!(transition(Blocked, &EpicAutoComplete).is_err());
+        // A proposed epic has not been approved — no auto-completion.
+        assert!(transition(Proposed, &EpicAutoComplete).is_err());
     }
 
     #[test]

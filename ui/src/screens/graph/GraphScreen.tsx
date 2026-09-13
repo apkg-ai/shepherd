@@ -416,11 +416,18 @@ function ProjectGraph({ projectId }: { projectId: string }) {
     const taskById = new Map(tasks.map((t) => [t.id, t]));
 
     for (const r of relations) {
-      // Epic blocked: child epic waiting on parent's non-epic subtasks.
+      // Epic blocked: a child epic waiting on its parent's non-epic
+      // subtasks before it becomes actionable. Only pre-action statuses
+      // get the flag — a child that is already done, cancelled, or
+      // actively in progress keeps its real status badge.
       if (r.type === "decomposition") {
         const parent = taskById.get(r.source_task_id);
         const child = taskById.get(r.target_task_id);
-        if (parent?.type === "epic" && child?.type === "epic") {
+        if (
+          parent?.type === "epic" &&
+          child?.type === "epic" &&
+          (child.status === "proposed" || child.status === "approved")
+        ) {
           const hasUnfinishedWork = relations.some((rel) => {
             if (rel.type !== "decomposition" || rel.source_task_id !== parent.id) return false;
             const sibling = taskById.get(rel.target_task_id);

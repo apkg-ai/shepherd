@@ -3,9 +3,10 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import type { Relation, RelationCreateType, Task } from "../../api/generated/model";
 import { useCreateTaskRelation } from "../../api/generated/relations/relations";
-import { useListTasks } from "../../api/generated/tasks/tasks";
+import { useListTasksInfinite } from "../../api/generated/tasks/tasks";
 import { invalidatePaths } from "../../api/invalidate";
 import { isShepherdError } from "../../api/problem";
+import { cursorPaging, flattenPages, useAllPages } from "../../api/paging";
 import { AttemptBadge } from "../../components/AttemptBadge";
 import { IdentityChip } from "../../components/IdentityChip";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -165,8 +166,15 @@ function GraphSidePanelActions({
   const [targetId, setTargetId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const candidatesQuery = useListTasks(projectId, { limit: 100 }, { query: { enabled: showLink } });
-  const candidates = (candidatesQuery.data?.items ?? []).filter((t) => t.id !== task.id);
+  // All tasks, not just the first page — the picker must offer every
+  // linkable task in the project. useAllPages drains the cursor.
+  const candidatesQuery = useListTasksInfinite(
+    projectId,
+    { limit: 100 },
+    { query: { ...cursorPaging(), enabled: showLink } },
+  );
+  useAllPages(candidatesQuery);
+  const candidates = flattenPages(candidatesQuery.data?.pages).filter((t) => t.id !== task.id);
 
   const createRelation = useCreateTaskRelation({ mutation: { meta: { silent: true } } });
 

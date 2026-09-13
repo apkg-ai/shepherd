@@ -28,10 +28,13 @@ identity — human or agent), relations, sessions, knowledge — plus a **`type`
   may be a human (agent asks user) or an agent (user asks agent). Blocking uses normal dependency
   semantics; the answer becomes reusable knowledge.
 - **`epic` task** — a first-class container for related work. An epic auto-completes (transitions to
-  `done`) when all its decomposition children are `done`. The graph's dependency-flow lens shows only
-  top-level epics; nested epics appear in the decomposition tree lens and the parent's side panel.
-  Cancelled children block auto-completion (conservative: a human should assess whether the epic is
-  still complete). See #54 for the planned epic/task lifecycle split.
+  `done`) when all its decomposition children are `done` **and** its own `depends_on` prerequisites
+  are met; approval is still required (a `proposed` epic does not auto-complete). Epics skip the
+  claim/session/review flow — they are not claimable and complete via the cascade, bypassing the
+  project's review gate. The graph's dependency-flow lens shows only top-level epics; nested epics
+  appear in the decomposition tree lens and the parent's side panel. Cancelled children block
+  auto-completion (conservative: a human should assess whether the epic is still complete). See #54
+  for the planned epic/task lifecycle split.
 - **"Artifacts"** are not a separate entity: they are knowledge items of type `link` (commits, PRs,
   files) attached to the task.
 
