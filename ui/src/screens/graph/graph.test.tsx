@@ -239,4 +239,102 @@ describe("Graph screen", () => {
     expect(await screen.findByText("From page two")).toBeInTheDocument();
     expect(screen.getByText("Epic")).toBeInTheDocument();
   });
+
+  it("collapsing a default-expanded root leaves other roots expanded", async () => {
+    // Two roots, both default-expanded in the tree lens. Collapsing one
+    // must seed from the effective default — not from an empty set, which
+    // would collapse every other root too.
+    const other = task({ project_id: proj.id, title: "Other epic" });
+    const otherChild = task({ project_id: proj.id, title: "Other step" });
+    const { router } = renderRoute(`/projects/${proj.id}?lens=tree`, {
+      handlers: [
+        getGetProjectMockHandler(proj),
+        getListTasksMockHandler(page([parent, step1, step2, other, otherChild])),
+        getListProjectRelationsMockHandler(
+          page([
+            ...relations,
+            relation({
+              type: "decomposition",
+              source_task_id: other.id,
+              target_task_id: otherChild.id,
+            }),
+          ]),
+        ),
+      ],
+    });
+
+    await screen.findByText("Step one");
+    expect(screen.getByText("Other step")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Collapse 2 subtasks" }));
+
+    // Epic collapsed; the other root keeps its subtree.
+    await waitFor(() => expect(screen.queryByText("Step one")).not.toBeInTheDocument());
+    expect(screen.getByText("Other step")).toBeInTheDocument();
+    const params = new URLSearchParams(router.state.location.search);
+    expect(params.get("expanded")).toBe(other.id);
+  });
+
+  it("expands a collapsed root via the chip", async () => {
+    const { router } = renderGraph("?lens=tree&expanded=");
+
+    expect(await screen.findByText("Epic")).toBeInTheDocument();
+    expect(screen.queryByText("Step one")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Expand 2 subtasks" }));
+
+    expect(await screen.findByText("Step one")).toBeInTheDocument();
+    expect(new URLSearchParams(router.state.location.search).get("expanded")).toContain(parent.id);
+  });
+
+  it("jumps to a subtask from the side panel and focuses it", async () => {
+    const { router } = renderGraph("?lens=tree&expanded=");
+
+    // Select the collapsed epic; its panel lists the hidden subtasks.
+    fireEvent.click((await screen.findByText("Epic")).closest("article")!);
+    const panel = await screen.findByRole("complementary", { name: "Selected task: Epic" });
+
+    await userEvent.click(within(panel).getByRole("button", { name: "Step two" }));
+
+    // The jump expands the ancestor chain and selects + focuses the child.
+    await waitFor(() =>
+      expect(new URLSearchParams(router.state.location.search).get("selected")).toBe(step2.id),
+    );
+    expect(new URLSearchParams(router.state.location.search).get("expanded")).toContain(parent.id);
+    // The child is now revealed on the canvas (its node title button).
+    expect(await screen.findByTitle("Step two")).toBeInTheDocument();
+  });
+
+  it("switches lenses via the tablist keyboard", async () => {
+    const { router } = renderGraph("?lens=tree");
+
+    await screen.findByText("Epic");
+    const treeTab = screen.getByRole("tab", { name: "Decomposition" });
+    treeTab.focus();
+    fireEvent.keyDown(treeTab, { key: "ArrowRight" });
+
+    await waitFor(() =>
+      expect(new URLSearchParams(router.state.location.search).get("lens")).toBe("flow"),
+    );
+    expect(screen.getByRole("tab", { name: "Dependency flow" })).toHaveFocus();
+
+    // ArrowLeft switches back.
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Dependency flow" }), { key: "ArrowLeft" });
+    await waitFor(() =>
+      expect(new URLSearchParams(router.state.location.search).get("lens")).toBe("tree"),
+    );
+  });
+
+  it("ignores clicks on the virtual boundary nodes", async () => {
+    const { router } = renderGraph();
+
+    await screen.findByText("Epic");
+    fireEvent.click(screen.getByText("Start").closest("div")!);
+    fireEvent.click(screen.getByText("End").closest("div")!);
+
+    // No selection: boundary nodes are virtual, selecting one would fade
+    // the whole canvas with no side panel to explain it.
+    expect(new URLSearchParams(router.state.location.search).get("selected")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: /Selected task/ })).not.toBeInTheDocument();
+  });
 });
