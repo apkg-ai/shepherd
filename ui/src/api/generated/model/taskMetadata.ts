@@ -9,6 +9,4 @@
 /**
  * Freeform structured metadata. No schema enforcement in v1 — per-type schemas are a post-v1 follow-up (F7).
  */
-export interface TaskMetadata {
-  [key: string]: unknown;
-}
+export interface TaskMetadata { [key: string]: unknown }

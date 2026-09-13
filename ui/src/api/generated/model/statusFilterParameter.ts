@@ -10,16 +10,16 @@
  * @minLength 4
  * @maxLength 11
  */
-export type StatusFilterParameter =
-  (typeof StatusFilterParameter)[keyof typeof StatusFilterParameter];
+export type StatusFilterParameter = typeof StatusFilterParameter[keyof typeof StatusFilterParameter];
+
 
 export const StatusFilterParameter = {
-  proposed: "proposed",
-  approved: "approved",
-  ready: "ready",
-  in_progress: "in_progress",
-  in_review: "in_review",
-  done: "done",
-  blocked: "blocked",
-  cancelled: "cancelled",
+  proposed: 'proposed',
+  approved: 'approved',
+  ready: 'ready',
+  in_progress: 'in_progress',
+  in_review: 'in_review',
+  done: 'done',
+  blocked: 'blocked',
+  cancelled: 'cancelled',
 } as const;

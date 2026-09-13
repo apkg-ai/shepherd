@@ -11,10 +11,10 @@
  */
 export interface BlockRequest {
   /**
-   * Explanation for why the task is blocked.
-   * @minLength 1
-   * @maxLength 2000
-   * @pattern ^[\s\S]+$
-   */
+     * Explanation for why the task is blocked.
+     * @minLength 1
+     * @maxLength 2000
+     * @pattern ^[\s\S]+$
+     */
   reason: string;
 }

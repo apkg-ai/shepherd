@@ -11,9 +11,10 @@
  * @minLength 10
  * @maxLength 13
  */
-export type RelationCreateType = (typeof RelationCreateType)[keyof typeof RelationCreateType];
+export type RelationCreateType = typeof RelationCreateType[keyof typeof RelationCreateType];
+
 
 export const RelationCreateType = {
-  decomposition: "decomposition",
-  depends_on: "depends_on",
+  decomposition: 'decomposition',
+  depends_on: 'depends_on',
 } as const;

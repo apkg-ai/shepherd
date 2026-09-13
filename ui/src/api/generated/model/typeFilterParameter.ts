@@ -10,12 +10,14 @@
  * @minLength 4
  * @maxLength 8
  */
-export type TypeFilterParameter = (typeof TypeFilterParameter)[keyof typeof TypeFilterParameter];
+export type TypeFilterParameter = typeof TypeFilterParameter[keyof typeof TypeFilterParameter];
+
 
 export const TypeFilterParameter = {
-  code: "code",
-  question: "question",
-  refactor: "refactor",
-  review: "review",
-  research: "research",
+  code: 'code',
+  question: 'question',
+  refactor: 'refactor',
+  review: 'review',
+  research: 'research',
+  epic: 'epic',
 } as const;

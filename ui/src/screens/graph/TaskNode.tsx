@@ -32,10 +32,13 @@ export function TaskNode({
   const { task, childCount, expanded, faded } = data;
   const { toggleExpand, lens } = useContext(GraphActionsContext);
 
-  // "start" AND "end" is the derived default for tasks with no dependency
-  // edges at all — as chips it's noise, so only real boundaries get marked.
+  // Epics: the virtual Start/End boundary nodes already anchor the flow,
+  // so start/end chips on individual epics are noise — only milestone shows.
+  // Non-epics: start+end together is the derived default for tasks with no
+  // dependency edges at all — also noise, so only real boundaries get marked.
   const roles =
-    task.graph_role.includes("start") && task.graph_role.includes("end")
+    task.type === "epic" ||
+    (task.graph_role.includes("start") && task.graph_role.includes("end"))
       ? task.graph_role.filter((role) => role === "milestone")
       : task.graph_role;
   const handleExpandClick = (event: React.MouseEvent) => {
@@ -48,13 +51,21 @@ export function TaskNode({
     // with the rich subtask list. Inline expansion tracked in #52.
   };
 
+  const waiting = data.epicBlocked || data.depWaiting;
+  // When a task is waiting on dependencies, override the visual status to
+  // "blocked" so the node border and badge read "this can't proceed" instead
+  // of the misleading "Approved."
+  const displayStatus = waiting ? "blocked" : task.status;
+
   return (
     <article
       className={styles.node}
       style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
-      data-status={task.status}
+      data-status={displayStatus}
+      data-kind={task.type === "epic" ? "epic" : undefined}
       data-selected={selected ? "true" : undefined}
       data-faded={faded ? "true" : undefined}
+      data-waiting={waiting ? "true" : undefined}
     >
       <Handle type="target" position={targetPosition ?? Position.Top} isConnectable={false} />
       {/* No handler: the click bubbles to React Flow's node wrapper, which
@@ -64,7 +75,16 @@ export function TaskNode({
         {task.title}
       </button>
       <div className={styles.meta}>
-        <StatusBadge status={task.status} />
+        {task.type === "epic" ? (
+          <span className={styles.epicBadge} aria-label="Epic">
+            Epic
+          </span>
+        ) : null}
+        {waiting ? (
+          <span className={styles.waitingBadge}>Waiting</span>
+        ) : (
+          <StatusBadge status={task.status} />
+        )}
         {task.status === "in_progress" && task.assignee ? (
           <IdentityChip identity={task.assignee} />
         ) : null}

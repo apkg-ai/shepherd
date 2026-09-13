@@ -5,7 +5,8 @@
  * Local-first hub for agent-driven project work. Maps projects as typed task graphs and acts as persistent shared memory across agent and human sessions. The spec is the product boundary — anything not in this contract does not exist. Design rules in docs/03-api.md.
  * OpenAPI spec version: 0.1.0
  */
-import * as zod from "zod";
+import * as zod from 'zod';
+
 
 /**
  * Returns a paginated list of every relation in the project — both decomposition and depends_on edges. This is the bulk feed for the graph view; the per-task endpoint remains for task-scoped reads.
@@ -14,59 +15,43 @@ import * as zod from "zod";
 export const listProjectRelationsPathProjectIdMin = 36;
 export const listProjectRelationsPathProjectIdMax = 36;
 
-export const listProjectRelationsPathProjectIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const listProjectRelationsPathProjectIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
 
 export const ListProjectRelationsParams = zod.object({
-  project_id: zod
-    .uuid()
-    .min(listProjectRelationsPathProjectIdMin)
-    .max(listProjectRelationsPathProjectIdMax)
-    .regex(listProjectRelationsPathProjectIdRegExp)
-    .describe("Unique project identifier."),
-});
+  "project_id": zod.uuid().min(listProjectRelationsPathProjectIdMin).max(listProjectRelationsPathProjectIdMax).regex(listProjectRelationsPathProjectIdRegExp).describe('Unique project identifier.')
+})
 
 export const listProjectRelationsQueryCursorMax = 256;
 
-export const listProjectRelationsQueryCursorRegExp = new RegExp("^[a-zA-Z0-9_=-]+$");
+
+export const listProjectRelationsQueryCursorRegExp = new RegExp('^[a-zA-Z0-9_=-]+$');
 export const listProjectRelationsQueryLimitDefault = 25;
 export const listProjectRelationsQueryLimitMax = 100;
 
+
+
 export const ListProjectRelationsQueryParams = zod.object({
-  cursor: zod
-    .string()
-    .min(1)
-    .max(listProjectRelationsQueryCursorMax)
-    .regex(listProjectRelationsQueryCursorRegExp)
-    .optional()
-    .describe("Opaque cursor for fetching the next page."),
-  limit: zod
-    .int()
-    .min(1)
-    .max(listProjectRelationsQueryLimitMax)
-    .default(listProjectRelationsQueryLimitDefault)
-    .describe("Maximum number of items per page. Default 25, max 100."),
-});
+  "cursor": zod.string().min(1).max(listProjectRelationsQueryCursorMax).regex(listProjectRelationsQueryCursorRegExp).optional().describe('Opaque cursor for fetching the next page.'),
+  "limit": zod.int().min(1).max(listProjectRelationsQueryLimitMax).default(listProjectRelationsQueryLimitDefault).describe('Maximum number of items per page. Default 25, max 100.')
+})
 
 export const listProjectRelationsResponseItemsItemIdMin = 36;
 export const listProjectRelationsResponseItemsItemIdMax = 36;
 
-export const listProjectRelationsResponseItemsItemIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const listProjectRelationsResponseItemsItemIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const listProjectRelationsResponseItemsItemSourceTaskIdMin = 36;
 export const listProjectRelationsResponseItemsItemSourceTaskIdMax = 36;
 
-export const listProjectRelationsResponseItemsItemSourceTaskIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const listProjectRelationsResponseItemsItemSourceTaskIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const listProjectRelationsResponseItemsItemTargetTaskIdMin = 36;
 export const listProjectRelationsResponseItemsItemTargetTaskIdMax = 36;
 
-export const listProjectRelationsResponseItemsItemTargetTaskIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const listProjectRelationsResponseItemsItemTargetTaskIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const listProjectRelationsResponseItemsItemCreatedAtMin = 20;
 export const listProjectRelationsResponseItemsItemCreatedAtMax = 32;
 
@@ -75,64 +60,21 @@ export const listProjectRelationsResponseItemsMax = 100;
 
 export const listProjectRelationsResponseNextCursorMax = 256;
 
-export const listProjectRelationsResponseNextCursorRegExp = new RegExp("^[a-zA-Z0-9_=-]+$");
 
-export const ListProjectRelationsResponse = zod
-  .object({
-    items: zod
-      .array(
-        zod
-          .object({
-            id: zod
-              .uuid()
-              .min(listProjectRelationsResponseItemsItemIdMin)
-              .max(listProjectRelationsResponseItemsItemIdMax)
-              .regex(listProjectRelationsResponseItemsItemIdRegExp)
-              .describe("Unique relation identifier."),
-            type: zod
-              .enum(["decomposition", "depends_on"])
-              .describe(
-                "Relation type. `decomposition` = parent/child split. `depends_on` = prerequisite ordering.",
-              ),
-            source_task_id: zod
-              .uuid()
-              .min(listProjectRelationsResponseItemsItemSourceTaskIdMin)
-              .max(listProjectRelationsResponseItemsItemSourceTaskIdMax)
-              .regex(listProjectRelationsResponseItemsItemSourceTaskIdRegExp)
-              .describe(
-                "The source task. For decomposition, this is the parent. For depends_on, this is the task that depends on the target.",
-              ),
-            target_task_id: zod
-              .uuid()
-              .min(listProjectRelationsResponseItemsItemTargetTaskIdMin)
-              .max(listProjectRelationsResponseItemsItemTargetTaskIdMax)
-              .regex(listProjectRelationsResponseItemsItemTargetTaskIdRegExp)
-              .describe(
-                "The target task. For decomposition, this is the child. For depends_on, this is the prerequisite.",
-              ),
-            created_at: zod.iso
-              .datetime({ offset: true })
-              .min(listProjectRelationsResponseItemsItemCreatedAtMin)
-              .max(listProjectRelationsResponseItemsItemCreatedAtMax)
-              .describe("When this relation was created."),
-          })
-          .describe(
-            "A directed edge between two tasks. Decomposition edges represent parent/child splits. Dependency edges (depends_on) represent prerequisite ordering. The dependency graph is always acyclic.",
-          ),
-      )
-      .min(listProjectRelationsResponseItemsMin)
-      .max(listProjectRelationsResponseItemsMax)
-      .describe("Array of relation resources."),
-    has_more: zod.boolean().describe("Whether more pages exist after this one."),
-    next_cursor: zod
-      .string()
-      .min(1)
-      .max(listProjectRelationsResponseNextCursorMax)
-      .regex(listProjectRelationsResponseNextCursorRegExp)
-      .nullish()
-      .describe("Cursor for fetching the next page. Null if no more pages."),
-  })
-  .describe("Paginated list of every relation in a project — the bulk feed for the graph view.");
+export const listProjectRelationsResponseNextCursorRegExp = new RegExp('^[a-zA-Z0-9_=-]+$');
+
+
+export const ListProjectRelationsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.uuid().min(listProjectRelationsResponseItemsItemIdMin).max(listProjectRelationsResponseItemsItemIdMax).regex(listProjectRelationsResponseItemsItemIdRegExp).describe('Unique relation identifier.'),
+  "type": zod.enum(['decomposition', 'depends_on']).describe('Relation type. `decomposition` = parent/child split. `depends_on` = prerequisite ordering.'),
+  "source_task_id": zod.uuid().min(listProjectRelationsResponseItemsItemSourceTaskIdMin).max(listProjectRelationsResponseItemsItemSourceTaskIdMax).regex(listProjectRelationsResponseItemsItemSourceTaskIdRegExp).describe('The source task. For decomposition, this is the parent. For depends_on, this is the task that depends on the target.'),
+  "target_task_id": zod.uuid().min(listProjectRelationsResponseItemsItemTargetTaskIdMin).max(listProjectRelationsResponseItemsItemTargetTaskIdMax).regex(listProjectRelationsResponseItemsItemTargetTaskIdRegExp).describe('The target task. For decomposition, this is the child. For depends_on, this is the prerequisite.'),
+  "created_at": zod.iso.datetime({"offset":true}).min(listProjectRelationsResponseItemsItemCreatedAtMin).max(listProjectRelationsResponseItemsItemCreatedAtMax).describe('When this relation was created.')
+}).describe('A directed edge between two tasks. Decomposition edges represent parent/child splits. Dependency edges (depends_on) represent prerequisite ordering. The dependency graph is always acyclic.')).min(listProjectRelationsResponseItemsMin).max(listProjectRelationsResponseItemsMax).describe('Array of relation resources.'),
+  "has_more": zod.boolean().describe('Whether more pages exist after this one.'),
+  "next_cursor": zod.string().min(1).max(listProjectRelationsResponseNextCursorMax).regex(listProjectRelationsResponseNextCursorRegExp).nullish().describe('Cursor for fetching the next page. Null if no more pages.')
+}).describe('Paginated list of every relation in a project — the bulk feed for the graph view.')
 
 /**
  * Returns all relations where this task is either the source or target.
@@ -141,105 +83,52 @@ export const ListProjectRelationsResponse = zod
 export const listTaskRelationsPathProjectIdMin = 36;
 export const listTaskRelationsPathProjectIdMax = 36;
 
-export const listTaskRelationsPathProjectIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const listTaskRelationsPathProjectIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const listTaskRelationsPathTaskIdMin = 36;
 export const listTaskRelationsPathTaskIdMax = 36;
 
-export const listTaskRelationsPathTaskIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const listTaskRelationsPathTaskIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
 
 export const ListTaskRelationsParams = zod.object({
-  project_id: zod
-    .uuid()
-    .min(listTaskRelationsPathProjectIdMin)
-    .max(listTaskRelationsPathProjectIdMax)
-    .regex(listTaskRelationsPathProjectIdRegExp)
-    .describe("Unique project identifier."),
-  task_id: zod
-    .uuid()
-    .min(listTaskRelationsPathTaskIdMin)
-    .max(listTaskRelationsPathTaskIdMax)
-    .regex(listTaskRelationsPathTaskIdRegExp)
-    .describe("Unique task identifier."),
-});
+  "project_id": zod.uuid().min(listTaskRelationsPathProjectIdMin).max(listTaskRelationsPathProjectIdMax).regex(listTaskRelationsPathProjectIdRegExp).describe('Unique project identifier.'),
+  "task_id": zod.uuid().min(listTaskRelationsPathTaskIdMin).max(listTaskRelationsPathTaskIdMax).regex(listTaskRelationsPathTaskIdRegExp).describe('Unique task identifier.')
+})
 
 export const listTaskRelationsResponseItemsItemIdMin = 36;
 export const listTaskRelationsResponseItemsItemIdMax = 36;
 
-export const listTaskRelationsResponseItemsItemIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const listTaskRelationsResponseItemsItemIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const listTaskRelationsResponseItemsItemSourceTaskIdMin = 36;
 export const listTaskRelationsResponseItemsItemSourceTaskIdMax = 36;
 
-export const listTaskRelationsResponseItemsItemSourceTaskIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const listTaskRelationsResponseItemsItemSourceTaskIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const listTaskRelationsResponseItemsItemTargetTaskIdMin = 36;
 export const listTaskRelationsResponseItemsItemTargetTaskIdMax = 36;
 
-export const listTaskRelationsResponseItemsItemTargetTaskIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const listTaskRelationsResponseItemsItemTargetTaskIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const listTaskRelationsResponseItemsItemCreatedAtMin = 20;
 export const listTaskRelationsResponseItemsItemCreatedAtMax = 32;
 
 export const listTaskRelationsResponseItemsMin = 0;
 export const listTaskRelationsResponseItemsMax = 1000;
 
-export const ListTaskRelationsResponse = zod
-  .object({
-    items: zod
-      .array(
-        zod
-          .object({
-            id: zod
-              .uuid()
-              .min(listTaskRelationsResponseItemsItemIdMin)
-              .max(listTaskRelationsResponseItemsItemIdMax)
-              .regex(listTaskRelationsResponseItemsItemIdRegExp)
-              .describe("Unique relation identifier."),
-            type: zod
-              .enum(["decomposition", "depends_on"])
-              .describe(
-                "Relation type. `decomposition` = parent/child split. `depends_on` = prerequisite ordering.",
-              ),
-            source_task_id: zod
-              .uuid()
-              .min(listTaskRelationsResponseItemsItemSourceTaskIdMin)
-              .max(listTaskRelationsResponseItemsItemSourceTaskIdMax)
-              .regex(listTaskRelationsResponseItemsItemSourceTaskIdRegExp)
-              .describe(
-                "The source task. For decomposition, this is the parent. For depends_on, this is the task that depends on the target.",
-              ),
-            target_task_id: zod
-              .uuid()
-              .min(listTaskRelationsResponseItemsItemTargetTaskIdMin)
-              .max(listTaskRelationsResponseItemsItemTargetTaskIdMax)
-              .regex(listTaskRelationsResponseItemsItemTargetTaskIdRegExp)
-              .describe(
-                "The target task. For decomposition, this is the child. For depends_on, this is the prerequisite.",
-              ),
-            created_at: zod.iso
-              .datetime({ offset: true })
-              .min(listTaskRelationsResponseItemsItemCreatedAtMin)
-              .max(listTaskRelationsResponseItemsItemCreatedAtMax)
-              .describe("When this relation was created."),
-          })
-          .describe(
-            "A directed edge between two tasks. Decomposition edges represent parent/child splits. Dependency edges (depends_on) represent prerequisite ordering. The dependency graph is always acyclic.",
-          ),
-      )
-      .min(listTaskRelationsResponseItemsMin)
-      .max(listTaskRelationsResponseItemsMax)
-      .describe("Array of relation resources."),
-  })
-  .describe(
-    "List of relations for a task. Not paginated — a task's relation count is bounded by the project task count.",
-  );
+
+
+export const ListTaskRelationsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.uuid().min(listTaskRelationsResponseItemsItemIdMin).max(listTaskRelationsResponseItemsItemIdMax).regex(listTaskRelationsResponseItemsItemIdRegExp).describe('Unique relation identifier.'),
+  "type": zod.enum(['decomposition', 'depends_on']).describe('Relation type. `decomposition` = parent/child split. `depends_on` = prerequisite ordering.'),
+  "source_task_id": zod.uuid().min(listTaskRelationsResponseItemsItemSourceTaskIdMin).max(listTaskRelationsResponseItemsItemSourceTaskIdMax).regex(listTaskRelationsResponseItemsItemSourceTaskIdRegExp).describe('The source task. For decomposition, this is the parent. For depends_on, this is the task that depends on the target.'),
+  "target_task_id": zod.uuid().min(listTaskRelationsResponseItemsItemTargetTaskIdMin).max(listTaskRelationsResponseItemsItemTargetTaskIdMax).regex(listTaskRelationsResponseItemsItemTargetTaskIdRegExp).describe('The target task. For decomposition, this is the child. For depends_on, this is the prerequisite.'),
+  "created_at": zod.iso.datetime({"offset":true}).min(listTaskRelationsResponseItemsItemCreatedAtMin).max(listTaskRelationsResponseItemsItemCreatedAtMax).describe('When this relation was created.')
+}).describe('A directed edge between two tasks. Decomposition edges represent parent/child splits. Dependency edges (depends_on) represent prerequisite ordering. The dependency graph is always acyclic.')).min(listTaskRelationsResponseItemsMin).max(listTaskRelationsResponseItemsMax).describe('Array of relation resources.')
+}).describe('List of relations for a task. Not paginated — a task\'s relation count is bounded by the project task count.')
 
 /**
  * Creates a relation from this task (source) to a target task. For `decomposition` relations the source becomes the parent. For `depends_on` relations, the source depends on the target. Any mutation that would create a cycle in the dependency graph is rejected with 409.
@@ -248,111 +137,59 @@ export const ListTaskRelationsResponse = zod
 export const createTaskRelationPathProjectIdMin = 36;
 export const createTaskRelationPathProjectIdMax = 36;
 
-export const createTaskRelationPathProjectIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const createTaskRelationPathProjectIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const createTaskRelationPathTaskIdMin = 36;
 export const createTaskRelationPathTaskIdMax = 36;
 
-export const createTaskRelationPathTaskIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const createTaskRelationPathTaskIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
 
 export const CreateTaskRelationParams = zod.object({
-  project_id: zod
-    .uuid()
-    .min(createTaskRelationPathProjectIdMin)
-    .max(createTaskRelationPathProjectIdMax)
-    .regex(createTaskRelationPathProjectIdRegExp)
-    .describe("Unique project identifier."),
-  task_id: zod
-    .uuid()
-    .min(createTaskRelationPathTaskIdMin)
-    .max(createTaskRelationPathTaskIdMax)
-    .regex(createTaskRelationPathTaskIdRegExp)
-    .describe("Unique task identifier."),
-});
+  "project_id": zod.uuid().min(createTaskRelationPathProjectIdMin).max(createTaskRelationPathProjectIdMax).regex(createTaskRelationPathProjectIdRegExp).describe('Unique project identifier.'),
+  "task_id": zod.uuid().min(createTaskRelationPathTaskIdMin).max(createTaskRelationPathTaskIdMax).regex(createTaskRelationPathTaskIdRegExp).describe('Unique task identifier.')
+})
 
 export const createTaskRelationBodyTargetTaskIdMin = 36;
 export const createTaskRelationBodyTargetTaskIdMax = 36;
 
-export const createTaskRelationBodyTargetTaskIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
 
-export const CreateTaskRelationBody = zod
-  .object({
-    type: zod.enum(["decomposition", "depends_on"]).describe("Relation type."),
-    target_task_id: zod
-      .uuid()
-      .min(createTaskRelationBodyTargetTaskIdMin)
-      .max(createTaskRelationBodyTargetTaskIdMax)
-      .regex(createTaskRelationBodyTargetTaskIdRegExp)
-      .describe("The target task for this relation."),
-  })
-  .describe(
-    "Request body for creating a relation. The source task is the task in the URL path; only the target and relation type are specified.",
-  );
+export const createTaskRelationBodyTargetTaskIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
+
+export const CreateTaskRelationBody = zod.object({
+  "type": zod.enum(['decomposition', 'depends_on']).describe('Relation type.'),
+  "target_task_id": zod.uuid().min(createTaskRelationBodyTargetTaskIdMin).max(createTaskRelationBodyTargetTaskIdMax).regex(createTaskRelationBodyTargetTaskIdRegExp).describe('The target task for this relation.')
+}).describe('Request body for creating a relation. The source task is the task in the URL path; only the target and relation type are specified.')
 
 export const createTaskRelationResponseIdMin = 36;
 export const createTaskRelationResponseIdMax = 36;
 
-export const createTaskRelationResponseIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const createTaskRelationResponseIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const createTaskRelationResponseSourceTaskIdMin = 36;
 export const createTaskRelationResponseSourceTaskIdMax = 36;
 
-export const createTaskRelationResponseSourceTaskIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const createTaskRelationResponseSourceTaskIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const createTaskRelationResponseTargetTaskIdMin = 36;
 export const createTaskRelationResponseTargetTaskIdMax = 36;
 
-export const createTaskRelationResponseTargetTaskIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const createTaskRelationResponseTargetTaskIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const createTaskRelationResponseCreatedAtMin = 20;
 export const createTaskRelationResponseCreatedAtMax = 32;
 
-export const CreateTaskRelationResponse = zod
-  .object({
-    id: zod
-      .uuid()
-      .min(createTaskRelationResponseIdMin)
-      .max(createTaskRelationResponseIdMax)
-      .regex(createTaskRelationResponseIdRegExp)
-      .describe("Unique relation identifier."),
-    type: zod
-      .enum(["decomposition", "depends_on"])
-      .describe(
-        "Relation type. `decomposition` = parent/child split. `depends_on` = prerequisite ordering.",
-      ),
-    source_task_id: zod
-      .uuid()
-      .min(createTaskRelationResponseSourceTaskIdMin)
-      .max(createTaskRelationResponseSourceTaskIdMax)
-      .regex(createTaskRelationResponseSourceTaskIdRegExp)
-      .describe(
-        "The source task. For decomposition, this is the parent. For depends_on, this is the task that depends on the target.",
-      ),
-    target_task_id: zod
-      .uuid()
-      .min(createTaskRelationResponseTargetTaskIdMin)
-      .max(createTaskRelationResponseTargetTaskIdMax)
-      .regex(createTaskRelationResponseTargetTaskIdRegExp)
-      .describe(
-        "The target task. For decomposition, this is the child. For depends_on, this is the prerequisite.",
-      ),
-    created_at: zod.iso
-      .datetime({ offset: true })
-      .min(createTaskRelationResponseCreatedAtMin)
-      .max(createTaskRelationResponseCreatedAtMax)
-      .describe("When this relation was created."),
-  })
-  .describe(
-    "A directed edge between two tasks. Decomposition edges represent parent/child splits. Dependency edges (depends_on) represent prerequisite ordering. The dependency graph is always acyclic.",
-  );
+
+
+export const CreateTaskRelationResponse = zod.object({
+  "id": zod.uuid().min(createTaskRelationResponseIdMin).max(createTaskRelationResponseIdMax).regex(createTaskRelationResponseIdRegExp).describe('Unique relation identifier.'),
+  "type": zod.enum(['decomposition', 'depends_on']).describe('Relation type. `decomposition` = parent/child split. `depends_on` = prerequisite ordering.'),
+  "source_task_id": zod.uuid().min(createTaskRelationResponseSourceTaskIdMin).max(createTaskRelationResponseSourceTaskIdMax).regex(createTaskRelationResponseSourceTaskIdRegExp).describe('The source task. For decomposition, this is the parent. For depends_on, this is the task that depends on the target.'),
+  "target_task_id": zod.uuid().min(createTaskRelationResponseTargetTaskIdMin).max(createTaskRelationResponseTargetTaskIdMax).regex(createTaskRelationResponseTargetTaskIdRegExp).describe('The target task. For decomposition, this is the child. For depends_on, this is the prerequisite.'),
+  "created_at": zod.iso.datetime({"offset":true}).min(createTaskRelationResponseCreatedAtMin).max(createTaskRelationResponseCreatedAtMax).describe('When this relation was created.')
+}).describe('A directed edge between two tasks. Decomposition edges represent parent/child splits. Dependency edges (depends_on) represent prerequisite ordering. The dependency graph is always acyclic.')
 
 /**
  * Deletes a relation. May cause downstream tasks to re-derive their `ready` status.
@@ -361,41 +198,25 @@ export const CreateTaskRelationResponse = zod
 export const deleteTaskRelationPathProjectIdMin = 36;
 export const deleteTaskRelationPathProjectIdMax = 36;
 
-export const deleteTaskRelationPathProjectIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const deleteTaskRelationPathProjectIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const deleteTaskRelationPathTaskIdMin = 36;
 export const deleteTaskRelationPathTaskIdMax = 36;
 
-export const deleteTaskRelationPathTaskIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const deleteTaskRelationPathTaskIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 export const deleteTaskRelationPathRelationIdMin = 36;
 export const deleteTaskRelationPathRelationIdMax = 36;
 
-export const deleteTaskRelationPathRelationIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const deleteTaskRelationPathRelationIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
 
 export const DeleteTaskRelationParams = zod.object({
-  project_id: zod
-    .uuid()
-    .min(deleteTaskRelationPathProjectIdMin)
-    .max(deleteTaskRelationPathProjectIdMax)
-    .regex(deleteTaskRelationPathProjectIdRegExp)
-    .describe("Unique project identifier."),
-  task_id: zod
-    .uuid()
-    .min(deleteTaskRelationPathTaskIdMin)
-    .max(deleteTaskRelationPathTaskIdMax)
-    .regex(deleteTaskRelationPathTaskIdRegExp)
-    .describe("Unique task identifier."),
-  relation_id: zod
-    .uuid()
-    .min(deleteTaskRelationPathRelationIdMin)
-    .max(deleteTaskRelationPathRelationIdMax)
-    .regex(deleteTaskRelationPathRelationIdRegExp)
-    .describe("Unique relation identifier."),
-});
+  "project_id": zod.uuid().min(deleteTaskRelationPathProjectIdMin).max(deleteTaskRelationPathProjectIdMax).regex(deleteTaskRelationPathProjectIdRegExp).describe('Unique project identifier.'),
+  "task_id": zod.uuid().min(deleteTaskRelationPathTaskIdMin).max(deleteTaskRelationPathTaskIdMax).regex(deleteTaskRelationPathTaskIdRegExp).describe('Unique task identifier.'),
+  "relation_id": zod.uuid().min(deleteTaskRelationPathRelationIdMin).max(deleteTaskRelationPathRelationIdMax).regex(deleteTaskRelationPathRelationIdRegExp).describe('Unique relation identifier.')
+})
 
-export const DeleteTaskRelationResponse = zod.void();
+export const DeleteTaskRelationResponse = zod.void()
+

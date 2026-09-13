@@ -6,11 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ListKnowledgeType = (typeof ListKnowledgeType)[keyof typeof ListKnowledgeType];
+export type ListKnowledgeType = typeof ListKnowledgeType[keyof typeof ListKnowledgeType];
+
 
 export const ListKnowledgeType = {
-  link: "link",
-  transcript: "transcript",
-  decision: "decision",
-  note: "note",
+  link: 'link',
+  transcript: 'transcript',
+  decision: 'decision',
+  note: 'note',
 } as const;

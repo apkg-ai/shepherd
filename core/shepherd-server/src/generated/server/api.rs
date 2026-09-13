@@ -60,6 +60,8 @@ pub enum ListTasksType {
     Review,
     #[serde(rename = "research")]
     Research,
+    #[serde(rename = "epic")]
+    Epic,
 }
 /// Operations under the `claims` tag.
 #[async_trait::async_trait]

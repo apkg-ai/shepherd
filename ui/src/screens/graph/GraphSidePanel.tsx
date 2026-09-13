@@ -1,5 +1,11 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
-import type { Relation, Task } from "../../api/generated/model";
+import type { Relation, RelationCreateType, Task } from "../../api/generated/model";
+import { useCreateTaskRelation } from "../../api/generated/relations/relations";
+import { useListTasks } from "../../api/generated/tasks/tasks";
+import { invalidatePaths } from "../../api/invalidate";
+import { isShepherdError } from "../../api/problem";
 import { AttemptBadge } from "../../components/AttemptBadge";
 import { IdentityChip } from "../../components/IdentityChip";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -132,10 +138,123 @@ export function GraphSidePanel({
       {group("Depends on", dependsOn)}
       {group("Needed by", neededBy)}
 
+      <GraphSidePanelActions
+        projectId={projectId}
+        task={task}
+        hasParent={parent !== undefined}
+      />
+
       <footer className={styles.footer}>
         <Link to={`/projects/${projectId}/tasks/${task.id}`}>Open full detail</Link>
         <span className={styles.muted}>Updated {formatDateTime(task.updated_at)}</span>
       </footer>
     </aside>
+  );
+}
+
+type LinkKind = "depends_on" | "subtask" | "parent";
+
+function GraphSidePanelActions({
+  projectId,
+  task,
+  hasParent,
+}: {
+  projectId: string;
+  task: Task;
+  hasParent: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [showLink, setShowLink] = useState(false);
+  const [linkKind, setLinkKind] = useState<LinkKind>("depends_on");
+  const [targetId, setTargetId] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const candidatesQuery = useListTasks(projectId, { limit: 100 }, { query: { enabled: showLink } });
+  const candidates = (candidatesQuery.data?.items ?? []).filter((t) => t.id !== task.id);
+
+  const createRelation = useCreateTaskRelation({ mutation: { meta: { silent: true } } });
+
+  const submitLink = (e: FormEvent) => {
+    e.preventDefault();
+    if (targetId === "") {
+      setError("Pick a task.");
+      return;
+    }
+    setError(null);
+    const type: RelationCreateType = linkKind === "depends_on" ? "depends_on" : "decomposition";
+    const sourceTaskId = linkKind === "parent" ? targetId : task.id;
+    const targetTaskId = linkKind === "parent" ? task.id : targetId;
+    createRelation.mutate(
+      { projectId, taskId: sourceTaskId, data: { type, target_task_id: targetTaskId } },
+      {
+        onSuccess: () => {
+          invalidatePaths(queryClient, `/api/v1/projects/${projectId}/relations`);
+          setShowLink(false);
+          setTargetId("");
+          setError(null);
+        },
+        onError: (err) => setError(isShepherdError(err) ? err.message : "Request failed"),
+      },
+    );
+  };
+
+  return (
+    <div className={styles.actionsSection}>
+      <div className={styles.actions}>
+        <Link
+          to={`/projects/${projectId}/tasks/new?parent=${task.id}`}
+          className={styles.actionLink}
+        >
+          + New subtask
+        </Link>
+        <Link
+          to={`/projects/${projectId}/tasks/new?depends_on=${task.id}`}
+          className={styles.actionLink}
+        >
+          + New dependency
+        </Link>
+        <button
+          type="button"
+          className={styles.actionLink}
+          onClick={() => setShowLink((v) => !v)}
+        >
+          {showLink ? "Cancel" : "+ Link task"}
+        </button>
+      </div>
+
+      {showLink ? (
+        <form onSubmit={submitLink} className={styles.linkForm}>
+          <select
+            value={linkKind}
+            onChange={(e) => setLinkKind(e.target.value as LinkKind)}
+            className={styles.linkSelect}
+          >
+            <option value="depends_on">This task depends on…</option>
+            <option value="subtask">Add subtask…</option>
+            {!hasParent ? <option value="parent">Set parent…</option> : null}
+          </select>
+          <select
+            value={targetId}
+            onChange={(e) => setTargetId(e.target.value)}
+            className={styles.linkSelect}
+          >
+            <option value="">{candidatesQuery.isPending ? "Loading…" : "Pick a task"}</option>
+            {candidates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title}
+              </option>
+            ))}
+          </select>
+          {error ? <p className={styles.linkError}>{error}</p> : null}
+          <button
+            type="submit"
+            className={styles.linkSubmit}
+            disabled={createRelation.isPending}
+          >
+            {createRelation.isPending ? "Adding…" : "Add"}
+          </button>
+        </form>
+      ) : null}
+    </div>
   );
 }

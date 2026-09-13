@@ -11,10 +11,11 @@
  * @minLength 4
  * @maxLength 7
  */
-export type KnowledgeItemScope = (typeof KnowledgeItemScope)[keyof typeof KnowledgeItemScope];
+export type KnowledgeItemScope = typeof KnowledgeItemScope[keyof typeof KnowledgeItemScope];
+
 
 export const KnowledgeItemScope = {
-  task: "task",
-  session: "session",
-  project: "project",
+  task: 'task',
+  session: 'session',
+  project: 'project',
 } as const;

@@ -76,6 +76,28 @@
   --status-cancelled-bg: var(--color-bg);
   --status-cancelled-border: 1px solid var(--color-border);
 
+  /* Epic accent — distinct from status tokens, additive. Reuses the
+     attention (violet) family; the badge and left-border stripe occupy
+     different visual slots from the in_review status badge. */
+  --epic-accent: var(--color-attention);
+  --epic-accent-soft: var(--color-attention-soft);
+
+  /* Task type visual language: one hue per type so the task list and graph
+     badges speed-scan. Aliases into the palette — dark theme retokens
+     automatically. */
+  --type-epic-fg: var(--color-attention);
+  --type-epic-bg: var(--color-attention-soft);
+  --type-code-fg: var(--color-accent);
+  --type-code-bg: var(--color-accent-soft);
+  --type-question-fg: var(--color-pink);
+  --type-question-bg: var(--color-pink-soft);
+  --type-refactor-fg: var(--color-teal);
+  --type-refactor-bg: var(--color-teal-soft);
+  --type-review-fg: var(--color-warning);
+  --type-review-bg: var(--color-warning-soft);
+  --type-research-fg: var(--color-success);
+  --type-research-bg: var(--color-success-soft);
+
   /* Spacing / shape */
   --space-1: 4px;
   --space-2: 8px;
@@ -133,6 +155,9 @@
 
   /* Accent is light in dark mode — dark text keeps the chip legible. */
   --color-on-accent: #0c1220;
+
+  --epic-accent: var(--color-attention);
+  --epic-accent-soft: var(--color-attention-soft);
 
   --shadow-1: 0 1px 3px rgb(0 0 0 / 45%);
   --shadow-2: 0 8px 30px rgb(0 0 0 / 60%);

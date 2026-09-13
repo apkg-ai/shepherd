@@ -52,10 +52,16 @@
 
 .row[data-status="blocked"] {
   --row-accent: var(--color-warning);
+  background: var(--color-warning-soft);
+  box-shadow: inset 4px 0 0 var(--color-warning);
 }
 
 .statusCell {
   width: 110px;
+}
+
+.typeCol {
+  width: 90px;
 }
 
 .titleCell {

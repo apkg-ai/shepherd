@@ -5,7 +5,10 @@
  * Local-first hub for agent-driven project work. Maps projects as typed task graphs and acts as persistent shared memory across agent and human sessions. The spec is the product boundary — anything not in this contract does not exist. Design rules in docs/03-api.md.
  * OpenAPI spec version: 0.1.0
  */
-import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery
+} from '@tanstack/react-query';
 import type {
   DataTag,
   DefinedInitialDataOptions,
@@ -18,8 +21,8 @@ import type {
   UseMutationOptions,
   UseMutationResult,
   UseQueryOptions,
-  UseQueryResult,
-} from "@tanstack/react-query";
+  UseQueryResult
+} from '@tanstack/react-query';
 
 import type {
   ExportDocument,
@@ -28,19 +31,22 @@ import type {
   NotFoundResponse,
   TooManyRequestsResponse,
   UnauthorizedResponse,
-  ValidationErrorResponse,
-} from "../model";
+  ValidationErrorResponse
+} from '../model';
 
-import { shepherdFetch } from "../../client";
+import { shepherdFetch } from '../../client';
+
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+
 
 const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKey: K } => {
   const result = { queryKey } as T & { queryKey: K };
   for (const key of Object.keys(query)) {
     // The explicit queryKey always wins, matching the previous
     // `{ ...query, queryKey }` spread where it was set last.
-    if (key === "queryKey") continue;
+    if (key === 'queryKey') continue;
     Object.defineProperty(result, key, {
       enumerable: true,
       configurable: true,
@@ -50,184 +56,127 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export const getExportProjectUrl = (projectId: string) => {
-  return `/api/v1/projects/${projectId}/export`;
-};
+export const getExportProjectUrl = (projectId: string,) => {
+
+
+
+
+  return `/api/v1/projects/${projectId}/export`
+}
 
 /**
  * Returns a self-contained JSON document containing the project and all its tasks, relations, sessions, and knowledge items. The document carries its own schema version for forward compatibility.
  * @summary Export a project as a versioned JSON document
  */
-export const exportProject = async (
-  projectId: string,
-  options?: Parameters<typeof shepherdFetch>[1],
-): Promise<ExportDocument> => {
-  return shepherdFetch<ExportDocument>(getExportProjectUrl(projectId), {
+export const exportProject = async (projectId: string, options?: Parameters<typeof shepherdFetch>[1]): Promise<ExportDocument> => {
+
+  return shepherdFetch<ExportDocument>(getExportProjectUrl(projectId),
+  {
     ...options,
-    method: "GET",
-  });
-};
+    method: 'GET'
 
-export const getExportProjectQueryKey = (projectId: string) => {
-  return [`/api/v1/projects/${projectId}/export`] as const;
-};
 
-export const getExportProjectQueryOptions = <
-  TData = Awaited<ReturnType<typeof exportProject>>,
-  TError =
-    | UnauthorizedResponse
-    | NotFoundResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
->(
-  projectId: string,
-  options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData>>;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
+  }
+);}
+
+
+
+
+
+export const getExportProjectQueryKey = (projectId: string,) => {
+    return [
+    `/api/v1/projects/${projectId}/export`
+    ] as const;
+    }
+
+
+export const getExportProjectQueryOptions = <TData = Awaited<ReturnType<typeof exportProject>>, TError = UnauthorizedResponse | NotFoundResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse>(projectId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData>>, request?: SecondParameter<typeof shepherdFetch>}
 ) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getExportProjectQueryKey(projectId);
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof exportProject>>> = ({ signal }) =>
-    exportProject(projectId, { signal, ...requestOptions });
+  const queryKey =  queryOptions?.queryKey ?? getExportProjectQueryKey(projectId);
 
-  return {
-    queryKey,
-    queryFn,
-    enabled: projectId !== null && projectId !== undefined,
-    ...queryOptions,
-  } as UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData> & {
-    queryKey: DataTag<QueryKey, TData, TError>;
-  };
-};
 
-export type ExportProjectQueryResult = NonNullable<Awaited<ReturnType<typeof exportProject>>>;
-export type ExportProjectQueryError =
-  | UnauthorizedResponse
-  | NotFoundResponse
-  | ValidationErrorResponse
-  | TooManyRequestsResponse
-  | InternalErrorResponse;
 
-export function useExportProject<
-  TData = Awaited<ReturnType<typeof exportProject>>,
-  TError =
-    | UnauthorizedResponse
-    | NotFoundResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
->(
-  projectId: string,
-  options: {
-    query: Partial<UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData>> &
-      Pick<
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportProject>>> = ({ signal }) => exportProject(projectId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: projectId !== null && projectId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ExportProjectQueryResult = NonNullable<Awaited<ReturnType<typeof exportProject>>>
+export type ExportProjectQueryError = UnauthorizedResponse | NotFoundResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse
+
+
+export function useExportProject<TData = Awaited<ReturnType<typeof exportProject>>, TError = UnauthorizedResponse | NotFoundResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse>(
+ projectId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportProject>>,
           TError,
           Awaited<ReturnType<typeof exportProject>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-export function useExportProject<
-  TData = Awaited<ReturnType<typeof exportProject>>,
-  TError =
-    | UnauthorizedResponse
-    | NotFoundResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
->(
-  projectId: string,
-  options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData>> &
-      Pick<
+        > , 'initialData'
+      >, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportProject<TData = Awaited<ReturnType<typeof exportProject>>, TError = UnauthorizedResponse | NotFoundResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse>(
+ projectId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof exportProject>>,
           TError,
           Awaited<ReturnType<typeof exportProject>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-export function useExportProject<
-  TData = Awaited<ReturnType<typeof exportProject>>,
-  TError =
-    | UnauthorizedResponse
-    | NotFoundResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
->(
-  projectId: string,
-  options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData>>;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+        > , 'initialData'
+      >, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportProject<TData = Awaited<ReturnType<typeof exportProject>>, TError = UnauthorizedResponse | NotFoundResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse>(
+ projectId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData>>, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary Export a project as a versioned JSON document
  */
 
-export function useExportProject<
-  TData = Awaited<ReturnType<typeof exportProject>>,
-  TError =
-    | UnauthorizedResponse
-    | NotFoundResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
->(
-  projectId: string,
-  options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData>>;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-  const queryOptions = getExportProjectQueryOptions(projectId, options);
+export function useExportProject<TData = Awaited<ReturnType<typeof exportProject>>, TError = UnauthorizedResponse | NotFoundResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse>(
+ projectId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportProject>>, TError, TData>>, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<TData, TError> & {
-    queryKey: DataTag<QueryKey, TData, TError>;
-  };
+  const queryOptions = getExportProjectQueryOptions(projectId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
   return withQueryKey(query, queryOptions.queryKey);
 }
 
+
+
+
+
+
 export const getImportProjectUrl = () => {
-  return `/api/v1/projects/import`;
-};
+
+
+
+
+  return `/api/v1/projects/import`
+}
 
 /**
  * Creates a new project from a previously exported document. Import always creates a new project — no merge semantics in v1. The schema version in the document must be compatible with this server.
  * @summary Import a project from an export document
  */
-export const importProject = async (
-  exportDocument: ExportDocument,
-  options?: Parameters<typeof shepherdFetch>[1],
-): Promise<ImportResult> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
+export const importProject = async (exportDocument: ExportDocument, options?: Parameters<typeof shepherdFetch>[1]): Promise<ImportResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
     if (Symbol.iterator in h) {
       return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
       );
     }
     const headers: Record<string, string | readonly string[]> = {};
@@ -236,91 +185,63 @@ export const importProject = async (
     }
     return headers;
   };
-  return shepherdFetch<ImportResult>(getImportProjectUrl(), {
+return shepherdFetch<ImportResult>(getImportProjectUrl(),
+  {
     ...options,
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...getHeaders(options?.headers) },
-    body: JSON.stringify(exportDocument),
-  });
-};
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(exportDocument)
+  }
+);}
 
-export const getImportProjectMutationKey = () => ["importProject"] as const;
 
-export const getImportProjectMutationOptions = <
-  TError =
-    | UnauthorizedResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof importProject>>,
-    TError,
-    ImportProjectMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof shepherdFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof importProject>>,
-  TError,
-  ImportProjectMutationVariables,
-  TContext
-> => {
-  const mutationKey = getImportProjectMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation && "mutationKey" in options.mutation && options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
 
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof importProject>>,
-    ImportProjectMutationVariables
-  > = (props) => {
-    const { data } = props ?? {};
 
-    return importProject(data, requestOptions);
-  };
 
-  return { mutationFn, ...mutationOptions };
-};
+export const getImportProjectMutationKey = () => ['importProject'] as const;
 
-export type ImportProjectMutationResult = NonNullable<Awaited<ReturnType<typeof importProject>>>;
-export type ImportProjectMutationBody = ExportDocument;
-export type ImportProjectMutationError =
-  | UnauthorizedResponse
-  | ValidationErrorResponse
-  | TooManyRequestsResponse
-  | InternalErrorResponse;
-export type ImportProjectMutationVariables = { data: ExportDocument };
+export const getImportProjectMutationOptions = <TError = UnauthorizedResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importProject>>, TError,ImportProjectMutationVariables, TContext>, request?: SecondParameter<typeof shepherdFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importProject>>, TError,ImportProjectMutationVariables, TContext> => {
 
-/**
+const mutationKey = getImportProjectMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importProject>>, ImportProjectMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  importProject(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportProjectMutationResult = NonNullable<Awaited<ReturnType<typeof importProject>>>
+    export type ImportProjectMutationBody = ExportDocument
+    export type ImportProjectMutationError = UnauthorizedResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse
+    export type ImportProjectMutationVariables = {data: ExportDocument}
+
+    /**
  * @summary Import a project from an export document
  */
-export const useImportProject = <
-  TError =
-    | UnauthorizedResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof importProject>>,
-      TError,
-      ImportProjectMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof importProject>>,
-  TError,
-  ImportProjectMutationVariables,
-  TContext
-> => {
-  return useMutation(getImportProjectMutationOptions(options), queryClient);
-};
+export const useImportProject = <TError = UnauthorizedResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importProject>>, TError,ImportProjectMutationVariables, TContext>, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof importProject>>,
+        TError,
+        ImportProjectMutationVariables,
+        TContext
+      > => {
+      return useMutation(getImportProjectMutationOptions(options), queryClient);
+    }

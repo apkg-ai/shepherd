@@ -11,15 +11,16 @@
  * @minLength 4
  * @maxLength 11
  */
-export type SiblingTaskStatus = (typeof SiblingTaskStatus)[keyof typeof SiblingTaskStatus];
+export type SiblingTaskStatus = typeof SiblingTaskStatus[keyof typeof SiblingTaskStatus];
+
 
 export const SiblingTaskStatus = {
-  proposed: "proposed",
-  approved: "approved",
-  ready: "ready",
-  in_progress: "in_progress",
-  in_review: "in_review",
-  done: "done",
-  blocked: "blocked",
-  cancelled: "cancelled",
+  proposed: 'proposed',
+  approved: 'approved',
+  ready: 'ready',
+  in_progress: 'in_progress',
+  in_review: 'in_review',
+  done: 'done',
+  blocked: 'blocked',
+  cancelled: 'cancelled',
 } as const;

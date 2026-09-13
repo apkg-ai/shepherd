@@ -11,10 +11,10 @@
  */
 export interface ApprovalRequest {
   /**
-   * Optional comment explaining the approval.
-   * @minLength 1
-   * @maxLength 2000
-   * @pattern ^[\s\S]+$
-   */
+     * Optional comment explaining the approval.
+     * @minLength 1
+     * @maxLength 2000
+     * @pattern ^[\s\S]+$
+     */
   comment?: string;
 }

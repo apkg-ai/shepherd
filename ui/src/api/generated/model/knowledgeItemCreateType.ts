@@ -11,12 +11,12 @@
  * @minLength 4
  * @maxLength 10
  */
-export type KnowledgeItemCreateType =
-  (typeof KnowledgeItemCreateType)[keyof typeof KnowledgeItemCreateType];
+export type KnowledgeItemCreateType = typeof KnowledgeItemCreateType[keyof typeof KnowledgeItemCreateType];
+
 
 export const KnowledgeItemCreateType = {
-  link: "link",
-  transcript: "transcript",
-  decision: "decision",
-  note: "note",
+  link: 'link',
+  transcript: 'transcript',
+  decision: 'decision',
+  note: 'note',
 } as const;

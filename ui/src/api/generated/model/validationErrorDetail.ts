@@ -11,24 +11,24 @@
  */
 export interface ValidationErrorDetail {
   /**
-   * JSON Pointer to the invalid field.
-   * @minLength 1
-   * @maxLength 200
-   * @pattern ^/[a-zA-Z0-9_/]+$
-   */
+     * JSON Pointer to the invalid field.
+     * @minLength 1
+     * @maxLength 200
+     * @pattern ^/[a-zA-Z0-9_/]+$
+     */
   field: string;
   /**
-   * Human-readable error message.
-   * @minLength 1
-   * @maxLength 500
-   * @pattern ^[\s\S]+$
-   */
+     * Human-readable error message.
+     * @minLength 1
+     * @maxLength 500
+     * @pattern ^[\s\S]+$
+     */
   message: string;
   /**
-   * Machine-readable error code.
-   * @minLength 1
-   * @maxLength 50
-   * @pattern ^[a-z][a-z0-9_]+$
-   */
+     * Machine-readable error code.
+     * @minLength 1
+     * @maxLength 50
+     * @pattern ^[a-z][a-z0-9_]+$
+     */
   code?: string;
 }

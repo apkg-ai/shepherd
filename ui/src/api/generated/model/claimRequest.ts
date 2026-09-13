@@ -5,7 +5,7 @@
  * Local-first hub for agent-driven project work. Maps projects as typed task graphs and acts as persistent shared memory across agent and human sessions. The spec is the product boundary — anything not in this contract does not exist. Design rules in docs/03-api.md.
  * OpenAPI spec version: 0.1.0
  */
-import type { Identity } from "./identity";
+import type { Identity } from './identity';
 
 /**
  * Request body for claiming a task.
@@ -13,9 +13,9 @@ import type { Identity } from "./identity";
 export interface ClaimRequest {
   identity: Identity;
   /**
-   * Requested lease duration in seconds. The server may cap this value.
-   * @minimum 30
-   * @maximum 86400
-   */
+     * Requested lease duration in seconds. The server may cap this value.
+     * @minimum 30
+     * @maximum 86400
+     */
   ttl_seconds: number;
 }

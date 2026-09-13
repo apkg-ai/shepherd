@@ -9,10 +9,11 @@
 /**
  * Service status. `pass` = healthy, `warn` = healthy with concerns, `fail` = unhealthy.
  */
-export type HealthStatus = (typeof HealthStatus)[keyof typeof HealthStatus];
+export type HealthStatus = typeof HealthStatus[keyof typeof HealthStatus];
+
 
 export const HealthStatus = {
-  pass: "pass",
-  warn: "warn",
-  fail: "fail",
+  pass: 'pass',
+  warn: 'warn',
+  fail: 'fail',
 } as const;

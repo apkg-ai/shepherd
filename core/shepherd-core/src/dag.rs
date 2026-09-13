@@ -457,6 +457,45 @@ mod tests {
         assert_eq!(count_downstream(tid(2), &edges), 1);
     }
 
+    // ── Decomposition cycle detection ────────────────────────────────
+
+    #[test]
+    fn decomposition_direct_cycle_detected() {
+        // A is parent of B. Adding B as parent of A would create a cycle.
+        let edges = vec![(tid(1), tid(2))];
+        assert!(would_create_cycle(&edges, tid(2), tid(1)));
+    }
+
+    #[test]
+    fn decomposition_transitive_cycle_detected() {
+        // A→B→C. Adding C→A closes the cycle.
+        let edges = vec![(tid(1), tid(2)), (tid(2), tid(3))];
+        assert!(would_create_cycle(&edges, tid(3), tid(1)));
+    }
+
+    #[test]
+    fn decomposition_no_false_positive() {
+        // A→B→C. D→A is fine (D becomes parent of A).
+        let edges = vec![(tid(1), tid(2)), (tid(2), tid(3))];
+        assert!(!would_create_cycle(&edges, tid(4), tid(1)));
+    }
+
+    #[test]
+    fn has_cycle_decomposition_loop() {
+        // Bulk check: A→B→C→A.
+        assert!(has_cycle(&[
+            (tid(1), tid(2)),
+            (tid(2), tid(3)),
+            (tid(3), tid(1))
+        ]));
+    }
+
+    #[test]
+    fn has_cycle_decomposition_tree_is_acyclic() {
+        // Tree: A→B, A→C (two children, no cycle).
+        assert!(!has_cycle(&[(tid(1), tid(2)), (tid(1), tid(3))]));
+    }
+
     #[test]
     fn derive_roles_single_task() {
         let roles = derive_graph_roles(&[tid(1)], &[]);

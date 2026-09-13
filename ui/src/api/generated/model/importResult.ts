@@ -11,34 +11,34 @@
  */
 export interface ImportResult {
   /**
-   * Identifier of the newly created project.
-   * @minLength 36
-   * @maxLength 36
-   * @pattern ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
-   */
+     * Identifier of the newly created project.
+     * @minLength 36
+     * @maxLength 36
+     * @pattern ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+     */
   project_id: string;
   /**
-   * Number of tasks imported.
-   * @minimum 0
-   * @maximum 10000
-   */
+     * Number of tasks imported.
+     * @minimum 0
+     * @maximum 10000
+     */
   task_count: number;
   /**
-   * Number of relations imported.
-   * @minimum 0
-   * @maximum 50000
-   */
+     * Number of relations imported.
+     * @minimum 0
+     * @maximum 50000
+     */
   relation_count: number;
   /**
-   * Number of sessions imported.
-   * @minimum 0
-   * @maximum 50000
-   */
+     * Number of sessions imported.
+     * @minimum 0
+     * @maximum 50000
+     */
   session_count: number;
   /**
-   * Number of knowledge items imported.
-   * @minimum 0
-   * @maximum 50000
-   */
+     * Number of knowledge items imported.
+     * @minimum 0
+     * @maximum 50000
+     */
   knowledge_count: number;
 }

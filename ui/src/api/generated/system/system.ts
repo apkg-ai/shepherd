@@ -5,7 +5,9 @@
  * Local-first hub for agent-driven project work. Maps projects as typed task graphs and acts as persistent shared memory across agent and human sessions. The spec is the product boundary — anything not in this contract does not exist. Design rules in docs/03-api.md.
  * OpenAPI spec version: 0.1.0
  */
-import { useQuery } from "@tanstack/react-query";
+import {
+  useQuery
+} from '@tanstack/react-query';
 import type {
   DataTag,
   DefinedInitialDataOptions,
@@ -15,8 +17,8 @@ import type {
   QueryKey,
   UndefinedInitialDataOptions,
   UseQueryOptions,
-  UseQueryResult,
-} from "@tanstack/react-query";
+  UseQueryResult
+} from '@tanstack/react-query';
 
 import type {
   Health,
@@ -24,19 +26,22 @@ import type {
   ProblemDetail,
   TooManyRequestsResponse,
   UnauthorizedResponse,
-  ValidationErrorResponse,
-} from "../model";
+  ValidationErrorResponse
+} from '../model';
 
-import { shepherdFetch } from "../../client";
+import { shepherdFetch } from '../../client';
+
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+
 
 const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKey: K } => {
   const result = { queryKey } as T & { queryKey: K };
   for (const key of Object.keys(query)) {
     // The explicit queryKey always wins, matching the previous
     // `{ ...query, queryKey }` spread where it was set last.
-    if (key === "queryKey") continue;
+    if (key === 'queryKey') continue;
     Object.defineProperty(result, key, {
       enumerable: true,
       configurable: true,
@@ -47,143 +52,103 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
 };
 
 export const getGetHealthUrl = () => {
-  return `/health`;
-};
+
+
+
+
+  return `/health`
+}
 
 /**
  * Liveness probe per draft-inadarei-api-health-check-06. Returns 200 with status `pass` while healthy, 503 with status `fail` when degraded. Content-Type: application/health+json.
  * @summary Service health check
  */
-export const getHealth = async (options?: Parameters<typeof shepherdFetch>[1]): Promise<Health> => {
-  return shepherdFetch<Health>(getGetHealthUrl(), {
+export const getHealth = async ( options?: Parameters<typeof shepherdFetch>[1]): Promise<Health> => {
+
+  return shepherdFetch<Health>(getGetHealthUrl(),
+  {
     ...options,
-    method: "GET",
-  });
-};
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
 
 export const getGetHealthQueryKey = () => {
-  return [`/health`] as const;
-};
+    return [
+    `/health`
+    ] as const;
+    }
 
-export const getGetHealthQueryOptions = <
-  TData = Awaited<ReturnType<typeof getHealth>>,
-  TError =
-    | UnauthorizedResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse
-    | ProblemDetail,
->(options?: {
-  query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>>;
-  request?: SecondParameter<typeof shepherdFetch>;
-}) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getGetHealthQueryKey();
+export const getGetHealthQueryOptions = <TData = Awaited<ReturnType<typeof getHealth>>, TError = UnauthorizedResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse | ProblemDetail>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>>, request?: SecondParameter<typeof shepherdFetch>}
+) => {
 
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof getHealth>>> = ({ signal }) =>
-    getHealth({ signal, ...requestOptions });
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof getHealth>>,
-    TError,
-    TData
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryKey =  queryOptions?.queryKey ?? getGetHealthQueryKey();
 
-export type GetHealthQueryResult = NonNullable<Awaited<ReturnType<typeof getHealth>>>;
-export type GetHealthQueryError =
-  | UnauthorizedResponse
-  | ValidationErrorResponse
-  | TooManyRequestsResponse
-  | InternalErrorResponse
-  | ProblemDetail;
 
-export function useGetHealth<
-  TData = Awaited<ReturnType<typeof getHealth>>,
-  TError =
-    | UnauthorizedResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse
-    | ProblemDetail,
->(
-  options: {
-    query: Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>> &
-      Pick<
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHealth>>> = ({ signal }) => getHealth({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHealthQueryResult = NonNullable<Awaited<ReturnType<typeof getHealth>>>
+export type GetHealthQueryError = UnauthorizedResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse | ProblemDetail
+
+
+export function useGetHealth<TData = Awaited<ReturnType<typeof getHealth>>, TError = UnauthorizedResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse | ProblemDetail>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getHealth>>,
           TError,
           Awaited<ReturnType<typeof getHealth>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-export function useGetHealth<
-  TData = Awaited<ReturnType<typeof getHealth>>,
-  TError =
-    | UnauthorizedResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse
-    | ProblemDetail,
->(
-  options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>> &
-      Pick<
+        > , 'initialData'
+      >, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealth<TData = Awaited<ReturnType<typeof getHealth>>, TError = UnauthorizedResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse | ProblemDetail>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getHealth>>,
           TError,
           Awaited<ReturnType<typeof getHealth>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-export function useGetHealth<
-  TData = Awaited<ReturnType<typeof getHealth>>,
-  TError =
-    | UnauthorizedResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse
-    | ProblemDetail,
->(
-  options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>>;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+        > , 'initialData'
+      >, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealth<TData = Awaited<ReturnType<typeof getHealth>>, TError = UnauthorizedResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse | ProblemDetail>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>>, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary Service health check
  */
 
-export function useGetHealth<
-  TData = Awaited<ReturnType<typeof getHealth>>,
-  TError =
-    | UnauthorizedResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse
-    | ProblemDetail,
->(
-  options?: {
-    query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>>;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-  const queryOptions = getGetHealthQueryOptions(options);
+export function useGetHealth<TData = Awaited<ReturnType<typeof getHealth>>, TError = UnauthorizedResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse | ProblemDetail>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>>, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<TData, TError> & {
-    queryKey: DataTag<QueryKey, TData, TError>;
-  };
+  const queryOptions = getGetHealthQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+
+
+
+
+

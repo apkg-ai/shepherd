@@ -5,7 +5,7 @@
  * Local-first hub for agent-driven project work. Maps projects as typed task graphs and acts as persistent shared memory across agent and human sessions. The spec is the product boundary — anything not in this contract does not exist. Design rules in docs/03-api.md.
  * OpenAPI spec version: 0.1.0
  */
-import type { Task } from "./task";
+import type { Task } from './task';
 
 /**
  * Result of the next-task query. Contains the next available task or null if no work is available.

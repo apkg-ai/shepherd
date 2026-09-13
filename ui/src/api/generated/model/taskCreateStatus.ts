@@ -11,9 +11,10 @@
  * @minLength 8
  * @maxLength 8
  */
-export type TaskCreateStatus = (typeof TaskCreateStatus)[keyof typeof TaskCreateStatus];
+export type TaskCreateStatus = typeof TaskCreateStatus[keyof typeof TaskCreateStatus];
+
 
 export const TaskCreateStatus = {
-  proposed: "proposed",
-  approved: "approved",
+  proposed: 'proposed',
+  approved: 'approved',
 } as const;

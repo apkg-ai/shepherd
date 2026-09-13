@@ -14,6 +14,7 @@ import { IdentityChip } from "../../components/IdentityChip";
 import { LoadMore } from "../../components/LoadMore";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
+import { TypeBadge } from "../../components/TypeBadge";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import { formatDateTime } from "../../lib/format";
 import { buildTaskTree, describeDependencies, type TaskTreeNode } from "../../lib/taskTree";
@@ -29,7 +30,7 @@ const STATUSES: StatusFilterParameter[] = [
   "blocked",
   "cancelled",
 ];
-const TYPES: TypeFilterParameter[] = ["code", "question", "refactor", "review", "research"];
+const TYPES: TypeFilterParameter[] = ["code", "question", "refactor", "review", "research", "epic"];
 
 export function ProjectTasksScreen() {
   const { projectId } = useParams();
@@ -149,6 +150,9 @@ function TaskList({ projectId }: { projectId: string }) {
           <td className={styles.statusCell}>
             <StatusBadge status={task.status} />
           </td>
+          <td className={styles.typeCol}>
+            <TypeBadge type={task.type} />
+          </td>
           <td>
             <div className={styles.titleCell} style={{ "--depth": depth } as CSSProperties}>
               {depth > 0 ? <span className={styles.elbow} aria-hidden="true" /> : null}
@@ -196,7 +200,6 @@ function TaskList({ projectId }: { projectId: string }) {
               {parentContext(node, flat)}
             </div>
           </td>
-          <td className={styles.muted}>{task.type}</td>
           <td>
             {task.status === "in_progress" && task.assignee ? (
               <IdentityChip identity={task.assignee} />
@@ -270,8 +273,8 @@ function TaskList({ projectId }: { projectId: string }) {
               <thead>
                 <tr>
                   <th>Status</th>
+                  <th className={styles.typeCol}>Type</th>
                   <th>Title</th>
-                  <th>Type</th>
                   <th>Assignee</th>
                   <th>Attempts</th>
                   <th>Updated</th>

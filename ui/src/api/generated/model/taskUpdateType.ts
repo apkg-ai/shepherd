@@ -11,12 +11,14 @@
  * @minLength 4
  * @maxLength 8
  */
-export type TaskUpdateType = (typeof TaskUpdateType)[keyof typeof TaskUpdateType];
+export type TaskUpdateType = typeof TaskUpdateType[keyof typeof TaskUpdateType];
+
 
 export const TaskUpdateType = {
-  code: "code",
-  question: "question",
-  refactor: "refactor",
-  review: "review",
-  research: "research",
+  code: 'code',
+  question: 'question',
+  refactor: 'refactor',
+  review: 'review',
+  research: 'research',
+  epic: 'epic',
 } as const;

@@ -11,10 +11,10 @@
  */
 export interface RejectionRequest {
   /**
-   * Explanation for the rejection.
-   * @minLength 1
-   * @maxLength 2000
-   * @pattern ^[\s\S]+$
-   */
+     * Explanation for the rejection.
+     * @minLength 1
+     * @maxLength 2000
+     * @pattern ^[\s\S]+$
+     */
   reason: string;
 }

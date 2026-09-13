@@ -63,6 +63,8 @@ pub enum TaskUpdateType {
     Review,
     #[serde(rename = "research")]
     Research,
+    #[serde(rename = "epic")]
+    Epic,
 }
 impl TaskUpdateType {
     pub fn as_str(&self) -> &'static str {
@@ -72,6 +74,7 @@ impl TaskUpdateType {
             Self::Refactor => "refactor",
             Self::Review => "review",
             Self::Research => "research",
+            Self::Epic => "epic",
         }
     }
 }
@@ -237,6 +240,8 @@ pub enum TaskCreateType {
     Review,
     #[serde(rename = "research")]
     Research,
+    #[serde(rename = "epic")]
+    Epic,
 }
 impl TaskCreateType {
     pub fn as_str(&self) -> &'static str {
@@ -246,6 +251,7 @@ impl TaskCreateType {
             Self::Refactor => "refactor",
             Self::Review => "review",
             Self::Research => "research",
+            Self::Epic => "epic",
         }
     }
 }
@@ -1108,6 +1114,8 @@ pub enum TaskType {
     Review,
     #[serde(rename = "research")]
     Research,
+    #[serde(rename = "epic")]
+    Epic,
 }
 impl TaskType {
     pub fn as_str(&self) -> &'static str {
@@ -1117,6 +1125,7 @@ impl TaskType {
             Self::Refactor => "refactor",
             Self::Review => "review",
             Self::Research => "research",
+            Self::Epic => "epic",
         }
     }
 }

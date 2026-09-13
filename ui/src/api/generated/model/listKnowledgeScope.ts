@@ -6,10 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ListKnowledgeScope = (typeof ListKnowledgeScope)[keyof typeof ListKnowledgeScope];
+export type ListKnowledgeScope = typeof ListKnowledgeScope[keyof typeof ListKnowledgeScope];
+
 
 export const ListKnowledgeScope = {
-  task: "task",
-  session: "session",
-  project: "project",
+  task: 'task',
+  session: 'session',
+  project: 'project',
 } as const;

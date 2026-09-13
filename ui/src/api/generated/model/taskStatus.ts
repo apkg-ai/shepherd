@@ -11,15 +11,16 @@
  * @minLength 4
  * @maxLength 11
  */
-export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
+export type TaskStatus = typeof TaskStatus[keyof typeof TaskStatus];
+
 
 export const TaskStatus = {
-  proposed: "proposed",
-  approved: "approved",
-  ready: "ready",
-  in_progress: "in_progress",
-  in_review: "in_review",
-  done: "done",
-  blocked: "blocked",
-  cancelled: "cancelled",
+  proposed: 'proposed',
+  approved: 'approved',
+  ready: 'ready',
+  in_progress: 'in_progress',
+  in_review: 'in_review',
+  done: 'done',
+  blocked: 'blocked',
+  cancelled: 'cancelled',
 } as const;

@@ -118,6 +118,7 @@ string_enum! {
         Refactor => "refactor",
         Review => "review",
         Research => "research",
+        Epic => "epic",
     }
 }
 
@@ -573,7 +574,7 @@ mod tests {
 
     #[test]
     fn task_type_roundtrip() {
-        for s in ["code", "question", "refactor", "review", "research"] {
+        for s in ["code", "question", "refactor", "review", "research", "epic"] {
             let tt: TaskType = s.parse().unwrap();
             assert_eq!(tt.to_string(), s);
         }

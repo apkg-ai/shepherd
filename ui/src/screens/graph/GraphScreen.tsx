@@ -303,8 +303,8 @@ function ProjectGraph({ projectId }: { projectId: string }) {
   );
 
   const graph = useMemo(() => {
-    // Epic detection: tasks that have at least one decomposition child.
-    // Used by the flow lens to show only epics (subtasks are hidden).
+    // Child counts: used for the expand chip's count display and fallback
+    // epic detection (projects with no first-class epics yet).
     const childCounts = new Map<string, number>();
     for (const r of relations) {
       if (r.type === "decomposition") {
@@ -316,12 +316,19 @@ function ProjectGraph({ projectId }: { projectId: string }) {
     if (lens === "tree") {
       graphNodes = decompositionGraph(tasks, relations, expandedIds);
     } else {
-      // Flow lens: show only epics (tasks with decomposition children).
-      // Projects with no epics fall back to all tasks — flow is the default
-      // lens, so it must never render a blank canvas. Inline subtask
-      // expansion is tracked in #52 — for now the side panel provides the
-      // subtask drill-down.
-      const epicTasks = tasks.filter((t) => childCounts.has(t.id));
+      // Flow lens: show top-level epics only — nested child epics (epics
+      // that are decomposition children of another epic) belong in the
+      // side panel, not as independent flow nodes. If no epics exist,
+      // fall back to the old heuristic (tasks with children) and then to
+      // all tasks — flow is the default lens, so it must never render a
+      // blank canvas. Inline subtask expansion tracked in #52.
+      const decompChildIds = new Set(
+        relations.filter((r) => r.type === "decomposition").map((r) => r.target_task_id),
+      );
+      let epicTasks = tasks.filter((t) => t.type === "epic" && !decompChildIds.has(t.id));
+      if (epicTasks.length === 0) {
+        epicTasks = tasks.filter((t) => childCounts.has(t.id) && !decompChildIds.has(t.id));
+      }
       const flowTasks = epicTasks.length > 0 ? epicTasks : tasks;
       const flowMeta = new Map(
         flowTasks.map((t) => [t.id, { childCount: childCounts.get(t.id) ?? 0, expanded: false }]),
@@ -402,6 +409,39 @@ function ProjectGraph({ projectId }: { projectId: string }) {
     return { nodes, edges };
   }, [lens, tasks, relations, expandedIds]);
 
+  // Display-only waiting indicators — no lifecycle changes.
+  const { epicBlockedIds, depWaitingIds } = useMemo(() => {
+    const epicBlocked = new Set<string>();
+    const depWaiting = new Set<string>();
+    const taskById = new Map(tasks.map((t) => [t.id, t]));
+
+    for (const r of relations) {
+      // Epic blocked: child epic waiting on parent's non-epic subtasks.
+      if (r.type === "decomposition") {
+        const parent = taskById.get(r.source_task_id);
+        const child = taskById.get(r.target_task_id);
+        if (parent?.type === "epic" && child?.type === "epic") {
+          const hasUnfinishedWork = relations.some((rel) => {
+            if (rel.type !== "decomposition" || rel.source_task_id !== parent.id) return false;
+            const sibling = taskById.get(rel.target_task_id);
+            return sibling && sibling.type !== "epic" && sibling.status !== "done" && sibling.status !== "cancelled";
+          });
+          if (hasUnfinishedWork) epicBlocked.add(child.id);
+        }
+      }
+
+      // Dependency waiting: task in approved with an unmet depends_on.
+      if (r.type === "depends_on") {
+        const source = taskById.get(r.source_task_id);
+        const target = taskById.get(r.target_task_id);
+        if (source && source.status === "approved" && target && target.status !== "done") {
+          depWaiting.add(source.id);
+        }
+      }
+    }
+    return { epicBlockedIds: epicBlocked, depWaitingIds: depWaiting };
+  }, [tasks, relations]);
+
   // Neighbor fade: when a node is selected, compute the transitive cone and
   // dim everything outside it. The lens type determines which relation edges
   // define "neighbor." Only a selection that is a task node on the canvas
@@ -423,16 +463,18 @@ function ProjectGraph({ projectId }: { projectId: string }) {
         const isSelected = node.id === selectedId;
         const isBoundary = node.id === START_ID || node.id === END_ID;
         const faded = !isBoundary && neighborIds !== null && !neighborIds.has(node.id);
-        if (!isSelected && !faded) return node;
+        const epicBlocked = !isBoundary && epicBlockedIds.has(node.id);
+        const depWaiting = !isBoundary && depWaitingIds.has(node.id);
+        if (!isSelected && !faded && !epicBlocked && !depWaiting) return node;
         // Boundary nodes never fade; only the selection flag can change.
         if (node.type === "boundary") return { ...node, selected: isSelected || undefined };
         return {
           ...node,
           selected: isSelected || undefined,
-          data: { ...node.data, faded },
+          data: { ...node.data, faded, epicBlocked, depWaiting },
         };
       }),
-    [graph.nodes, selectedId, neighborIds],
+    [graph.nodes, selectedId, neighborIds, epicBlockedIds, depWaitingIds],
   );
 
   // Fade edges: full opacity on edges between two neighbors, dim otherwise.

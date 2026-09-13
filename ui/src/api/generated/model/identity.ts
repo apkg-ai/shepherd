@@ -11,31 +11,31 @@
  */
 export interface Identity {
   /**
-   * The agent harness or tool making the call (e.g. claude-code, cursor, custom-script).
-   * @minLength 1
-   * @maxLength 100
-   * @pattern ^[\x20-\x7E]+$
-   */
+     * The agent harness or tool making the call (e.g. claude-code, cursor, custom-script).
+     * @minLength 1
+     * @maxLength 100
+     * @pattern ^[\x20-\x7E]+$
+     */
   harness: string;
   /**
-   * The agent or model performing the work (e.g. opus-5, human).
-   * @minLength 1
-   * @maxLength 100
-   * @pattern ^[\x20-\x7E]+$
-   */
+     * The agent or model performing the work (e.g. opus-5, human).
+     * @minLength 1
+     * @maxLength 100
+     * @pattern ^[\x20-\x7E]+$
+     */
   agent_model: string;
   /**
-   * Caller-generated session identifier for correlating work across multiple API calls within a single work session.
-   * @minLength 1
-   * @maxLength 200
-   * @pattern ^[\x20-\x7E]+$
-   */
+     * Caller-generated session identifier for correlating work across multiple API calls within a single work session.
+     * @minLength 1
+     * @maxLength 200
+     * @pattern ^[\x20-\x7E]+$
+     */
   session_id: string;
   /**
-   * Optional human-readable label for this session (e.g. "S3 domain core", "bug fix #42").
-   * @minLength 1
-   * @maxLength 200
-   * @pattern ^[\x20-\x7E]+$
-   */
+     * Optional human-readable label for this session (e.g. "S3 domain core", "bug fix #42").
+     * @minLength 1
+     * @maxLength 200
+     * @pattern ^[\x20-\x7E]+$
+     */
   label?: string;
 }

@@ -5,7 +5,8 @@
  * Local-first hub for agent-driven project work. Maps projects as typed task graphs and acts as persistent shared memory across agent and human sessions. The spec is the product boundary — anything not in this contract does not exist. Design rules in docs/03-api.md.
  * OpenAPI spec version: 0.1.0
  */
-import * as zod from "zod";
+import * as zod from 'zod';
+
 
 /**
  * Opens a Server-Sent Events stream delivering typed domain events in real time. Optionally filter to a single project. No replay or Last-Event-ID support in v1 — clients refetch on reconnect. See openapi/shepherd-events.asyncapi.yaml for the full event catalog and payload schemas.
@@ -14,18 +15,13 @@ import * as zod from "zod";
 export const getEventsQueryProjectIdMin = 36;
 export const getEventsQueryProjectIdMax = 36;
 
-export const getEventsQueryProjectIdRegExp = new RegExp(
-  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-);
+
+export const getEventsQueryProjectIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
 
 export const GetEventsQueryParams = zod.object({
-  project_id: zod
-    .uuid()
-    .min(getEventsQueryProjectIdMin)
-    .max(getEventsQueryProjectIdMax)
-    .regex(getEventsQueryProjectIdRegExp)
-    .optional()
-    .describe("Filter events to a single project."),
-});
+  "project_id": zod.uuid().min(getEventsQueryProjectIdMin).max(getEventsQueryProjectIdMax).regex(getEventsQueryProjectIdRegExp).optional().describe('Filter events to a single project.')
+})
 
-export const GetEventsResponse = zod.unknown();
+export const GetEventsResponse = zod.unknown()
+

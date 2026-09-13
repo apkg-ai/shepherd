@@ -11,9 +11,10 @@
  * @minLength 6
  * @maxLength 9
  */
-export type SessionReportOutcome = (typeof SessionReportOutcome)[keyof typeof SessionReportOutcome];
+export type SessionReportOutcome = typeof SessionReportOutcome[keyof typeof SessionReportOutcome];
+
 
 export const SessionReportOutcome = {
-  succeeded: "succeeded",
-  failed: "failed",
+  succeeded: 'succeeded',
+  failed: 'failed',
 } as const;

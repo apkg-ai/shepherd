@@ -11,12 +11,14 @@
  * @minLength 4
  * @maxLength 8
  */
-export type TaskCreateType = (typeof TaskCreateType)[keyof typeof TaskCreateType];
+export type TaskCreateType = typeof TaskCreateType[keyof typeof TaskCreateType];
+
 
 export const TaskCreateType = {
-  code: "code",
-  question: "question",
-  refactor: "refactor",
-  review: "review",
-  research: "research",
+  code: 'code',
+  question: 'question',
+  refactor: 'refactor',
+  review: 'review',
+  research: 'research',
+  epic: 'epic',
 } as const;

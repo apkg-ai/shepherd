@@ -5,13 +5,15 @@
  * Local-first hub for agent-driven project work. Maps projects as typed task graphs and acts as persistent shared memory across agent and human sessions. The spec is the product boundary — anything not in this contract does not exist. Design rules in docs/03-api.md.
  * OpenAPI spec version: 0.1.0
  */
-import { useMutation } from "@tanstack/react-query";
+import {
+  useMutation
+} from '@tanstack/react-query';
 import type {
   MutationFunction,
   QueryClient,
   UseMutationOptions,
-  UseMutationResult,
-} from "@tanstack/react-query";
+  UseMutationResult
+} from '@tanstack/react-query';
 
 import type {
   Claim,
@@ -24,38 +26,39 @@ import type {
   NotFoundResponse,
   TooManyRequestsResponse,
   UnauthorizedResponse,
-  ValidationErrorResponse,
-} from "../model";
+  ValidationErrorResponse
+} from '../model';
 
-import { shepherdFetch } from "../../client";
+import { shepherdFetch } from '../../client';
+
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
-export const getClaimTaskUrl = (projectId: string, taskId: string) => {
-  return `/api/v1/projects/${projectId}/tasks/${taskId}/claim`;
-};
+
+
+export const getClaimTaskUrl = (projectId: string,
+    taskId: string,) => {
+
+
+
+
+  return `/api/v1/projects/${projectId}/tasks/${taskId}/claim`
+}
 
 /**
  * Acquires a lease-based claim on a task. The task must be `ready` and unclaimed. The caller provides their identity and a TTL; the task transitions to `in_progress`. At most one active claim per task; concurrent attempts result in exactly one winner. Expired leases release the task back to `ready` automatically.
  * @summary Claim a task
  */
-export const claimTask = async (
-  projectId: string,
-  taskId: string,
-  claimRequest: ClaimRequest,
-  options?: Parameters<typeof shepherdFetch>[1],
-): Promise<Claim> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
+export const claimTask = async (projectId: string,
+    taskId: string,
+    claimRequest: ClaimRequest, options?: Parameters<typeof shepherdFetch>[1]): Promise<Claim> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
     if (Symbol.iterator in h) {
       return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
       );
     }
     const headers: Record<string, string | readonly string[]> = {};
@@ -64,125 +67,89 @@ export const claimTask = async (
     }
     return headers;
   };
-  return shepherdFetch<Claim>(getClaimTaskUrl(projectId, taskId), {
+return shepherdFetch<Claim>(getClaimTaskUrl(projectId,taskId),
+  {
     ...options,
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...getHeaders(options?.headers) },
-    body: JSON.stringify(claimRequest),
-  });
-};
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(claimRequest)
+  }
+);}
 
-export const getClaimTaskMutationKey = () => ["claimTask"] as const;
 
-export const getClaimTaskMutationOptions = <
-  TError =
-    | UnauthorizedResponse
-    | NotFoundResponse
-    | ConflictResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof claimTask>>,
-    TError,
-    ClaimTaskMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof shepherdFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof claimTask>>,
-  TError,
-  ClaimTaskMutationVariables,
-  TContext
-> => {
-  const mutationKey = getClaimTaskMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation && "mutationKey" in options.mutation && options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
 
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof claimTask>>,
-    ClaimTaskMutationVariables
-  > = (props) => {
-    const { projectId, taskId, data } = props ?? {};
 
-    return claimTask(projectId, taskId, data, requestOptions);
-  };
 
-  return { mutationFn, ...mutationOptions };
-};
+export const getClaimTaskMutationKey = () => ['claimTask'] as const;
 
-export type ClaimTaskMutationResult = NonNullable<Awaited<ReturnType<typeof claimTask>>>;
-export type ClaimTaskMutationBody = ClaimRequest;
-export type ClaimTaskMutationError =
-  | UnauthorizedResponse
-  | NotFoundResponse
-  | ConflictResponse
-  | ValidationErrorResponse
-  | TooManyRequestsResponse
-  | InternalErrorResponse;
-export type ClaimTaskMutationVariables = { projectId: string; taskId: string; data: ClaimRequest };
+export const getClaimTaskMutationOptions = <TError = UnauthorizedResponse | NotFoundResponse | ConflictResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimTask>>, TError,ClaimTaskMutationVariables, TContext>, request?: SecondParameter<typeof shepherdFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof claimTask>>, TError,ClaimTaskMutationVariables, TContext> => {
 
-/**
+const mutationKey = getClaimTaskMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof claimTask>>, ClaimTaskMutationVariables> = (props) => {
+          const {projectId,taskId,data} = props ?? {};
+
+          return  claimTask(projectId,taskId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClaimTaskMutationResult = NonNullable<Awaited<ReturnType<typeof claimTask>>>
+    export type ClaimTaskMutationBody = ClaimRequest
+    export type ClaimTaskMutationError = UnauthorizedResponse | NotFoundResponse | ConflictResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse
+    export type ClaimTaskMutationVariables = {projectId: string;taskId: string;data: ClaimRequest}
+
+    /**
  * @summary Claim a task
  */
-export const useClaimTask = <
-  TError =
-    | UnauthorizedResponse
-    | NotFoundResponse
-    | ConflictResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof claimTask>>,
-      TError,
-      ClaimTaskMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof claimTask>>,
-  TError,
-  ClaimTaskMutationVariables,
-  TContext
-> => {
-  return useMutation(getClaimTaskMutationOptions(options), queryClient);
-};
-export const getRenewClaimUrl = (projectId: string, taskId: string) => {
-  return `/api/v1/projects/${projectId}/tasks/${taskId}/claim/renew`;
-};
+export const useClaimTask = <TError = UnauthorizedResponse | NotFoundResponse | ConflictResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimTask>>, TError,ClaimTaskMutationVariables, TContext>, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof claimTask>>,
+        TError,
+        ClaimTaskMutationVariables,
+        TContext
+      > => {
+      return useMutation(getClaimTaskMutationOptions(options), queryClient);
+    }
+    export const getRenewClaimUrl = (projectId: string,
+    taskId: string,) => {
+
+
+
+
+  return `/api/v1/projects/${projectId}/tasks/${taskId}/claim/renew`
+}
 
 /**
  * Extends the TTL of an active claim. The caller must be the current claimant (matched by identity) — a mismatched identity is rejected with 409 Conflict. Returns 410 Gone if the lease has already expired.
  * @summary Renew a task claim
  */
-export const renewClaim = async (
-  projectId: string,
-  taskId: string,
-  claimRenewal: ClaimRenewal,
-  options?: Parameters<typeof shepherdFetch>[1],
-): Promise<Claim> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
+export const renewClaim = async (projectId: string,
+    taskId: string,
+    claimRenewal: ClaimRenewal, options?: Parameters<typeof shepherdFetch>[1]): Promise<Claim> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
     if (Symbol.iterator in h) {
       return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
       );
     }
     const headers: Record<string, string | readonly string[]> = {};
@@ -191,128 +158,89 @@ export const renewClaim = async (
     }
     return headers;
   };
-  return shepherdFetch<Claim>(getRenewClaimUrl(projectId, taskId), {
+return shepherdFetch<Claim>(getRenewClaimUrl(projectId,taskId),
+  {
     ...options,
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...getHeaders(options?.headers) },
-    body: JSON.stringify(claimRenewal),
-  });
-};
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(claimRenewal)
+  }
+);}
 
-export const getRenewClaimMutationKey = () => ["renewClaim"] as const;
 
-export const getRenewClaimMutationOptions = <
-  TError =
-    | UnauthorizedResponse
-    | NotFoundResponse
-    | ConflictResponse
-    | GoneResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof renewClaim>>,
-    TError,
-    RenewClaimMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof shepherdFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof renewClaim>>,
-  TError,
-  RenewClaimMutationVariables,
-  TContext
-> => {
-  const mutationKey = getRenewClaimMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation && "mutationKey" in options.mutation && options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
 
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof renewClaim>>,
-    RenewClaimMutationVariables
-  > = (props) => {
-    const { projectId, taskId, data } = props ?? {};
 
-    return renewClaim(projectId, taskId, data, requestOptions);
-  };
 
-  return { mutationFn, ...mutationOptions };
-};
+export const getRenewClaimMutationKey = () => ['renewClaim'] as const;
 
-export type RenewClaimMutationResult = NonNullable<Awaited<ReturnType<typeof renewClaim>>>;
-export type RenewClaimMutationBody = ClaimRenewal;
-export type RenewClaimMutationError =
-  | UnauthorizedResponse
-  | NotFoundResponse
-  | ConflictResponse
-  | GoneResponse
-  | ValidationErrorResponse
-  | TooManyRequestsResponse
-  | InternalErrorResponse;
-export type RenewClaimMutationVariables = { projectId: string; taskId: string; data: ClaimRenewal };
+export const getRenewClaimMutationOptions = <TError = UnauthorizedResponse | NotFoundResponse | ConflictResponse | GoneResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renewClaim>>, TError,RenewClaimMutationVariables, TContext>, request?: SecondParameter<typeof shepherdFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof renewClaim>>, TError,RenewClaimMutationVariables, TContext> => {
 
-/**
+const mutationKey = getRenewClaimMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renewClaim>>, RenewClaimMutationVariables> = (props) => {
+          const {projectId,taskId,data} = props ?? {};
+
+          return  renewClaim(projectId,taskId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenewClaimMutationResult = NonNullable<Awaited<ReturnType<typeof renewClaim>>>
+    export type RenewClaimMutationBody = ClaimRenewal
+    export type RenewClaimMutationError = UnauthorizedResponse | NotFoundResponse | ConflictResponse | GoneResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse
+    export type RenewClaimMutationVariables = {projectId: string;taskId: string;data: ClaimRenewal}
+
+    /**
  * @summary Renew a task claim
  */
-export const useRenewClaim = <
-  TError =
-    | UnauthorizedResponse
-    | NotFoundResponse
-    | ConflictResponse
-    | GoneResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof renewClaim>>,
-      TError,
-      RenewClaimMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof renewClaim>>,
-  TError,
-  RenewClaimMutationVariables,
-  TContext
-> => {
-  return useMutation(getRenewClaimMutationOptions(options), queryClient);
-};
-export const getReleaseClaimUrl = (projectId: string, taskId: string) => {
-  return `/api/v1/projects/${projectId}/tasks/${taskId}/claim/release`;
-};
+export const useRenewClaim = <TError = UnauthorizedResponse | NotFoundResponse | ConflictResponse | GoneResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renewClaim>>, TError,RenewClaimMutationVariables, TContext>, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof renewClaim>>,
+        TError,
+        RenewClaimMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRenewClaimMutationOptions(options), queryClient);
+    }
+    export const getReleaseClaimUrl = (projectId: string,
+    taskId: string,) => {
+
+
+
+
+  return `/api/v1/projects/${projectId}/tasks/${taskId}/claim/release`
+}
 
 /**
  * Voluntarily releases the current claim without reporting a session. The caller must be the current claimant (matched by identity) — a mismatched identity is rejected with 409 Conflict. The task returns to `ready` and becomes claimable by others. Returns 410 Gone if the lease has already expired.
  * @summary Release a task claim
  */
-export const releaseClaim = async (
-  projectId: string,
-  taskId: string,
-  claimRelease: ClaimRelease,
-  options?: Parameters<typeof shepherdFetch>[1],
-): Promise<void> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
+export const releaseClaim = async (projectId: string,
+    taskId: string,
+    claimRelease: ClaimRelease, options?: Parameters<typeof shepherdFetch>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
     if (Symbol.iterator in h) {
       return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
       );
     }
     const headers: Record<string, string | readonly string[]> = {};
@@ -321,104 +249,63 @@ export const releaseClaim = async (
     }
     return headers;
   };
-  return shepherdFetch<void>(getReleaseClaimUrl(projectId, taskId), {
+return shepherdFetch<void>(getReleaseClaimUrl(projectId,taskId),
+  {
     ...options,
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...getHeaders(options?.headers) },
-    body: JSON.stringify(claimRelease),
-  });
-};
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(claimRelease)
+  }
+);}
 
-export const getReleaseClaimMutationKey = () => ["releaseClaim"] as const;
 
-export const getReleaseClaimMutationOptions = <
-  TError =
-    | UnauthorizedResponse
-    | NotFoundResponse
-    | ConflictResponse
-    | GoneResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof releaseClaim>>,
-    TError,
-    ReleaseClaimMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof shepherdFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof releaseClaim>>,
-  TError,
-  ReleaseClaimMutationVariables,
-  TContext
-> => {
-  const mutationKey = getReleaseClaimMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation && "mutationKey" in options.mutation && options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
 
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof releaseClaim>>,
-    ReleaseClaimMutationVariables
-  > = (props) => {
-    const { projectId, taskId, data } = props ?? {};
 
-    return releaseClaim(projectId, taskId, data, requestOptions);
-  };
 
-  return { mutationFn, ...mutationOptions };
-};
+export const getReleaseClaimMutationKey = () => ['releaseClaim'] as const;
 
-export type ReleaseClaimMutationResult = NonNullable<Awaited<ReturnType<typeof releaseClaim>>>;
-export type ReleaseClaimMutationBody = ClaimRelease;
-export type ReleaseClaimMutationError =
-  | UnauthorizedResponse
-  | NotFoundResponse
-  | ConflictResponse
-  | GoneResponse
-  | ValidationErrorResponse
-  | TooManyRequestsResponse
-  | InternalErrorResponse;
-export type ReleaseClaimMutationVariables = {
-  projectId: string;
-  taskId: string;
-  data: ClaimRelease;
-};
+export const getReleaseClaimMutationOptions = <TError = UnauthorizedResponse | NotFoundResponse | ConflictResponse | GoneResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseClaim>>, TError,ReleaseClaimMutationVariables, TContext>, request?: SecondParameter<typeof shepherdFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof releaseClaim>>, TError,ReleaseClaimMutationVariables, TContext> => {
 
-/**
+const mutationKey = getReleaseClaimMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof releaseClaim>>, ReleaseClaimMutationVariables> = (props) => {
+          const {projectId,taskId,data} = props ?? {};
+
+          return  releaseClaim(projectId,taskId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReleaseClaimMutationResult = NonNullable<Awaited<ReturnType<typeof releaseClaim>>>
+    export type ReleaseClaimMutationBody = ClaimRelease
+    export type ReleaseClaimMutationError = UnauthorizedResponse | NotFoundResponse | ConflictResponse | GoneResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse
+    export type ReleaseClaimMutationVariables = {projectId: string;taskId: string;data: ClaimRelease}
+
+    /**
  * @summary Release a task claim
  */
-export const useReleaseClaim = <
-  TError =
-    | UnauthorizedResponse
-    | NotFoundResponse
-    | ConflictResponse
-    | GoneResponse
-    | ValidationErrorResponse
-    | TooManyRequestsResponse
-    | InternalErrorResponse,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof releaseClaim>>,
-      TError,
-      ReleaseClaimMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof shepherdFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof releaseClaim>>,
-  TError,
-  ReleaseClaimMutationVariables,
-  TContext
-> => {
-  return useMutation(getReleaseClaimMutationOptions(options), queryClient);
-};
+export const useReleaseClaim = <TError = UnauthorizedResponse | NotFoundResponse | ConflictResponse | GoneResponse | ValidationErrorResponse | TooManyRequestsResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseClaim>>, TError,ReleaseClaimMutationVariables, TContext>, request?: SecondParameter<typeof shepherdFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof releaseClaim>>,
+        TError,
+        ReleaseClaimMutationVariables,
+        TContext
+      > => {
+      return useMutation(getReleaseClaimMutationOptions(options), queryClient);
+    }

@@ -130,6 +130,73 @@
   min-width: 0;
 }
 
+.actionsSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.actionLink {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.actionLink:hover {
+  text-decoration: underline;
+}
+
+.linkForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.linkSelect {
+  font: inherit;
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.linkError {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}
+
+.linkSubmit {
+  align-self: flex-start;
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  border-radius: var(--radius-1);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.linkSubmit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .footer {
   margin-top: auto;
   display: flex;

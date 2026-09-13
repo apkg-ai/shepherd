@@ -10,10 +10,11 @@
  * @minLength 3
  * @maxLength 9
  */
-export type TaskGraphRoleItem = (typeof TaskGraphRoleItem)[keyof typeof TaskGraphRoleItem];
+export type TaskGraphRoleItem = typeof TaskGraphRoleItem[keyof typeof TaskGraphRoleItem];
+
 
 export const TaskGraphRoleItem = {
-  start: "start",
-  end: "end",
-  milestone: "milestone",
+  start: 'start',
+  end: 'end',
+  milestone: 'milestone',
 } as const;
