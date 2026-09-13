@@ -16,12 +16,30 @@ import type { Relation, Task } from "../api/generated/model";
  * Nodes have a fixed size so layout stays pure (no measure loop); node id is
  * the task id (stable across lenses — selection survives a toggle), edge id
  * the relation id.
+ *
+ * The tree lens supports progressive disclosure: when `expandedIds` is
+ * provided, only nodes whose parents are in the set (or roots) are laid out.
+ * Each node carries a `childCount` so the UI can render an expand chip.
  */
 
 export const NODE_WIDTH = 248;
 export const NODE_HEIGHT = 76;
 
-export type TaskNodeType = Node<{ task: Task }, "task">;
+export interface TaskNodeData {
+  task: Task;
+  /** Direct children in the decomposition tree. 0 in the flow lens. */
+  childCount: number;
+  /** Whether this node's children are visible. Always false in the flow lens. */
+  expanded: boolean;
+  /** Set by the graph screen when neighbor fade is active (not a layout concern). */
+  faded?: boolean;
+}
+
+export type TaskNodeType = Node<TaskNodeData, "task">;
+
+/** Virtual Start/End nodes anchoring the epic flow. */
+export const BOUNDARY_SIZE = 64;
+export type BoundaryNodeType = Node<{ label: string }, "boundary">;
 
 export interface GraphModel {
   nodes: TaskNodeType[];
@@ -35,18 +53,31 @@ interface LensEdge {
   target: string;
 }
 
-/** Decomposition lens: parent above child, top→bottom. */
+/**
+ * Decomposition lens: parent above child, top→bottom.
+ *
+ * When `expandedIds` is provided, only nodes whose parents are in the set
+ * (or roots with no parent) appear. Pass `undefined` to show everything
+ * (backward compat / tests), or an empty Set to collapse all subtrees.
+ */
 export function decompositionGraph(
   tasks: readonly Task[],
   relations: readonly Relation[],
+  expandedIds?: ReadonlySet<string>,
 ): GraphModel {
-  return treeLayout(tasks, lensEdges(tasks, relations, "decomposition"));
+  return treeLayout(tasks, lensEdges(tasks, relations, "decomposition"), expandedIds);
 }
 
-/** Dependency lens: prerequisite before dependent, start→end left→right. */
+/**
+ * Dependency lens: prerequisite before dependent, start→end left→right.
+ *
+ * When `nodeMeta` is provided, each node carries the given `childCount`
+ * and `expanded` values (used by the epic-only flow to show subtask chips).
+ */
 export function dependencyGraph(
   tasks: readonly Task[],
   relations: readonly Relation[],
+  nodeMeta?: ReadonlyMap<string, { childCount: number; expanded: boolean }>,
 ): GraphModel {
   // Flip: depends_on points dependent → prerequisite, the lens reads
   // prerequisite → dependent.
@@ -55,7 +86,7 @@ export function dependencyGraph(
     source: e.relation.target_task_id,
     target: e.relation.source_task_id,
   }));
-  return layout(tasks, edges, "LR", { markerEnd: { type: MarkerType.ArrowClosed } });
+  return layout(tasks, edges, "TB", { markerEnd: { type: MarkerType.ArrowClosed } }, nodeMeta);
 }
 
 /** Edges of one type whose endpoints are both loaded; self-edges dropped. */
@@ -103,6 +134,7 @@ function layout(
   edges: readonly LensEdge[],
   rankdir: "TB" | "LR",
   edgeExtras: Partial<Edge> = {},
+  nodeMeta?: ReadonlyMap<string, NodeMeta>,
 ): GraphModel {
   // Connected components via union-find over the lens edges.
   const root = new Map<string, string>(tasks.map((t) => [t.id, t.id]));
@@ -144,7 +176,13 @@ function layout(
   }
   if (singles.length > 0) blocks.push(gridBlock(singles));
 
-  return assemble(tasks, edges, packBlocks(blocks, MAX_ROW_WIDTH), rankdir === "LR", edgeExtras);
+  return assemble(tasks, edges, packBlocks(blocks, MAX_ROW_WIDTH), rankdir === "LR", edgeExtras, nodeMeta);
+}
+
+/** Per-node metadata produced during tree layout for the UI expand chip. */
+interface NodeMeta {
+  childCount: number;
+  expanded: boolean;
 }
 
 /**
@@ -152,8 +190,15 @@ function layout(
  * blocks WRAP into rows instead of forming one endless rank — dagre can't do
  * this, and it's what keeps a shallow-wide tree (one root, many epics, many
  * leaves) viewport-shaped. Parents sit centered above their child area.
+ *
+ * When `expandedIds` is provided, only children of expanded nodes are laid
+ * out. Pass `undefined` to show everything (tests / no progressive disclosure).
  */
-function treeLayout(tasks: readonly Task[], edges: readonly LensEdge[]): GraphModel {
+function treeLayout(
+  tasks: readonly Task[],
+  edges: readonly LensEdge[],
+  expandedIds?: ReadonlySet<string>,
+): GraphModel {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const childrenOf = new Map<string, string[]>();
   const hasParent = new Set<string>();
@@ -165,18 +210,36 @@ function treeLayout(tasks: readonly Task[], edges: readonly LensEdge[]): GraphMo
     hasParent.add(edge.target);
   }
 
+  const nodeMeta = new Map<string, NodeMeta>();
   const visited = new Set<string>();
+
   const subtree = (id: string): Block => {
     visited.add(id);
     const kids = (childrenOf.get(id) ?? []).filter((k) => !visited.has(k) && byId.has(k));
-    const kidBlocks = kids.map(subtree);
-    if (kidBlocks.length === 0) {
+    const childCount = kids.length;
+    const isExpanded = childCount > 0 && (expandedIds === undefined || expandedIds.has(id));
+    nodeMeta.set(id, { childCount, expanded: isExpanded });
+
+    // Collapsed or leaf: render just this node.
+    if (!isExpanded) {
+      // Mark all descendants as visited so the stranded-node check below
+      // doesn't accidentally surface them as singletons.
+      const markHidden = (ids: readonly string[]) => {
+        for (const kid of ids) {
+          if (visited.has(kid)) continue;
+          visited.add(kid);
+          markHidden((childrenOf.get(kid) ?? []).filter((k) => byId.has(k)));
+        }
+      };
+      markHidden(kids);
       return {
         positions: new Map([[id, { x: 0, y: 0 }]]),
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
       };
     }
+
+    const kidBlocks = kids.map(subtree);
     const childArea = packBlocks(kidBlocks, MAX_ROW_WIDTH);
     let width = NODE_WIDTH;
     let height = 0;
@@ -198,14 +261,25 @@ function treeLayout(tasks: readonly Task[], edges: readonly LensEdge[]): GraphMo
   for (const task of tasks) {
     if (hasParent.has(task.id)) continue;
     if (childrenOf.has(task.id)) blocks.push(subtree(task.id));
-    else singles.push(task);
+    else {
+      nodeMeta.set(task.id, { childCount: 0, expanded: false });
+      singles.push(task);
+    }
   }
   // Defensive: anything unreachable (malformed parent cycles) still renders.
   const stranded = tasks.filter((t) => !visited.has(t.id) && !singles.includes(t));
-  if (stranded.length > 0) singles.push(...stranded);
+  if (stranded.length > 0) {
+    for (const t of stranded) nodeMeta.set(t.id, { childCount: 0, expanded: false });
+    singles.push(...stranded);
+  }
   if (singles.length > 0) blocks.push(gridBlock(singles));
 
-  return assemble(tasks, edges, packBlocks(blocks, MAX_ROW_WIDTH), false);
+  const positions = packBlocks(blocks, MAX_ROW_WIDTH);
+
+  // Only keep edges whose both endpoints are visible (collapsed children are hidden).
+  const visibleEdges = edges.filter((e) => positions.has(e.source) && positions.has(e.target));
+
+  return assemble(tasks, visibleEdges, positions, false, {}, nodeMeta);
 }
 
 /** Shelf-packs blocks into rows capped at `maxWidth`; returns merged positions. */
@@ -239,13 +313,21 @@ function assemble(
   positions: ReadonlyMap<string, { x: number; y: number }>,
   horizontal: boolean,
   edgeExtras: Partial<Edge> = {},
+  nodeMeta?: ReadonlyMap<string, NodeMeta>,
 ): GraphModel {
   const statusById = new Map(tasks.map((t) => [t.id, t.status]));
 
-  const nodes: TaskNodeType[] = tasks.map((task) => ({
+  // Only create nodes for tasks that have a position (collapsed children are excluded).
+  const visibleTasks = tasks.filter((t) => positions.has(t.id));
+
+  const nodes: TaskNodeType[] = visibleTasks.map((task) => ({
     id: task.id,
     type: "task",
-    data: { task },
+    data: {
+      task,
+      childCount: nodeMeta?.get(task.id)?.childCount ?? 0,
+      expanded: nodeMeta?.get(task.id)?.expanded ?? false,
+    },
     position: positions.get(task.id)!,
     // Explicit dimensions: edges render immediately, no measure pass.
     width: NODE_WIDTH,
@@ -260,6 +342,7 @@ function assemble(
     id: relation.id,
     source,
     target,
+    type: "smoothstep",
     // A live agent's path pulses: edges touching an in_progress task animate.
     animated: statusById.get(source) === "in_progress" || statusById.get(target) === "in_progress",
     ...edgeExtras,

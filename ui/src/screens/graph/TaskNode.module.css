@@ -108,3 +108,38 @@
   color: var(--color-text-muted);
   border: 1px solid var(--color-text-faint);
 }
+
+/* Subtask-count chip: sits at the right edge of the meta row.
+   Triangle + count, clickable to expand/collapse the node's children. */
+.expandChip {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-1);
+  background: none;
+  color: var(--color-accent);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.expandChip:hover {
+  background: var(--color-accent);
+  color: var(--color-surface);
+}
+
+/* Neighbor fade: non-neighboring nodes dim to push the blocking chain forward. */
+.node[data-faded="true"] {
+  opacity: 0.15;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+
+.node:not([data-faded]) {
+  transition: opacity 200ms ease;
+}

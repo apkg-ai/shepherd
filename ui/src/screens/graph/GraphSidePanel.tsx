@@ -11,20 +11,27 @@ import styles from "./GraphSidePanel.module.css";
  * its edges, each a jump to that node's own panel. Full task detail stays
  * one link away. Data comes from the graph's already-loaded feeds, so the
  * panel is live off the same SSE invalidations for free.
+ *
+ * In the tree lens, clicking a subtask triggers expand-and-focus: the
+ * current task's children expand, and the camera pans to the target.
  */
 export function GraphSidePanel({
   task,
   projectId,
   tasks,
   relations,
+  lens,
   onSelect,
+  onExpandAndFocus,
   onClose,
 }: {
   task: Task;
   projectId: string;
   tasks: readonly Task[];
   relations: readonly Relation[];
+  lens: "tree" | "flow";
   onSelect: (taskId: string) => void;
+  onExpandAndFocus: (parentId: string, childId: string) => void;
   onClose: () => void;
 }) {
   const titleById = new Map(tasks.map((t) => [t.id, t.title]));
@@ -43,7 +50,7 @@ export function GraphSidePanel({
     .filter((r) => r.type === "depends_on" && r.target_task_id === task.id)
     .map((r) => r.source_task_id);
 
-  const group = (label: string, ids: readonly string[]) => {
+  const group = (label: string, ids: readonly string[], expandParent = false) => {
     const loaded = ids.filter((id) => titleById.has(id));
     if (loaded.length === 0) return null;
     return (
@@ -52,7 +59,15 @@ export function GraphSidePanel({
         <ul className={styles.groupList}>
           {loaded.map((id) => (
             <li key={id}>
-              <button type="button" className={styles.jump} onClick={() => onSelect(id)}>
+              <button
+                type="button"
+                className={styles.jump}
+                onClick={() =>
+                  expandParent && lens === "tree"
+                    ? onExpandAndFocus(task.id, id)
+                    : onSelect(id)
+                }
+              >
                 {titleById.get(id)}
               </button>
             </li>
@@ -85,7 +100,7 @@ export function GraphSidePanel({
       )}
 
       {group("Parent", parent !== undefined ? [parent] : [])}
-      {group("Subtasks", subtasks)}
+      {group("Subtasks", subtasks, true)}
       {group("Depends on", dependsOn)}
       {group("Needed by", neededBy)}
 
