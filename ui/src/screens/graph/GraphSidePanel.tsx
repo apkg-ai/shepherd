@@ -138,11 +138,7 @@ export function GraphSidePanel({
       {group("Depends on", dependsOn)}
       {group("Needed by", neededBy)}
 
-      <GraphSidePanelActions
-        projectId={projectId}
-        task={task}
-        hasParent={parent !== undefined}
-      />
+      <GraphSidePanelActions projectId={projectId} task={task} hasParent={parent !== undefined} />
 
       <footer className={styles.footer}>
         <Link to={`/projects/${projectId}/tasks/${task.id}`}>Open full detail</Link>
@@ -213,11 +209,7 @@ function GraphSidePanelActions({
         >
           + New dependency
         </Link>
-        <button
-          type="button"
-          className={styles.actionLink}
-          onClick={() => setShowLink((v) => !v)}
-        >
+        <button type="button" className={styles.actionLink} onClick={() => setShowLink((v) => !v)}>
           {showLink ? "Cancel" : "+ Link task"}
         </button>
       </div>
@@ -246,11 +238,7 @@ function GraphSidePanelActions({
             ))}
           </select>
           {error ? <p className={styles.linkError}>{error}</p> : null}
-          <button
-            type="submit"
-            className={styles.linkSubmit}
-            disabled={createRelation.isPending}
-          >
+          <button type="submit" className={styles.linkSubmit} disabled={createRelation.isPending}>
             {createRelation.isPending ? "Adding…" : "Add"}
           </button>
         </form>

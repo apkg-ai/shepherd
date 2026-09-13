@@ -37,8 +37,7 @@ export function TaskNode({
   // Non-epics: start+end together is the derived default for tasks with no
   // dependency edges at all — also noise, so only real boundaries get marked.
   const roles =
-    task.type === "epic" ||
-    (task.graph_role.includes("start") && task.graph_role.includes("end"))
+    task.type === "epic" || (task.graph_role.includes("start") && task.graph_role.includes("end"))
       ? task.graph_role.filter((role) => role === "milestone")
       : task.graph_role;
   const handleExpandClick = (event: React.MouseEvent) => {

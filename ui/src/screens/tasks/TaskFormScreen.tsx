@@ -115,7 +115,7 @@ function TaskFormFields({
         {
           onSuccess: () => afterWrite(created.id),
           onError: () => {
-            toast("Task created but linking failed — add the relation manually.", "warning");
+            toast("Task created but linking failed — add the relation manually.", "error");
             afterWrite(created.id);
           },
         },
@@ -131,7 +131,7 @@ function TaskFormFields({
         {
           onSuccess: () => afterWrite(created.id),
           onError: () => {
-            toast("Task created but dependency link failed — add the relation manually.", "warning");
+            toast("Task created but dependency link failed — add the relation manually.", "error");
             afterWrite(created.id);
           },
         },

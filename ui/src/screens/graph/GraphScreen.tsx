@@ -424,7 +424,12 @@ function ProjectGraph({ projectId }: { projectId: string }) {
           const hasUnfinishedWork = relations.some((rel) => {
             if (rel.type !== "decomposition" || rel.source_task_id !== parent.id) return false;
             const sibling = taskById.get(rel.target_task_id);
-            return sibling && sibling.type !== "epic" && sibling.status !== "done" && sibling.status !== "cancelled";
+            return (
+              sibling &&
+              sibling.type !== "epic" &&
+              sibling.status !== "done" &&
+              sibling.status !== "cancelled"
+            );
           });
           if (hasUnfinishedWork) epicBlocked.add(child.id);
         }
