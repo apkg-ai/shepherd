@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "generate:api": "orval --config orval.config.ts && oxfmt src/api/generated",
+    "generate:api": "orval --config orval.config.ts",
     "test:e2e": "bash ../scripts/playwright-e2e.sh",
     "lint": "oxlint",
     "preview": "vite preview",
