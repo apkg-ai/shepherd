@@ -1,0 +1,110 @@
+/*
+ * Node dimensions come from the layout constants (graphLayout.ts
+ * NODE_WIDTH/HEIGHT) via an inline style on the component — dagre never
+ * needs a measure pass and there is a single source of truth.
+ *
+ * Status styling flows entirely through the --status-* tokens (tokens.css).
+ * The border repeats the status hue; the cancelled border steps up to
+ * --color-text-faint because --color-border misses the 3:1 non-text bar
+ * (see contrast.test.ts).
+ */
+.node {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-2);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-1);
+}
+
+.node[data-status="proposed"] {
+  border: var(--status-proposed-border);
+}
+
+.node[data-status="approved"] {
+  border: var(--status-approved-border);
+}
+
+.node[data-status="ready"] {
+  border: var(--status-ready-border);
+}
+
+/* The only solid-filled node: an agent is on it right now. */
+.node[data-status="in_progress"] {
+  border: var(--status-in_progress-border);
+  background: var(--status-in_progress-bg);
+}
+
+.node[data-status="in_progress"] .title {
+  color: var(--status-in_progress-fg);
+}
+
+.node[data-status="in_review"] {
+  border: var(--status-in_review-border);
+}
+
+.node[data-status="done"] {
+  border: var(--status-done-border);
+}
+
+.node[data-status="blocked"] {
+  border: var(--status-blocked-border);
+}
+
+.node[data-status="cancelled"] {
+  border: 1px solid var(--color-text-faint);
+}
+
+.node[data-status="cancelled"] .title {
+  color: var(--color-text-faint);
+  text-decoration: line-through;
+}
+
+.node[data-selected="true"] {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.title {
+  /* Button reset — it reads as the node's label, not a control. */
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  display: block;
+  max-width: 100%;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title:hover {
+  text-decoration: underline;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.role {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-text-faint);
+}

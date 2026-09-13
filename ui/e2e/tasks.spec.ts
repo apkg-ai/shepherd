@@ -37,7 +37,7 @@ test.describe("task creation and list", () => {
     await createTask(project.id, "Research work", { type: "research" });
 
     // Hash deep link straight into a filtered list.
-    await page.goto(`/#/projects/${project.id}?type=research`);
+    await page.goto(`/#/projects/${project.id}/tasks?type=research`);
     await expect(page.getByRole("link", { name: "Research work" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Code work" })).toBeHidden();
 

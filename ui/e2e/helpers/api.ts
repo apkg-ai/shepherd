@@ -120,6 +120,28 @@ export async function seedInReviewTask(projectId: string, title: string): Promis
   return task;
 }
 
+export function createKnowledge(
+  projectId: string,
+  options: {
+    title: string;
+    content: string;
+    type?: "note" | "link" | "decision" | "transcript";
+    scope?: "project" | "task" | "session";
+    taskId?: string;
+  },
+): Promise<{ id: string }> {
+  return api(`/projects/${projectId}/knowledge`, {
+    method: "POST",
+    body: JSON.stringify({
+      type: options.type ?? "note",
+      title: options.title,
+      content: options.content,
+      scope: options.scope ?? "project",
+      ...(options.taskId !== undefined && { task_id: options.taskId }),
+    }),
+  });
+}
+
 /** Full export document for a project — the real thing, for import tests. */
 export function exportProject(projectId: string): Promise<Record<string, unknown>> {
   return api(`/projects/${projectId}/export`);

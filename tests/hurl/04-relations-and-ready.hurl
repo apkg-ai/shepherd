@@ -119,6 +119,23 @@ Content-Type: application/json
 }
 HTTP 201
 
+# Bulk list: every relation in the project (B→C depends_on + A→child
+# decomposition — A→B was deleted above).
+GET {{base_url}}/api/v1/projects/{{pid}}/relations
+HTTP 200
+[Asserts]
+jsonpath "$.items" count == 2
+jsonpath "$.has_more" == false
+jsonpath "$.next_cursor" not exists
+
+# Bulk list paginates.
+GET {{base_url}}/api/v1/projects/{{pid}}/relations?limit=1
+HTTP 200
+[Asserts]
+jsonpath "$.items" count == 1
+jsonpath "$.has_more" == true
+jsonpath "$.next_cursor" isString
+
 # Second parent → 409.
 POST {{base_url}}/api/v1/projects/{{pid}}/tasks/{{c}}/relations
 Content-Type: application/json

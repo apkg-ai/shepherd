@@ -1603,6 +1603,64 @@ paths:
 
   # ── Relations ────────────────────────────────────────────────────────
 
+  /api/v1/projects/{project_id}/relations:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listProjectRelations
+      tags:
+        - relations
+      summary: List all relations in a project
+      description: >-
+        Returns a paginated list of every relation in the project — both
+        decomposition and depends_on edges. This is the bulk feed for the
+        graph view; the per-task endpoint remains for task-scoped reads.
+      security:
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Paginated relation list.
+          headers:
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimit-Limit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimit-Remaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimit-Reset"
+            Access-Control-Allow-Origin:
+              $ref: "#/components/headers/Access-Control-Allow-Origin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRelationList"
+              example:
+                items:
+                  - id: 019263a0-1234-7def-8000-000000000041
+                    type: decomposition
+                    source_task_id: 019263a0-1234-7def-8000-000000000009
+                    target_task_id: 019263a0-1234-7def-8000-000000000010
+                    created_at: "2026-09-06T10:06:30Z"
+                  - id: 019263a0-1234-7def-8000-000000000040
+                    type: depends_on
+                    source_task_id: 019263a0-1234-7def-8000-000000000010
+                    target_task_id: 019263a0-1234-7def-8000-000000000011
+                    created_at: "2026-09-06T10:06:00Z"
+                has_more: false
+                next_cursor: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/projects/{project_id}/tasks/{task_id}/relations:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -3468,6 +3526,35 @@ components:
           maxItems: 1000
           items:
             $ref: "#/components/schemas/Relation"
+
+    ProjectRelationList:
+      type: object
+      description: >-
+        Paginated list of every relation in a project — the bulk feed for
+        the graph view.
+      additionalProperties: false
+      required:
+        - items
+        - has_more
+      properties:
+        items:
+          description: Array of relation resources.
+          type: array
+          minItems: 0
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/Relation"
+        has_more:
+          type: boolean
+          description: Whether more pages exist after this one.
+        next_cursor:
+          type:
+            - string
+            - "null"
+          description: Cursor for fetching the next page. Null if no more pages.
+          minLength: 1
+          maxLength: 256
+          pattern: "^[a-zA-Z0-9_=-]+$"
 
     # ─── Knowledge ───────────────────────────────────────────────────
 

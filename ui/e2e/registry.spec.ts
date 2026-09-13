@@ -52,6 +52,7 @@ test.describe("project registry", () => {
     await expect(
       page.getByText(/Imported 1 tasks, 0 relations, 0 sessions, 0 knowledge items\./),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: "Travelling task" })).toBeVisible();
+    // Import lands on the graph — the task shows as a node (title button).
+    await expect(page.getByRole("button", { name: "Travelling task" })).toBeVisible();
   });
 });

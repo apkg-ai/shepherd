@@ -109,6 +109,16 @@ impl From<core::Page<core::Task>> for wire::TaskList {
     }
 }
 
+impl From<core::Page<core::Relation>> for wire::ProjectRelationList {
+    fn from(page: core::Page<core::Relation>) -> Self {
+        Self {
+            items: page.items.into_iter().map(wire::Relation::from).collect(),
+            has_more: page.has_more,
+            next_cursor: page.next_cursor.map(Some),
+        }
+    }
+}
+
 impl From<core::Identity> for wire::Identity {
     fn from(i: core::Identity) -> Self {
         Self {

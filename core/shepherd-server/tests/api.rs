@@ -512,6 +512,71 @@ async fn relation_depends_on_crud() {
 }
 
 #[tokio::test]
+async fn project_relations_bulk_list() {
+    let app = test_app().await;
+    let pid = create_project(&app, "bulk-rel-test").await;
+    let parent = create_task(&app, &pid, "Parent", "approved").await;
+    let child = create_task(&app, &pid, "Child", "approved").await;
+    let dep = create_task(&app, &pid, "Dep", "approved").await;
+
+    post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{parent}/relations"),
+        serde_json::json!({ "type": "decomposition", "target_task_id": child }),
+    )
+    .await;
+    post(
+        &app,
+        &format!("/api/v1/projects/{pid}/tasks/{child}/relations"),
+        serde_json::json!({ "type": "depends_on", "target_task_id": dep }),
+    )
+    .await;
+
+    // Bulk list returns both edges in one page.
+    let (status, body) = get(&app, &format!("/api/v1/projects/{pid}/relations")).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(body["has_more"], false);
+    assert_eq!(body["next_cursor"], serde_json::Value::Null);
+    for item in items {
+        assert!(item["id"].is_string());
+        assert!(item["source_task_id"].is_string());
+        assert!(item["target_task_id"].is_string());
+        assert!(item["created_at"].is_string());
+    }
+
+    // ?limit=1 pages: walk both pages via next_cursor.
+    let (status, page1) = get(&app, &format!("/api/v1/projects/{pid}/relations?limit=1")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page1["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page1["has_more"], true);
+    let cursor = page1["next_cursor"].as_str().unwrap();
+
+    let (status, page2) = get(
+        &app,
+        &format!("/api/v1/projects/{pid}/relations?limit=1&cursor={cursor}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page2["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page2["has_more"], false);
+    assert_ne!(
+        page1["items"][0]["id"].as_str().unwrap(),
+        page2["items"][0]["id"].as_str().unwrap()
+    );
+
+    // Unknown project → 404.
+    let (status, body) = get(
+        &app,
+        "/api/v1/projects/00000000-0000-7000-8000-000000000000/relations",
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["type"], "urn:shepherd:error:not-found");
+}
+
+#[tokio::test]
 async fn relation_cycle_rejected() {
     let app = test_app().await;
     let pid = create_project(&app, "cycle-test").await;

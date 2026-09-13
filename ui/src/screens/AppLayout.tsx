@@ -2,6 +2,7 @@ import { Link, NavLink, Outlet, useParams } from "react-router";
 import { useGetProject, useListProjects } from "../api/generated/projects/projects";
 import { useListTasks } from "../api/generated/tasks/tasks";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { useProjectEvents } from "../lib/events";
 import styles from "./AppLayout.module.css";
 
 function ProjectSwitcher({ activeProjectId }: { activeProjectId?: string }) {
@@ -68,11 +69,17 @@ function ProjectNav({ projectId }: { projectId: string }) {
     <nav className={styles.projectNav} aria-label="Project">
       <div className={styles.projectName}>{project?.name ?? "…"}</div>
       <NavLink to={`/projects/${projectId}`} end className={linkClass}>
+        Graph
+      </NavLink>
+      <NavLink to={`/projects/${projectId}/tasks`} className={linkClass}>
         Tasks
       </NavLink>
       <NavLink to={`/projects/${projectId}/review`} className={linkClass}>
         Review
         <ReviewBadge projectId={projectId} />
+      </NavLink>
+      <NavLink to={`/projects/${projectId}/knowledge`} className={linkClass}>
+        Knowledge
       </NavLink>
       <NavLink to={`/projects/${projectId}/settings`} className={linkClass}>
         Settings
@@ -83,6 +90,9 @@ function ProjectNav({ projectId }: { projectId: string }) {
 
 export function AppLayout() {
   const { projectId } = useParams();
+  // One SSE subscription per active project keeps the graph, lists, review
+  // badge, and detail screens live while agents work (S8).
+  useProjectEvents(projectId);
   return (
     <div className={styles.shell}>
       <aside className={styles.sidebar}>

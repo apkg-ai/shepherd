@@ -35,6 +35,7 @@ operations = [
     "getNextTask",
     "getTaskContext",
     # Relations
+    "listProjectRelations",
     "listTaskRelations",
     "createTaskRelation",
     "deleteTaskRelation",

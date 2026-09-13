@@ -176,6 +176,15 @@ pub trait ProjectsApi: Send + Sync + 'static {
 /// Operations under the `relations` tag.
 #[async_trait::async_trait]
 pub trait RelationsApi: Send + Sync + 'static {
+    /// List all relations in a project
+    ///
+    /// `GET /api/v1/projects/{project_id}/relations`
+    async fn list_project_relations(
+        &self,
+        project_id: String,
+        cursor: ::std::option::Option<String>,
+        limit: ::std::option::Option<i32>,
+    ) -> ListProjectRelationsResponse;
     /// List relations for a task
     ///
     /// `GET /api/v1/projects/{project_id}/tasks/{task_id}/relations`

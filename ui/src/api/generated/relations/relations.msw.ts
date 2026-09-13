@@ -10,7 +10,27 @@ import { faker } from "@faker-js/faker";
 import { HttpResponse, http } from "msw";
 import type { RequestHandlerOptions } from "msw";
 
-import type { Relation, RelationList } from "../model";
+import type { ProjectRelationList, Relation, RelationList } from "../model";
+
+export const getListProjectRelationsResponseMock = (
+  overrideResponse: Partial<Extract<ProjectRelationList, object>> = {},
+): ProjectRelationList => ({
+  items: Array.from({ length: faker.number.int({ min: 0, max: 100 }) }, (_, i) => i + 1).map(
+    () => ({
+      id: faker.string.uuid(),
+      type: faker.helpers.arrayElement(["decomposition", "depends_on"] as const),
+      source_task_id: faker.string.uuid(),
+      target_task_id: faker.string.uuid(),
+      created_at: faker.date.past().toISOString().slice(0, 19) + "Z",
+    }),
+  ),
+  has_more: faker.datatype.boolean(),
+  next_cursor: faker.helpers.arrayElement([
+    faker.helpers.arrayElement([faker.helpers.fromRegExp("^[a-zA-Z0-9_=-]+$"), null]),
+    undefined,
+  ]),
+  ...overrideResponse,
+});
 
 export const getListTaskRelationsResponseMock = (
   overrideResponse: Partial<Extract<RelationList, object>> = {},
@@ -37,6 +57,30 @@ export const getCreateTaskRelationResponseMock = (
   created_at: faker.date.past().toISOString().slice(0, 19) + "Z",
   ...overrideResponse,
 });
+
+export const getListProjectRelationsMockHandler = (
+  overrideResponse?:
+    | ProjectRelationList
+    | ((
+        info: Parameters<Parameters<typeof http.get>[1]>[0],
+      ) => Promise<ProjectRelationList> | ProjectRelationList),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get(
+    "/api/v1/projects/:projectId/relations",
+    async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getListProjectRelationsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 
 export const getListTaskRelationsMockHandler = (
   overrideResponse?:
@@ -103,6 +147,7 @@ export const getDeleteTaskRelationMockHandler = (
   );
 };
 export const getRelationsMock = () => [
+  getListProjectRelationsMockHandler(),
   getListTaskRelationsMockHandler(),
   getCreateTaskRelationMockHandler(),
   getDeleteTaskRelationMockHandler(),

@@ -1,6 +1,8 @@
 import type { RouteObject } from "react-router";
 import { AppLayout } from "./screens/AppLayout";
 import { NotFound } from "./screens/NotFound";
+import { GraphScreen } from "./screens/graph/GraphScreen";
+import { ProjectKnowledgeScreen } from "./screens/knowledge/ProjectKnowledgeScreen";
 import { ProjectRegistryScreen } from "./screens/projects/ProjectRegistryScreen";
 import { ProjectSettingsScreen } from "./screens/projects/ProjectSettingsScreen";
 import { ReviewQueueScreen } from "./screens/review/ReviewQueueScreen";
@@ -19,7 +21,10 @@ export const routes: RouteObject[] = [
     element: <AppLayout />,
     children: [
       { index: true, element: <ProjectRegistryScreen /> },
-      { path: "projects/:projectId", element: <ProjectTasksScreen /> },
+      // The graph is the project's home screen (S8, docs/04-ui.md); the
+      // tasks table lives one level down.
+      { path: "projects/:projectId", element: <GraphScreen /> },
+      { path: "projects/:projectId/tasks", element: <ProjectTasksScreen /> },
       { path: "projects/:projectId/tasks/new", element: <TaskFormScreen /> },
       {
         path: "projects/:projectId/tasks/:taskId",
@@ -30,6 +35,10 @@ export const routes: RouteObject[] = [
         element: <TaskFormScreen />,
       },
       { path: "projects/:projectId/review", element: <ReviewQueueScreen /> },
+      {
+        path: "projects/:projectId/knowledge",
+        element: <ProjectKnowledgeScreen />,
+      },
       {
         path: "projects/:projectId/settings",
         element: <ProjectSettingsScreen />,
