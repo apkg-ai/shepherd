@@ -30,7 +30,7 @@ export function TaskNode({
   targetPosition,
 }: NodeProps<TaskNodeType>) {
   const { task, childCount, expanded, faded } = data;
-  const { toggleExpand, lens } = useContext(GraphActionsContext);
+  const { toggleExpand } = useContext(GraphActionsContext);
 
   // "start" AND "end" is the derived default for tasks with no dependency
   // edges at all — as chips it's noise, so only real boundaries get marked.
@@ -40,12 +40,9 @@ export function TaskNode({
       : task.graph_role;
 
   const handleExpandClick = (event: React.MouseEvent) => {
-    if (lens === "tree") {
-      // Tree lens: toggle subtree, don't also select.
-      event.stopPropagation();
-      toggleExpand(task.id);
-    }
-    // Flow lens: let the click bubble to onNodeClick → selection → side panel.
+    // Both lenses: toggle the subtree, don't also select.
+    event.stopPropagation();
+    toggleExpand(task.id);
   };
 
   return (

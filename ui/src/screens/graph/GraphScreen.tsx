@@ -269,9 +269,11 @@ function ProjectGraph({ projectId }: { projectId: string }) {
       );
     }
 
-    // Resolve expansion: null = no URL param → default to roots expanded
-    // so the epic-level structure is visible on first load.
-    const expandedIds = parsedExpanded ?? defaultExpanded(tasks, relations);
+    // Resolve expansion: null = no URL param → lens-dependent default.
+    // Tree lens: roots expanded so epic-level structure is visible.
+    // Flow lens: nothing expanded — start with epics only, drill in via chip.
+    const expandedIds =
+      parsedExpanded ?? (lens === "tree" ? defaultExpanded(tasks, relations) : new Set<string>());
 
     // Epic detection: tasks that have at least one decomposition child.
     // Used by the flow lens to show only epics (subtasks are hidden).
@@ -286,18 +288,51 @@ function ProjectGraph({ projectId }: { projectId: string }) {
     if (lens === "tree") {
       graphNodes = decompositionGraph(tasks, relations, expandedIds);
     } else {
-      // Flow lens: show only epics (tasks with decomposition children).
-      // Subtask-level edges vanish automatically via lensEdges endpoint filter.
-      const epicTasks = tasks.filter((t) => childCounts.has(t.id));
+      // Flow lens: show epics + subtasks of expanded epics.
+      // An "epic" is any task with decomposition children.
+      const expandedChildren = new Set<string>();
+      for (const r of relations) {
+        if (r.type === "decomposition" && expandedIds.has(r.source_task_id)) {
+          expandedChildren.add(r.target_task_id);
+        }
+      }
+      const flowTasks = tasks.filter(
+        (t) => childCounts.has(t.id) || expandedChildren.has(t.id),
+      );
       const flowMeta = new Map(
-        epicTasks.map((t) => [
+        flowTasks.map((t) => [
           t.id,
-          { childCount: childCounts.get(t.id) ?? 0, expanded: false },
+          {
+            childCount: childCounts.get(t.id) ?? 0,
+            expanded: expandedIds.has(t.id),
+          },
         ]),
       );
-      graphNodes = dependencyGraph(epicTasks, relations, flowMeta);
+      graphNodes = dependencyGraph(flowTasks, relations, flowMeta);
     }
     let { nodes, edges } = graphNodes;
+
+    // Flow lens: add dashed decomposition edges from expanded epics to their
+    // visible children so the parent-child relationship is clear on the canvas.
+    if (lens === "flow") {
+      const visibleIds = new Set(nodes.map((n) => n.id));
+      const decompEdges = relations
+        .filter(
+          (r) =>
+            r.type === "decomposition" &&
+            expandedIds.has(r.source_task_id) &&
+            visibleIds.has(r.source_task_id) &&
+            visibleIds.has(r.target_task_id),
+        )
+        .map((r) => ({
+          id: r.id,
+          source: r.source_task_id,
+          target: r.target_task_id,
+          type: "smoothstep" as const,
+          style: { strokeDasharray: "6 3" },
+        }));
+      edges = [...edges, ...decompEdges];
+    }
 
     // Flow lens: inject virtual Start/End boundary nodes so the graph
     // reads as a complete traversal from a single entry to a single exit.

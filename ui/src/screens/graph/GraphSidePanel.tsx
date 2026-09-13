@@ -34,13 +34,14 @@ export function GraphSidePanel({
   onExpandAndFocus: (parentId: string, childId: string) => void;
   onClose: () => void;
 }) {
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
   const titleById = new Map(tasks.map((t) => [t.id, t.title]));
 
   const parent = relations.find(
     (r) =>
       r.type === "decomposition" && r.target_task_id === task.id && r.source_task_id !== task.id,
   )?.source_task_id;
-  const subtasks = relations
+  const subtaskIds = relations
     .filter((r) => r.type === "decomposition" && r.source_task_id === task.id)
     .map((r) => r.target_task_id);
   const dependsOn = relations
@@ -50,7 +51,7 @@ export function GraphSidePanel({
     .filter((r) => r.type === "depends_on" && r.target_task_id === task.id)
     .map((r) => r.source_task_id);
 
-  const group = (label: string, ids: readonly string[], expandParent = false) => {
+  const group = (label: string, ids: readonly string[]) => {
     const loaded = ids.filter((id) => titleById.has(id));
     if (loaded.length === 0) return null;
     return (
@@ -59,17 +60,46 @@ export function GraphSidePanel({
         <ul className={styles.groupList}>
           {loaded.map((id) => (
             <li key={id}>
+              <button type="button" className={styles.jump} onClick={() => onSelect(id)}>
+                {titleById.get(id)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
+
+  /** Rich subtask list with status badges and progress summary. */
+  const subtaskGroup = () => {
+    const subs = subtaskIds.map((id) => taskById.get(id)).filter(Boolean) as Task[];
+    if (subs.length === 0) return null;
+    const done = subs.filter((s) => s.status === "done").length;
+    return (
+      <div className={styles.group}>
+        <div className={styles.groupLabel}>
+          Subtasks — {done}/{subs.length} done
+        </div>
+        <div className={styles.progressTrack}>
+          <div
+            className={styles.progressFill}
+            style={{ width: `${(done / subs.length) * 100}%` }}
+          />
+        </div>
+        <ul className={styles.subtaskList}>
+          {subs.map((s) => (
+            <li key={s.id} className={styles.subtaskRow}>
+              <StatusBadge status={s.status} />
               <button
                 type="button"
                 className={styles.jump}
                 onClick={() =>
-                  expandParent && lens === "tree"
-                    ? onExpandAndFocus(task.id, id)
-                    : onSelect(id)
+                  lens === "tree" ? onExpandAndFocus(task.id, s.id) : onSelect(s.id)
                 }
               >
-                {titleById.get(id)}
+                {s.title}
               </button>
+              {s.assignee ? <IdentityChip identity={s.assignee} /> : null}
             </li>
           ))}
         </ul>
@@ -100,7 +130,7 @@ export function GraphSidePanel({
       )}
 
       {group("Parent", parent !== undefined ? [parent] : [])}
-      {group("Subtasks", subtasks, true)}
+      {subtaskGroup()}
       {group("Depends on", dependsOn)}
       {group("Needed by", neededBy)}
 
