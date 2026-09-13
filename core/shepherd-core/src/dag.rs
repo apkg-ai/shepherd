@@ -247,6 +247,50 @@ pub fn derive_graph_roles(
     result
 }
 
+/// Returns `true` if the graph contains any cycle. Single O(V+E) pass —
+/// used by bulk import validation, where running `would_create_cycle` per
+/// edge would be quadratic.
+pub fn has_cycle(edges: &[(TaskId, TaskId)]) -> bool {
+    let mut adj: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
+    for &(src, tgt) in edges {
+        adj.entry(src).or_default().push(tgt);
+    }
+
+    // Iterative DFS with white/gray/black coloring: hitting a gray node is
+    // a back edge, i.e. a cycle. Every node on a cycle has an outgoing
+    // edge, so seeding from adjacency keys covers all cycle candidates.
+    const WHITE: u8 = 0;
+    const GRAY: u8 = 1;
+    const BLACK: u8 = 2;
+    let mut color: HashMap<TaskId, u8> = HashMap::new();
+
+    for &start in adj.keys() {
+        if color.get(&start).copied().unwrap_or(WHITE) != WHITE {
+            continue;
+        }
+        // Stack of (node, next-neighbor index).
+        let mut stack: Vec<(TaskId, usize)> = vec![(start, 0)];
+        color.insert(start, GRAY);
+        while let Some((node, next)) = stack.pop() {
+            let Some(child) = adj.get(&node).and_then(|ns| ns.get(next).copied()) else {
+                color.insert(node, BLACK);
+                continue;
+            };
+            stack.push((node, next + 1));
+            match color.get(&child).copied().unwrap_or(WHITE) {
+                GRAY => return true,
+                BLACK => {}
+                _ => {
+                    color.insert(child, GRAY);
+                    stack.push((child, 0));
+                }
+            }
+        }
+    }
+
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +305,40 @@ mod tests {
     #[test]
     fn no_cycle_in_empty_graph() {
         assert!(!would_create_cycle(&[], tid(1), tid(2)));
+    }
+
+    #[test]
+    fn has_cycle_empty_and_chain() {
+        assert!(!has_cycle(&[]));
+        assert!(!has_cycle(&[(tid(1), tid(2)), (tid(2), tid(3))]));
+    }
+
+    #[test]
+    fn has_cycle_two_node_loop() {
+        assert!(has_cycle(&[(tid(1), tid(2)), (tid(2), tid(1))]));
+    }
+
+    #[test]
+    fn has_cycle_self_loop_and_long_loop() {
+        assert!(has_cycle(&[(tid(1), tid(1))]));
+        // A → B → C → D → B.
+        assert!(has_cycle(&[
+            (tid(1), tid(2)),
+            (tid(2), tid(3)),
+            (tid(3), tid(4)),
+            (tid(4), tid(2))
+        ]));
+    }
+
+    #[test]
+    fn has_cycle_diamond_is_acyclic() {
+        // A → B, A → C, B → D, C → D — two paths, no cycle.
+        assert!(!has_cycle(&[
+            (tid(1), tid(2)),
+            (tid(1), tid(3)),
+            (tid(2), tid(4)),
+            (tid(3), tid(4))
+        ]));
     }
 
     #[test]

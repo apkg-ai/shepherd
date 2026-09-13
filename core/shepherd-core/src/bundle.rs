@@ -33,13 +33,14 @@ pub fn assemble(
                 .collect();
 
             // Use the most recent successful session's summary, or fall back
-            // to the task description.
+            // to the task description — an ancestor with only failed (or no)
+            // sessions must still tell the claimer what it was.
             let summary = sessions
                 .iter()
                 .rev()
                 .find(|s| s.outcome == crate::model::SessionOutcome::Succeeded)
                 .map(|s| s.summary.clone())
-                .unwrap_or_default();
+                .unwrap_or_else(|| ancestor.description.clone());
 
             AncestorSummary {
                 task_id: ancestor.id,
@@ -147,6 +148,33 @@ mod tests {
         assert_eq!(bundle.ancestor_summaries[0].summary, "did things");
         assert_eq!(bundle.ancestor_summaries[0].decisions, vec!["chose X"]);
         assert_eq!(bundle.artifacts, vec!["https://example.com/pr/1"]);
+    }
+
+    #[test]
+    fn ancestor_without_successful_session_falls_back_to_description() {
+        // Only a failed session (or none): the summary must still tell the
+        // claimer what the ancestor was, via its description.
+        let target = make_task(TaskId::new(), "target task");
+        let mut ancestor = make_task(TaskId::new(), "ancestor");
+        ancestor.description = "what the ancestor was about".into();
+        let failed = make_session(ancestor.id, SessionOutcome::Failed);
+
+        let with_failed = assemble(
+            target.clone(),
+            vec![(ancestor.clone(), vec![failed])],
+            vec![],
+            vec![],
+        );
+        assert_eq!(
+            with_failed.ancestor_summaries[0].summary,
+            "what the ancestor was about"
+        );
+
+        let with_none = assemble(target, vec![(ancestor, vec![])], vec![], vec![]);
+        assert_eq!(
+            with_none.ancestor_summaries[0].summary,
+            "what the ancestor was about"
+        );
     }
 
     #[test]

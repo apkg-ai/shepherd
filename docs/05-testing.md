@@ -15,7 +15,7 @@
 | **API E2E** | The REST contract over a real socket: a booted server on a fresh DB driven by plain HTTP scripts — CRUD, lifecycle actions, relations, error shapes. Complements the in-process integration layer by exercising the real binary and wire bytes. | `hurl` (`scripts/hurl-e2e.sh`, `tests/hurl/*.hurl`) |
 | **E2E** | Browser driving the real UI against a real server: register → create/approve → both graph lenses → live SSE update → review queue. Includes an axe WCAG AA audit of every screen in both themes and keyboard-navigation checks. | Playwright |
 | **Smoke** | Seconds-fast boot sanity: server starts on a fresh DB, `/health` OK, spec served, UI index loads. Gates every PR and release artifact. | Minimal CI script |
-| **Fuzz** | Untrusted input boundaries: task `metadata` JSON, graph mutation payloads, query params, import documents. | `cargo-fuzz` — short per PR, deep nightly |
+| **Fuzz** | Untrusted input boundaries: task `metadata` JSON, graph mutation payloads, query params, import documents. | `cargo-fuzz` — **not yet implemented**; recorded follow-up (see judgment call below) |
 
 **Judgment call, recorded:** for this domain, property-based tests outrank raw fuzzing — the graph and
 lifecycle invariants are where logic bugs live; fuzz earns its keep on the parse/validation boundaries.
@@ -30,8 +30,9 @@ lifecycle invariants are where logic bugs live; fuzz earns its keep on the parse
 | **Generated-code drift** | every PR | regenerate `src/generated` from the spec and fail on diff (`scripts/regen-generated.sh`) |
 | **Smoke** | every PR | boot check (fresh DB → health → spec → UI index) |
 | **E2E** | every PR | Playwright primary flow |
-| **Fuzz (short)** | every PR | ~2–3 min per target |
-| **Fuzz (deep)** | nightly | extended runs, all targets |
+
+The fuzz layer is a placeholder in CI (`core-test-fuzz` echoes) — no `cargo-fuzz` targets exist
+yet. The judgment call below is the rationale for the ordering, not a claim that fuzz runs today.
 
 Coverage is gated in CI (`cargo-llvm-cov`, vitest coverage), scoped so each suite measures the code it
 owns (unit → `shepherd-core` + `ui/src`, integration → server lib; `main.rs` is smoke-covered). Two

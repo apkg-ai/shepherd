@@ -75,10 +75,15 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
             "/api/v1/events",
             get(move |query: Query<EventsQuery>| sse_handler(sse_state, query)),
         )
+        // The fallback must be registered BEFORE the layers: Router::layer
+        // wraps only what precedes it. Registered after, the static service
+        // would serve without CORS/rate-limit headers, and unknown /api/*
+        // paths would return ServeDir's bare 404 instead of a problem
+        // detail.
+        .fallback_service(ServeDir::new(ui_dir.as_ref()))
         .layer(ProblemDetailRemapLayer)
         .layer(RateLimitHeaderLayer)
         .layer(cors_layer())
-        .fallback_service(ServeDir::new(ui_dir.as_ref()))
 }
 
 async fn openapi_spec() -> impl IntoResponse {

@@ -22,6 +22,21 @@ describe("eventInvalidations", () => {
     ]);
   });
 
+  it("maps relation events with endpoints to the per-task relations queries", () => {
+    expect(
+      eventInvalidations(
+        "relation.removed",
+        { source_task_id: TASK, target_task_id: "00000000-0000-4000-8000-00000000000c" },
+        PROJECT,
+      ),
+    ).toEqual([
+      `/api/v1/projects/${PROJECT}/relations`,
+      `/api/v1/projects/${PROJECT}/tasks`,
+      `/api/v1/projects/${PROJECT}/tasks/${TASK}/relations`,
+      `/api/v1/projects/${PROJECT}/tasks/00000000-0000-4000-8000-00000000000c/relations`,
+    ]);
+  });
+
   it("maps sessions, knowledge, and project events", () => {
     expect(eventInvalidations("session.recorded", { task_id: TASK }, PROJECT)).toContain(
       `/api/v1/projects/${PROJECT}/tasks/${TASK}/sessions`,
@@ -44,12 +59,14 @@ describe("eventInvalidations", () => {
 
 /** Minimal EventSource fake capturing listeners for manual dispatch. */
 class FakeEventSource {
+  static CLOSED = 2;
   static instances: FakeEventSource[] = [];
   readonly url: string;
   readonly listeners = new Map<string, (event: MessageEvent<string>) => void>();
   onerror: (() => void) | null = null;
   onopen: (() => void) | null = null;
   closed = false;
+  readyState = 0;
 
   constructor(url: string) {
     this.url = url;
@@ -60,6 +77,7 @@ class FakeEventSource {
   }
   close() {
     this.closed = true;
+    this.readyState = FakeEventSource.CLOSED;
   }
   emit(type: EventType, payload: unknown) {
     this.listeners.get(type)?.({ data: JSON.stringify(payload) } as MessageEvent<string>);
@@ -145,6 +163,39 @@ describe("useProjectEvents", () => {
     };
     expect(predicate({ queryKey: [`/api/v1/projects/${PROJECT}/relations`] })).toBe(true);
     expect(predicate({ queryKey: ["/api/v1/projects/other"] })).toBe(false);
+  });
+
+  it("recreates the stream with backoff after a terminal failure", () => {
+    renderHarness(PROJECT);
+    const [first] = FakeEventSource.instances;
+
+    // Terminal failure: readyState CLOSED (non-200 / wrong content type) —
+    // the browser never reconnects on its own.
+    first.readyState = FakeEventSource.CLOSED;
+    first.onerror?.();
+    expect(first.closed).toBe(true);
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    // Backoff elapses → a fresh EventSource is opened.
+    vi.advanceTimersByTime(1_000);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    const second = FakeEventSource.instances[1];
+    expect(second.closed).toBe(false);
+
+    // The reconnect refetches everything project-scoped.
+    second.onopen?.();
+    expect(invalidated).toHaveLength(1);
+  });
+
+  it("does not recreate the stream after unmount", () => {
+    const { unmount } = renderHarness(PROJECT);
+    const [first] = FakeEventSource.instances;
+    first.readyState = FakeEventSource.CLOSED;
+    first.onerror?.();
+    unmount();
+
+    vi.runAllTimers();
+    expect(FakeEventSource.instances).toHaveLength(1);
   });
 
   it("closes the stream and clears the flush timer on unmount", () => {

@@ -28,6 +28,8 @@ interface DrainableQuery {
   isFetchingNextPage: boolean;
   isError: boolean;
   fetchNextPage: () => unknown;
+  /** The infinite-query data; `pageParams` drives the stuck-cursor guard. */
+  data?: { pageParams?: readonly unknown[] };
 }
 
 /**
@@ -35,10 +37,23 @@ interface DrainableQuery {
  * task/relation feeds, knowledge search) need every page, not a Load-more
  * button. Pair with `limit: 100` to keep the round-trips few. Stops on
  * error — the screen's error state takes over.
+ *
+ * Also stops when the cursor stops advancing (the last two page params are
+ * identical): a server-side paging bug would otherwise turn the drain into
+ * an unbounded request loop.
  */
 export function useAllPages(query: DrainableQuery): void {
-  const { hasNextPage, isFetchingNextPage, isError, fetchNextPage } = query;
+  const { hasNextPage, isFetchingNextPage, isError, fetchNextPage, data } = query;
+  const pageParams = data?.pageParams;
   useEffect(() => {
-    if (hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
+    if (!hasNextPage || isFetchingNextPage || isError) return;
+    if (
+      pageParams !== undefined &&
+      pageParams.length >= 2 &&
+      JSON.stringify(pageParams.at(-1)) === JSON.stringify(pageParams.at(-2))
+    ) {
+      return;
+    }
+    void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage, pageParams]);
 }

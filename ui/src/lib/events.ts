@@ -35,11 +35,11 @@ const COALESCE_MS = 200;
 /**
  * Pure event → stale-path mapping, exported for tests. Payload shapes come
  * from the AsyncAPI catalog; `task_id` is present on every task-scoped
- * event.
+ * event, `source_task_id`/`target_task_id` on relation events.
  */
 export function eventInvalidations(
   type: EventType,
-  payload: { task_id?: string },
+  payload: { task_id?: string; source_task_id?: string; target_task_id?: string },
   projectId: string,
 ): string[] {
   const base = `/api/v1/projects/${projectId}`;
@@ -61,8 +61,16 @@ export function eventInvalidations(
       // consumers too (the graph restyles nodes and edge animation).
       return taskPaths([`${base}/next-task`]);
     case "relation.added":
-    case "relation.removed":
-      return [`${base}/relations`, `${base}/tasks`];
+    case "relation.removed": {
+      // The task detail's RelationsPanel queries per task
+      // (`/tasks/{id}/relations`) — the bulk paths don't match its key, so
+      // target both endpoints of the relation explicitly.
+      const paths = [`${base}/relations`, `${base}/tasks`];
+      for (const id of [payload.source_task_id, payload.target_task_id]) {
+        if (id !== undefined) paths.push(`${base}/tasks/${id}/relations`);
+      }
+      return paths;
+    }
     case "claim.acquired":
     case "claim.renewed":
     case "claim.released":
@@ -90,10 +98,13 @@ export function useProjectEvents(projectId: string | undefined): void {
   useEffect(() => {
     if (projectId === undefined || typeof EventSource !== "function") return;
 
-    const source = new EventSource(getGetEventsUrl({ project_id: projectId }));
     const pending = new Set<string>();
     let flushTimer: ReturnType<typeof setTimeout> | undefined;
     let hadError = false;
+    let source: EventSource | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let retryDelayMs = 1_000;
+    let disposed = false;
 
     const queueInvalidation = (paths: string[]) => {
       for (const path of paths) pending.add(path);
@@ -105,36 +116,65 @@ export function useProjectEvents(projectId: string | undefined): void {
       }, COALESCE_MS);
     };
 
-    for (const type of EVENT_TYPES) {
-      source.addEventListener(type, (event: MessageEvent<string>) => {
-        let payload: { task_id?: string } = {};
-        try {
-          payload = JSON.parse(event.data) as { task_id?: string };
-        } catch {
-          // Malformed frame — invalidate off the event type alone.
+    const attach = (src: EventSource) => {
+      for (const type of EVENT_TYPES) {
+        src.addEventListener(type, (event: MessageEvent<string>) => {
+          let payload: { task_id?: string; source_task_id?: string; target_task_id?: string } = {};
+          try {
+            payload = JSON.parse(event.data) as {
+              task_id?: string;
+              source_task_id?: string;
+              target_task_id?: string;
+            };
+          } catch {
+            // Malformed frame — invalidate off the event type alone.
+          }
+          queueInvalidation(eventInvalidations(type, payload, projectId));
+        });
+      }
+      src.onerror = () => {
+        hadError = true;
+        // Native EventSource only auto-reconnects on network errors — a
+        // non-200 response or wrong content type fails the connection
+        // permanently (readyState CLOSED). Recreate with backoff so the
+        // UI can't go silently stale forever.
+        if (src.readyState === EventSource.CLOSED) {
+          src.close();
+          retryTimer ??= setTimeout(() => {
+            retryTimer = undefined;
+            if (disposed) return;
+            retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
+            source = open();
+          }, retryDelayMs);
         }
-        queueInvalidation(eventInvalidations(type, payload, projectId));
-      });
-    }
+      };
+      // No replay in v1: after a dropped connection, anything might have
+      // happened — refetch every query touching this project.
+      src.onopen = () => {
+        retryDelayMs = 1_000;
+        if (!hadError) return;
+        hadError = false;
+        void queryClient.invalidateQueries({
+          predicate: (query) =>
+            query.queryKey.some(
+              (part) => typeof part === "string" && part.includes(`/projects/${projectId}`),
+            ),
+        });
+      };
+    };
 
-    source.onerror = () => {
-      hadError = true;
+    const open = (): EventSource => {
+      const src = new EventSource(getGetEventsUrl({ project_id: projectId }));
+      attach(src);
+      return src;
     };
-    // No replay in v1: after a dropped connection, anything might have
-    // happened — refetch every query touching this project.
-    source.onopen = () => {
-      if (!hadError) return;
-      hadError = false;
-      void queryClient.invalidateQueries({
-        predicate: (query) =>
-          query.queryKey.some(
-            (part) => typeof part === "string" && part.includes(`/projects/${projectId}`),
-          ),
-      });
-    };
+
+    source = open();
 
     return () => {
-      source.close();
+      disposed = true;
+      source?.close();
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
       if (flushTimer !== undefined) clearTimeout(flushTimer);
     };
   }, [projectId, queryClient]);
