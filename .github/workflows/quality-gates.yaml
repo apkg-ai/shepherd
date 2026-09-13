@@ -47,6 +47,11 @@ jobs:
         with:
           workspaces: core
 
+      - name: Generate wire types
+        run: |
+          cargo install openapi-to-rust --version 0.16.0 --locked
+          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+
       - name: Format
         run: |
           cargo fmt --check
@@ -86,6 +91,11 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: core
+
+      - name: Generate wire types
+        run: |
+          cargo install openapi-to-rust --version 0.16.0 --locked
+          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
 
       - name: Install cargo-llvm-cov
         env:
@@ -145,6 +155,11 @@ jobs:
         with:
           workspaces: core
 
+      - name: Generate wire types
+        run: |
+          cargo install openapi-to-rust --version 0.16.0 --locked
+          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+
       - name: Install cargo-llvm-cov
         env:
           LLVM_COV_VERSION: 0.9.0
@@ -195,6 +210,10 @@ jobs:
         run: |
           npm ci --prefer-offline
 
+      - name: Generate API client
+        run: |
+          npm run generate:api
+
       - name: Lint
         run: |
           npm run lint
@@ -226,6 +245,10 @@ jobs:
         run: |
           npm ci --prefer-offline
 
+      - name: Generate API client
+        run: |
+          npm run generate:api
+
       - name: Typecheck
         run: |
           npm run typecheck
@@ -252,6 +275,10 @@ jobs:
       - name: Install Dependencies
         run: |
           npm ci --prefer-offline
+
+      - name: Generate API client
+        run: |
+          npm run generate:api
 
       - name: Unit Tests (Coverage)
         run: |
@@ -287,43 +314,13 @@ jobs:
         run: |
           npm ci --prefer-offline
 
+      - name: Generate API client
+        run: |
+          npm run generate:api
+
       - name: Build
         run: |
           npm run build
-
-  ui-generated-drift:
-    name: UI / Generated code drift
-    runs-on: ubuntu-24.04-arm
-    # Regenerates src/api/generated from openapi/shepherd.yaml (orval + oxfmt,
-    # both pinned by ui/package-lock.json) and fails on any diff, so spec edits
-    # cannot leave the committed TypeScript client stale. Mirrors
-    # core-generated-drift for the Rust side.
-
-    defaults:
-      run:
-        working-directory: ui
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-
-      - name: Install Dependencies
-        run: |
-          npm ci --prefer-offline
-
-      - name: Regenerate and check for drift
-        run: |
-          npm run generate:api
-          # add -N so newly generated (untracked) files also fail the diff
-          git add -N src/api/generated
-          git diff --exit-code -- src/api/generated
 
   spec-lint:
     name: Spec / Lint
@@ -449,9 +446,15 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
+      - name: Generate wire types
+        run: |
+          cargo install openapi-to-rust --version 0.16.0 --locked
+          scripts/regen-generated.sh
+
       - name: Build UI
         run: |
           npm ci --prefer-offline --prefix ui
+          npm run generate:api --prefix ui
           npm run build --prefix ui
 
       # Boot → /health → spec → UI index (builds shepherd-server itself)
@@ -557,6 +560,11 @@ jobs:
         with:
           workspaces: core
 
+      - name: Generate wire types
+        run: |
+          cargo install openapi-to-rust --version 0.16.0 --locked
+          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+
       - name: Contract conformance tests
         run: |
           cargo test --package shepherd-server --test api -- contract
@@ -600,39 +608,14 @@ jobs:
           sudo cp "hurl-${HURL_VERSION}-aarch64-unknown-linux-gnu/bin/hurl" /usr/local/bin/
           hurl --version
 
+      - name: Generate wire types
+        run: |
+          cargo install openapi-to-rust --version 0.16.0 --locked
+          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+
       - name: Hurl E2E suite
         run: |
           "$GITHUB_WORKSPACE/scripts/hurl-e2e.sh"
-
-  core-generated-drift:
-    name: Core / Generated code drift
-    runs-on: ubuntu-24.04-arm
-    # Regenerates src/generated from openapi/shepherd.yaml and fails on any
-    # diff, so spec edits cannot leave the committed wire types stale.
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Parse pinned toolchain
-        id: toolchain
-        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
-        with:
-          toolchain: ${{ steps.toolchain.outputs.channel }}
-          components: rustfmt
-
-      - name: Install openapi-to-rust (pinned)
-        run: cargo install openapi-to-rust --version 0.16.0 --locked
-
-      - name: Regenerate and check for drift
-        run: |
-          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
-          # add -N so newly generated (untracked) files also fail the diff
-          git add -N core/shepherd-server/src/generated
-          git diff --exit-code -- core/shepherd-server/src/generated
 
   core-test-fuzz:
     name: Core / Test (Fuzz)
@@ -676,8 +659,16 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
+      - name: Generate wire types
+        run: |
+          cargo install openapi-to-rust --version 0.16.0 --locked
+          scripts/regen-generated.sh
+
       - name: Install Dependencies
         run: npm ci --prefer-offline --prefix ui
+
+      - name: Generate API client
+        run: npm run generate:api --prefix ui
 
       - name: Build UI
         run: npm run build --prefix ui
