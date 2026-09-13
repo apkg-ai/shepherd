@@ -1,6 +1,7 @@
 import type { RouteObject } from "react-router";
 import { AppLayout } from "./screens/AppLayout";
 import { NotFound } from "./screens/NotFound";
+import { RouteError } from "./screens/RouteError";
 import { GraphScreen } from "./screens/graph/GraphScreen";
 import { ProjectKnowledgeScreen } from "./screens/knowledge/ProjectKnowledgeScreen";
 import { ProjectRegistryScreen } from "./screens/projects/ProjectRegistryScreen";
@@ -19,6 +20,9 @@ export const routes: RouteObject[] = [
   {
     path: "/",
     element: <AppLayout />,
+    // A render-time crash in any screen falls back to RouteError instead of
+    // a blank page (the toast system lives inside the layout).
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <ProjectRegistryScreen /> },
       // The graph is the project's home screen (S8, docs/04-ui.md); the

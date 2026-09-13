@@ -76,8 +76,8 @@ test.describe("axe WCAG AA audit", () => {
   });
 
   test("graph, both lenses", async ({ page }) => {
-    await auditRoute(page, `/#/projects/${project.id}`, "graph tree lens");
-    await auditRoute(page, `/#/projects/${project.id}?lens=flow`, "graph flow lens");
+    await auditRoute(page, `/#/projects/${project.id}`, "graph flow lens");
+    await auditRoute(page, `/#/projects/${project.id}?lens=tree`, "graph tree lens");
   });
 
   test("graph with the side panel open", async ({ page }) => {

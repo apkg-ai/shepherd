@@ -59,8 +59,14 @@ pub fn transition(current: TaskStatus, trigger: &Trigger) -> Result<TaskStatus, 
         // Block: any non-terminal status
         (s, Block) if !is_terminal(s) && s != Blocked => Blocked,
 
-        // Unblock: restore previous status
-        (Blocked, Unblock { blocked_from }) => *blocked_from,
+        // Unblock: restore previous status. The restored status must be a
+        // legal pre-block status — a terminal status (or Blocked itself)
+        // would bypass every guard on the happy path.
+        (Blocked, Unblock { blocked_from })
+            if !is_terminal(*blocked_from) && *blocked_from != Blocked =>
+        {
+            *blocked_from
+        }
 
         // Cancel: any non-terminal status
         (s, Cancel) if !is_terminal(s) => Cancelled,
@@ -216,6 +222,25 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn unblock_to_terminal_or_blocked_fails() {
+        // A blocked task must not unblock straight into a terminal status
+        // (or loop back to Blocked) — that would bypass every guard on the
+        // happy path.
+        for invalid in [Done, Cancelled, Blocked] {
+            assert!(
+                transition(
+                    Blocked,
+                    &Unblock {
+                        blocked_from: invalid
+                    }
+                )
+                .is_err(),
+                "unblock to {invalid} must be rejected"
+            );
+        }
     }
 
     #[test]

@@ -5,7 +5,7 @@ import type { Relation, Task } from "../api/generated/model";
 /**
  * Pure task-graph → React Flow assembly for the two lenses (docs/04-ui.md):
  * decomposition tree (parent/child, top→bottom) and dependency flow
- * (depends_on DAG, start→end left→right). One dagre rank layout serves both
+ * (depends_on DAG, start→end top→bottom). One dagre rank layout serves both
  * — a tree is a DAG, and dagre handles forests and isolated nodes.
  *
  * Relation semantics (docs/02-domain-model.md, mirrored in taskTree.ts):
@@ -25,7 +25,10 @@ import type { Relation, Task } from "../api/generated/model";
 export const NODE_WIDTH = 248;
 export const NODE_HEIGHT = 76;
 
-export interface TaskNodeData {
+// A type alias (not an interface): object literal types get TypeScript's
+// implicit index signature, which Node<T>'s Record<string, unknown> constraint
+// requires — interfaces don't.
+export type TaskNodeData = {
   task: Task;
   /** Direct children in the decomposition tree. 0 in the flow lens. */
   childCount: number;
@@ -33,7 +36,7 @@ export interface TaskNodeData {
   expanded: boolean;
   /** Set by the graph screen when neighbor fade is active (not a layout concern). */
   faded?: boolean;
-}
+};
 
 export type TaskNodeType = Node<TaskNodeData, "task">;
 
@@ -69,7 +72,7 @@ export function decompositionGraph(
 }
 
 /**
- * Dependency lens: prerequisite before dependent, start→end left→right.
+ * Dependency lens: prerequisite above dependent, start→end top→bottom.
  *
  * When `nodeMeta` is provided, each node carries the given `childCount`
  * and `expanded` values (used by the epic-only flow to show subtask chips).
@@ -176,7 +179,14 @@ function layout(
   }
   if (singles.length > 0) blocks.push(gridBlock(singles));
 
-  return assemble(tasks, edges, packBlocks(blocks, MAX_ROW_WIDTH), rankdir === "LR", edgeExtras, nodeMeta);
+  return assemble(
+    tasks,
+    edges,
+    packBlocks(blocks, MAX_ROW_WIDTH),
+    rankdir === "LR",
+    edgeExtras,
+    nodeMeta,
+  );
 }
 
 /** Per-node metadata produced during tree layout for the UI expand chip. */
@@ -204,9 +214,11 @@ function treeLayout(
   const hasParent = new Set<string>();
   for (const edge of edges) {
     // Decomposition orientation: source is the parent, target the child.
+    // Dedupe per source: a duplicated edge would double-count the child in
+    // the chip and run its subtree twice, displacing it into the wrong block.
     const siblings = childrenOf.get(edge.source);
     if (siblings === undefined) childrenOf.set(edge.source, [edge.target]);
-    else siblings.push(edge.target);
+    else if (!siblings.includes(edge.target)) siblings.push(edge.target);
     hasParent.add(edge.target);
   }
 

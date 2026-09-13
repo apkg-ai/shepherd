@@ -68,11 +68,7 @@ describe("decompositionGraph", () => {
     ];
 
     // Expand root only — epics appear, but leaf stays hidden.
-    const { nodes } = decompositionGraph(
-      [root, epic1, epic2, leaf],
-      relations,
-      new Set([root.id]),
-    );
+    const { nodes } = decompositionGraph([root, epic1, epic2, leaf], relations, new Set([root.id]));
 
     const ids = new Set(nodes.map((n) => n.id));
     expect(ids).toContain(root.id);
@@ -160,11 +156,7 @@ describe("decompositionGraph", () => {
     ];
 
     // Expand only root — epic visible, sub-epic and deep task hidden.
-    const { nodes } = decompositionGraph(
-      [root, epic, sub, deep],
-      relations,
-      new Set([root.id]),
-    );
+    const { nodes } = decompositionGraph([root, epic, sub, deep], relations, new Set([root.id]));
     const ids = new Set(nodes.map((n) => n.id));
 
     expect(ids).toEqual(new Set([root.id, epic.id]));

@@ -55,10 +55,9 @@ jobs:
         run: |
           cargo clippy --all-targets -- -D warnings
 
-  # Test jobs are split per category (05-testing.md taxonomy). S1 ships unit,
-  # integration, and smoke; the remaining categories run as echo placeholders
-  # (end of file) until their session lands the suites:
-  # property + migration (S3), contract (S4), e2e + fuzz (S9).
+  # Test jobs are split per category (05-testing.md taxonomy). Property,
+  # migration, contract, and e2e suites have all landed alongside their
+  # sessions; fuzz is the one remaining placeholder (end of file).
   core-test-unit:
     name: Core / Test (Unit)
     runs-on: ubuntu-24.04-arm
@@ -638,11 +637,13 @@ jobs:
   core-test-fuzz:
     name: Core / Test (Fuzz)
     runs-on: ubuntu-24.04-arm
-    # S9: cargo-fuzz targets (metadata, mutation payloads, params, imports) —
-    # short runs per PR; deep runs move to a nightly workflow.
+    # Placeholder: cargo-fuzz targets (metadata, mutation payloads, params,
+    # imports) are not implemented yet. Per 05-testing.md, property-based
+    # tests outrank raw fuzzing for this domain; fuzz remains a recorded
+    # follow-up, not a live gate.
     steps:
       - name: Placeholder
-        run: echo "no fuzz targets yet — cargo-fuzz lands in S9"
+        run: echo "no fuzz targets yet — cargo-fuzz is a recorded follow-up"
 
   test-e2e:
     name: Test (E2E)

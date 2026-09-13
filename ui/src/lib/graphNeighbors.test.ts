@@ -41,26 +41,20 @@ describe("computeNeighborIds", () => {
     });
 
     it("ignores relations of the wrong type", () => {
-      const rels = [
-        relation({ type: "decomposition", source_task_id: "a", target_task_id: "b" }),
-      ];
+      const rels = [relation({ type: "decomposition", source_task_id: "a", target_task_id: "b" })];
       const result = computeNeighborIds("a", rels, "depends_on");
       expect(result).toEqual(new Set(["a"]));
     });
 
     it("excludes disconnected nodes", () => {
       // B depends on A, D is separate
-      const rels = [
-        relation({ type: "depends_on", source_task_id: "b", target_task_id: "a" }),
-      ];
+      const rels = [relation({ type: "depends_on", source_task_id: "b", target_task_id: "a" })];
       const result = computeNeighborIds("a", rels, "depends_on");
       expect(result).not.toContain("d");
     });
 
     it("handles self-edges gracefully", () => {
-      const rels = [
-        relation({ type: "depends_on", source_task_id: "a", target_task_id: "a" }),
-      ];
+      const rels = [relation({ type: "depends_on", source_task_id: "a", target_task_id: "a" })];
       const result = computeNeighborIds("a", rels, "depends_on");
       expect(result).toEqual(new Set(["a"]));
     });
@@ -76,9 +70,7 @@ describe("computeNeighborIds", () => {
         new Set(["epicA", "epicB", "epicC"]),
       );
       // Select A → C is downstream, but B is not related to A.
-      expect(computeNeighborIds("epicA", rels, "depends_on")).toEqual(
-        new Set(["epicA", "epicC"]),
-      );
+      expect(computeNeighborIds("epicA", rels, "depends_on")).toEqual(new Set(["epicA", "epicC"]));
     });
 
     it("follows cross-epic task deps without pulling in decomposition siblings", () => {

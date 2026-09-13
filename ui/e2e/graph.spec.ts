@@ -9,8 +9,10 @@ import {
 } from "./helpers/api";
 
 /**
- * The S8 definition of done (#11): both lenses render a seeded project and
- * update live while an agent works via REST — no reloads anywhere.
+ * The S9 graph (#48): the flow lens is the project home screen — epics only,
+ * anchored by virtual Start/End boundary nodes, top→bottom. The tree lens
+ * keeps the full decomposition with roots expanded. Both update live while
+ * an agent works via REST — no reloads anywhere.
  */
 
 let project: SeededProject;
@@ -30,52 +32,60 @@ test.beforeAll(async () => {
 });
 
 test.describe("graph lenses", () => {
-  test("decomposition lens is the project home screen", async ({ page }) => {
+  test("flow lens is the project home screen", async ({ page }) => {
     await page.goto(`/#/projects/${project.id}`);
 
-    await expect(page.getByRole("tab", { name: "Decomposition" })).toHaveAttribute(
+    await expect(page.getByRole("tab", { name: "Dependency flow" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    for (const title of ["Graph epic", "First step", "Second step"]) {
-      await expect(page.getByRole("button", { name: title })).toBeVisible();
-    }
-    // Two decomposition edges, no dependency edge in this lens.
+    // Epic-only: subtasks stay hidden until drill-down via the side panel.
+    await expect(page.getByRole("button", { name: "Graph epic" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "First step" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Second step" })).toHaveCount(0);
+    // Start → epic and epic → End boundary edges.
     await expect(page.locator(".react-flow__edge")).toHaveCount(2);
   });
 
-  test("toggling lenses swaps the edge set and keeps selection", async ({ page }) => {
+  test("toggling lenses swaps the node set and keeps selection", async ({ page }) => {
     await page.goto(`/#/projects/${project.id}`);
     await expect(page.getByRole("button", { name: "Graph epic" })).toBeVisible();
 
-    // Select a node (body click), then switch lens: selection survives
+    // Select the epic (body click), then switch lens: selection survives
     // because node ids are task ids in both lenses.
-    await page.locator(`[data-id="${lens.id}"]`).click();
-    await expect(page).toHaveURL(new RegExp(`selected=${lens.id}`));
+    await page.locator(`[data-id="${epic.id}"]`).click();
+    await expect(page).toHaveURL(new RegExp(`selected=${epic.id}`));
 
-    await page.getByRole("tab", { name: "Dependency flow" }).click();
-    await expect(page.locator(".react-flow__edge")).toHaveCount(1);
-    await expect(page).toHaveURL(/lens=flow/);
-    await expect(page).toHaveURL(new RegExp(`selected=${lens.id}`));
-    await expect(page.locator(`[data-id="${lens.id}"] article`)).toHaveAttribute(
+    await page.getByRole("tab", { name: "Decomposition" }).click();
+    await expect(page).toHaveURL(/lens=tree/);
+    await expect(page).toHaveURL(new RegExp(`selected=${epic.id}`));
+    // Tree lens: roots expanded by default — the full decomposition shows.
+    // (Node-wrapper locators: the open side panel lists the same titles.)
+    for (const task of [epic, lens, flow]) {
+      await expect(page.locator(`[data-id="${task.id}"]`)).toBeVisible();
+    }
+    await expect(page.locator(".react-flow__edge")).toHaveCount(2);
+    await expect(page.locator(`[data-id="${epic.id}"] article`)).toHaveAttribute(
       "data-selected",
       "true",
     );
   });
 
-  test("?lens=flow deep link renders the dependency DAG start → end", async ({ page }) => {
+  test("?lens=flow deep link renders the epic flow Start → End", async ({ page }) => {
     await page.goto(`/#/projects/${project.id}?lens=flow`);
 
     await expect(page.getByRole("tab", { name: "Dependency flow" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+    await expect(page.locator(".react-flow__edge")).toHaveCount(2);
 
-    // Prerequisite sits left of its dependent.
-    const first = await page.locator(`[data-id="${lens.id}"]`).boundingBox();
-    const second = await page.locator(`[data-id="${flow.id}"]`).boundingBox();
-    expect(first!.x).toBeLessThan(second!.x);
+    // TB layout: Start above the epic, End below it.
+    const start = await page.locator('[data-id="__start__"]').boundingBox();
+    const epicBox = await page.locator(`[data-id="${epic.id}"]`).boundingBox();
+    const end = await page.locator('[data-id="__end__"]').boundingBox();
+    expect(start!.y).toBeLessThan(epicBox!.y);
+    expect(epicBox!.y).toBeLessThan(end!.y);
   });
 
   test("selecting a node opens the side panel; full detail is a link away", async ({ page }) => {
@@ -102,6 +112,8 @@ test.describe("graph lenses", () => {
     const live = await createProject(`Graph live ${Date.now()}`);
     const start = await createTask(live.id, "Live start");
     await page.goto(`/#/projects/${live.id}?lens=flow`);
+    // No epics in this project: the flow lens falls back to all tasks so
+    // the default lens never renders a blank canvas.
     await expect(page.getByRole("button", { name: "Live start" })).toBeVisible();
 
     // An agent claims the task: the node restyles as in_progress with the
@@ -119,6 +131,7 @@ test.describe("graph lenses", () => {
     await expect(page.getByRole("button", { name: "Live next" })).toBeVisible({
       timeout: 10_000,
     });
-    await expect(page.locator(".react-flow__edge")).toHaveCount(1, { timeout: 10_000 });
+    // start → next plus the Start/End boundary edges around them.
+    await expect(page.locator(".react-flow__edge")).toHaveCount(3, { timeout: 10_000 });
   });
 });

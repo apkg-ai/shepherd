@@ -425,16 +425,19 @@ impl Store {
         };
         let assignee_json = assignee.map(|a| serde_json::to_string(a).unwrap());
 
-        let (graph_role, graph_role_explicit) = if let Some(roles) = &input.graph_role {
-            (roles.clone(), true)
+        // Omitting graph_role preserves both the roles and their explicit
+        // flag — resetting the flag would let the next recompute overwrite
+        // user-provided roles (COALESCE keeps the column when unbound).
+        let (graph_role_json, graph_role_explicit) = if let Some(roles) = &input.graph_role {
+            (Some(serde_json::to_string(roles).unwrap()), Some(true))
         } else {
-            (existing.graph_role.clone(), false) // preserve existing
+            (None, None) // preserve existing
         };
-        let graph_role_json = serde_json::to_string(&graph_role).unwrap();
 
         sqlx::query(
             "UPDATE tasks SET title = ?, description = ?, type = ?, metadata = ?,
-                              assignee = ?, graph_role = ?, graph_role_explicit = ?,
+                              assignee = ?, graph_role = COALESCE(?, graph_role),
+                              graph_role_explicit = COALESCE(?, graph_role_explicit),
                               updated_at = ?
              WHERE id = ? AND project_id = ? AND deleted_at IS NULL",
         )
@@ -443,7 +446,7 @@ impl Store {
         .bind(task_type.to_string())
         .bind(serde_json::to_string(&metadata).unwrap())
         .bind(assignee_json.as_deref())
-        .bind(&graph_role_json)
+        .bind(graph_role_json.as_deref())
         .bind(graph_role_explicit)
         .bind(now.to_rfc3339())
         .bind(id.to_string())
@@ -468,7 +471,11 @@ impl Store {
         if assignee != existing.assignee.as_ref() {
             updated_fields.push("assignee".to_string());
         }
-        if graph_role != existing.graph_role {
+        if input
+            .graph_role
+            .as_ref()
+            .is_some_and(|r| r != &existing.graph_role)
+        {
             updated_fields.push("graph_role".to_string());
         }
         if !updated_fields.is_empty() {
@@ -495,7 +502,8 @@ impl Store {
         id: TaskId,
         now: DateTime<Utc>,
     ) -> Result<()> {
-        // Cascade: release any active claim.
+        // Cascade: release any active claim. Already-released (racing sweep
+        // or reporter) is fine here — the task is going away regardless.
         if let Some(claim) = self.get_active_claim(id, now).await? {
             self.release_claim_internal(project_id, id, claim.id, now, ReleaseReason::TaskDeleted)
                 .await?;
@@ -636,7 +644,7 @@ impl Store {
         }
 
         // Score each by downstream dependent count.
-        let edges = self.load_depends_on_edges(project_id).await?;
+        let edges = self.load_depends_on_edges(project_id, &self.pool).await?;
         let mut best: Option<(Task, usize)> = None;
 
         for task in tasks {
@@ -666,8 +674,16 @@ impl Store {
         };
         let new_status = lifecycle::transition(task.status, &trigger)?;
 
-        self.set_task_status(project_id, id, task.status, new_status)
-            .await?;
+        if !self
+            .set_task_status(project_id, id, task.status, new_status)
+            .await?
+        {
+            return Err(Error::InvalidTransition {
+                from: task.status,
+                trigger: "Approve".into(),
+                detail: "task status changed concurrently — refetch and retry".into(),
+            });
+        }
 
         match new_status {
             // Auto-ready: check if all deps are done.
@@ -695,8 +711,16 @@ impl Store {
             new_status = TaskStatus::Approved;
         }
 
-        self.set_task_status(project_id, id, task.status, new_status)
-            .await?;
+        if !self
+            .set_task_status(project_id, id, task.status, new_status)
+            .await?
+        {
+            return Err(Error::InvalidTransition {
+                from: task.status,
+                trigger: "HumanRejection".into(),
+                detail: "task status changed concurrently — refetch and retry".into(),
+            });
+        }
 
         self.get_task(project_id, id).await
     }
@@ -711,18 +735,30 @@ impl Store {
         let _ = lifecycle::transition(task.status, &Trigger::Block)?;
         let now = Utc::now();
 
-        sqlx::query(
+        // Guarded on the current status: a concurrent transition must not
+        // be silently overwritten (and must not record a wrong
+        // blocked_from_status).
+        let result = sqlx::query(
             "UPDATE tasks SET status = 'blocked', blocked_from_status = ?,
                               block_reason = ?, updated_at = ?
-             WHERE id = ? AND project_id = ?",
+             WHERE id = ? AND project_id = ? AND status = ?",
         )
         .bind(task.status.to_string())
         .bind(reason)
         .bind(now.to_rfc3339())
         .bind(id.to_string())
         .bind(project_id.to_string())
+        .bind(task.status.to_string())
         .execute(&self.pool)
         .await?;
+
+        if result.rows_affected() != 1 {
+            return Err(Error::InvalidTransition {
+                from: task.status,
+                trigger: "Block".into(),
+                detail: "task status changed concurrently — refetch and retry".into(),
+            });
+        }
 
         self.emit(DomainEvent::TaskStatusChanged {
             project_id,
@@ -770,17 +806,28 @@ impl Store {
         }
 
         let now = Utc::now();
-        sqlx::query(
+        // Guarded on the current (Blocked) status: a concurrent transition
+        // must not be silently overwritten.
+        let result = sqlx::query(
             "UPDATE tasks SET status = ?, blocked_from_status = NULL,
                               block_reason = NULL, updated_at = ?
-             WHERE id = ? AND project_id = ?",
+             WHERE id = ? AND project_id = ? AND status = ?",
         )
         .bind(new_status.to_string())
         .bind(now.to_rfc3339())
         .bind(id.to_string())
         .bind(project_id.to_string())
+        .bind(task.status.to_string())
         .execute(&self.pool)
         .await?;
+
+        if result.rows_affected() != 1 {
+            return Err(Error::InvalidTransition {
+                from: task.status,
+                trigger: "Unblock".into(),
+                detail: "task status changed concurrently — refetch and retry".into(),
+            });
+        }
 
         self.emit(DomainEvent::TaskStatusChanged {
             project_id,
@@ -796,8 +843,16 @@ impl Store {
         let task = self.get_task(project_id, id).await?;
         let new_status = lifecycle::transition(task.status, &Trigger::Cancel)?;
 
-        self.set_task_status(project_id, id, task.status, new_status)
-            .await?;
+        if !self
+            .set_task_status(project_id, id, task.status, new_status)
+            .await?
+        {
+            return Err(Error::InvalidTransition {
+                from: task.status,
+                trigger: "Cancel".into(),
+                detail: "task status changed concurrently — refetch and retry".into(),
+            });
+        }
 
         self.get_task(project_id, id).await
     }
@@ -812,7 +867,7 @@ impl Store {
     ) -> Result<Relation> {
         // Verify both tasks exist and belong to the project.
         let source = self.get_task(project_id, source_task_id).await?;
-        let _ = self.get_task(project_id, input.target_task_id).await?;
+        let target = self.get_task(project_id, input.target_task_id).await?;
 
         if source_task_id == input.target_task_id {
             return Err(Error::ValidationError {
@@ -821,10 +876,25 @@ impl Store {
             });
         }
 
+        let id = RelationId::new();
+        let now = Utc::now();
+
+        // Check + insert run in one transaction, and the first statement
+        // takes SQLite's write lock (same trick as claim_task): two
+        // concurrent create_relation calls serialize, so the cycle and
+        // single-parent checks cannot race an insert (TOCTOU).
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query("UPDATE projects SET name = name WHERE id = ?")
+            .bind(project_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+
+        let mut demoted = false;
         match input.relation_type {
             RelationType::DependsOn => {
                 // Cycle detection.
-                let edges = self.load_depends_on_edges(project_id).await?;
+                let edges = self.load_depends_on_edges(project_id, &mut *tx).await?;
                 if dag::would_create_cycle(&edges, source_task_id, input.target_task_id) {
                     return Err(Error::DependencyCycle {
                         detail: format!(
@@ -834,24 +904,29 @@ impl Store {
                     });
                 }
 
-                // Ready demotion: if source is Ready and new dep is not Done,
-                // demote to Approved.
-                if source.status == TaskStatus::Ready {
-                    let target = self.get_task(project_id, input.target_task_id).await?;
-                    if target.status != TaskStatus::Done {
-                        self.set_task_status(
-                            project_id,
-                            source_task_id,
-                            source.status,
-                            TaskStatus::Approved,
-                        )
-                        .await?;
-                    }
+                // Ready demotion: if source is Ready and new dep is not
+                // Done, demote to Approved. Guarded on the status read —
+                // the write lock already serializes, this keeps the event
+                // honest if the task moved before the tx began.
+                if source.status == TaskStatus::Ready && target.status != TaskStatus::Done {
+                    let result = sqlx::query(
+                        "UPDATE tasks SET status = ?, updated_at = ?
+                         WHERE id = ? AND project_id = ? AND deleted_at IS NULL
+                           AND status = ?",
+                    )
+                    .bind(TaskStatus::Approved.to_string())
+                    .bind(now.to_rfc3339())
+                    .bind(source_task_id.to_string())
+                    .bind(project_id.to_string())
+                    .bind(TaskStatus::Ready.to_string())
+                    .execute(&mut *tx)
+                    .await?;
+                    demoted = result.rows_affected() == 1;
                 }
             }
             RelationType::Decomposition => {
                 // Single-parent check.
-                let decomp_edges = self.load_decomposition_edges(project_id).await?;
+                let decomp_edges = self.load_decomposition_edges(project_id, &mut *tx).await?;
                 if dag::would_violate_single_parent(&decomp_edges, input.target_task_id) {
                     return Err(Error::DecompositionViolation {
                         detail: format!(
@@ -863,9 +938,6 @@ impl Store {
             }
         }
 
-        let id = RelationId::new();
-        let now = Utc::now();
-
         sqlx::query(
             "INSERT INTO relations (id, type, source_task_id, target_task_id, created_at)
              VALUES (?, ?, ?, ?, ?)",
@@ -875,10 +947,23 @@ impl Store {
         .bind(source_task_id.to_string())
         .bind(input.target_task_id.to_string())
         .bind(now.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        // Recompute graph roles.
+        tx.commit().await?;
+
+        // Events strictly after commit — a failed insert must not have
+        // broadcast anything.
+        if demoted {
+            self.emit(DomainEvent::TaskStatusChanged {
+                project_id,
+                task_id: source_task_id,
+                old_status: TaskStatus::Ready,
+                new_status: TaskStatus::Approved,
+            });
+        }
+
+        // Recompute graph roles (derived data — reads committed state).
         self.recompute_graph_roles(project_id).await?;
 
         self.emit(DomainEvent::RelationAdded {
@@ -898,6 +983,11 @@ impl Store {
         task_id: TaskId,
         id: RelationId,
     ) -> Result<()> {
+        // Project scoping: the task must belong to the path's project. The
+        // relation lookup below is global, so without this check a caller
+        // with a foreign relation id could delete across projects.
+        self.get_task(project_id, task_id).await?;
+
         let rel = self.get_relation(id).await?;
 
         // Verify the relation involves the given task.
@@ -1156,9 +1246,11 @@ impl Store {
         lease::validate_ttl(ttl)?;
         let new_expires = lease::compute_renewal_expiry(now, ttl);
 
-        sqlx::query(
+        // Guarded: a claim released between the read above and this write
+        // (sweep or session report) must not be resurrected by a renewal.
+        let result = sqlx::query(
             "UPDATE claims SET expires_at = ?, renewed_at = ?, ttl_seconds = ?
-             WHERE id = ?",
+             WHERE id = ? AND released_at IS NULL",
         )
         .bind(new_expires.to_rfc3339())
         .bind(now.to_rfc3339())
@@ -1166,6 +1258,15 @@ impl Store {
         .bind(claim.id.to_string())
         .execute(&self.pool)
         .await?;
+
+        if result.rows_affected() != 1 {
+            return Err(Error::LeaseExpired {
+                detail: format!(
+                    "claim on task {task_id} was already released — the lease may have \
+                     expired; re-claim the task"
+                ),
+            });
+        }
 
         self.emit(DomainEvent::ClaimRenewed {
             project_id,
@@ -1199,8 +1300,16 @@ impl Store {
             });
         }
 
-        self.release_claim_internal(project_id, task_id, claim.id, now, ReleaseReason::Voluntary)
-            .await?;
+        // A concurrent release (sweep, session report) must not be papered
+        // over — the claimant no longer holds the claim.
+        if !self
+            .release_claim_internal(project_id, task_id, claim.id, now, ReleaseReason::Voluntary)
+            .await?
+        {
+            return Err(Error::LeaseExpired {
+                detail: format!("claim on task {task_id} was already released"),
+            });
+        }
 
         // Return task to ready (or approved if new deps were added).
         if task.status == TaskStatus::InProgress {
@@ -1251,10 +1360,13 @@ impl Store {
                 .parse()
                 .map_err(|e: String| Error::Internal(e))?;
 
-            self.release_claim_internal(project_id, task_id, claim_id, now, ReleaseReason::Expired)
+            // If a racing reporter released the claim first, leave the task
+            // alone — the owner acted within the release window.
+            let did_release = self
+                .release_claim_internal(project_id, task_id, claim_id, now, ReleaseReason::Expired)
                 .await?;
 
-            if status == TaskStatus::InProgress {
+            if did_release && status == TaskStatus::InProgress {
                 // Check deps — new ones may have been added while claimed.
                 let target = if self.all_deps_done(project_id, task_id).await? {
                     TaskStatus::Ready
@@ -1358,14 +1470,25 @@ impl Store {
                 detail: "session identity does not match the active claim".into(),
             });
         }
-        self.release_claim_internal(
-            project_id,
-            task_id,
-            claim.id,
-            now,
-            ReleaseReason::SessionReported,
-        )
-        .await?;
+        // A stale reporter must not advance a task whose claim was already
+        // released (expired and swept, or re-claimed by another agent).
+        if !self
+            .release_claim_internal(
+                project_id,
+                task_id,
+                claim.id,
+                now,
+                ReleaseReason::SessionReported,
+            )
+            .await?
+        {
+            return Err(Error::LeaseExpired {
+                detail: format!(
+                    "claim on task {task_id} was already released — the lease may have \
+                     expired; re-claim the task before reporting"
+                ),
+            });
+        }
 
         let session_id = SessionId::new();
         let decisions = input.decisions.as_deref().unwrap_or(&[]);
@@ -1657,8 +1780,10 @@ impl Store {
         let task = self.get_task(project_id, task_id).await?;
 
         // Load edges.
-        let deps = self.load_depends_on_edges(project_id).await?;
-        let decomp = self.load_decomposition_edges(project_id).await?;
+        let deps = self.load_depends_on_edges(project_id, &self.pool).await?;
+        let decomp = self
+            .load_decomposition_edges(project_id, &self.pool)
+            .await?;
 
         // Walk ancestors.
         let ancestor_ids = dag::ancestor_chain(task_id, &deps, &decomp);
@@ -2075,27 +2200,34 @@ impl Store {
 
     // ── Internal helpers ─────────────────────────────────────────────────
 
+    /// Guarded status transition: the UPDATE only lands when the status is
+    /// still `old_status`, so two concurrent transitions cannot silently
+    /// overwrite each other (last-writer-wins). Returns `false` — and emits
+    /// nothing — when the guard didn't match (task missing, soft-deleted, or
+    /// concurrently transitioned); user-facing callers turn that into a
+    /// conflict, cascades treat it as "no longer applicable".
     async fn set_task_status(
         &self,
         project_id: ProjectId,
         id: TaskId,
         old_status: TaskStatus,
         status: TaskStatus,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let now = Utc::now();
         let result = sqlx::query(
             "UPDATE tasks SET status = ?, updated_at = ?
-             WHERE id = ? AND project_id = ? AND deleted_at IS NULL",
+             WHERE id = ? AND project_id = ? AND deleted_at IS NULL AND status = ?",
         )
         .bind(status.to_string())
         .bind(now.to_rfc3339())
         .bind(id.to_string())
         .bind(project_id.to_string())
+        .bind(old_status.to_string())
         .execute(&self.pool)
         .await?;
 
-        // No phantom events: a 0-row update (soft-deleted task) must not
-        // broadcast a status change for a task that no longer exists.
+        // No phantom events: a 0-row update must not broadcast a status
+        // change that didn't happen.
         if result.rows_affected() == 1 {
             self.emit(DomainEvent::TaskStatusChanged {
                 project_id,
@@ -2103,9 +2235,10 @@ impl Store {
                 old_status,
                 new_status: status,
             });
+            return Ok(true);
         }
 
-        Ok(())
+        Ok(false)
     }
 
     /// Check if a task can be auto-readied (approved + all deps done).
@@ -2220,6 +2353,10 @@ impl Store {
         row_to_relation(&row)
     }
 
+    /// Releases a claim. Returns `false` — and emits nothing — when the
+    /// claim was already released: a stale reporter or a racing sweep must
+    /// not overwrite the original `release_reason` or broadcast a phantom
+    /// event.
     async fn release_claim_internal(
         &self,
         project_id: ProjectId,
@@ -2227,16 +2364,20 @@ impl Store {
         claim_id: ClaimId,
         now: DateTime<Utc>,
         reason: ReleaseReason,
-    ) -> Result<()> {
-        sqlx::query(
+    ) -> Result<bool> {
+        let result = sqlx::query(
             "UPDATE claims SET released_at = ?, release_reason = ?
-             WHERE id = ?",
+             WHERE id = ? AND released_at IS NULL",
         )
         .bind(now.to_rfc3339())
         .bind(reason.as_str())
         .bind(claim_id.to_string())
         .execute(&self.pool)
         .await?;
+
+        if result.rows_affected() != 1 {
+            return Ok(false);
+        }
 
         match reason {
             ReleaseReason::Expired => self.emit(DomainEvent::ClaimExpired {
@@ -2251,7 +2392,7 @@ impl Store {
             }),
         }
 
-        Ok(())
+        Ok(true)
     }
 
     async fn create_knowledge_internal(
@@ -2267,6 +2408,26 @@ impl Store {
 
         let task_id = task_id_override.or(input.task_id);
         let session_id = session_id_override.or(input.session_id);
+
+        // Project scoping: a task- or session-scoped item must reference
+        // rows inside this project — the FK alone would happily accept a
+        // foreign project's task or session.
+        if let Some(tid) = task_id {
+            self.get_task(project_id, tid).await?;
+        }
+        if let Some(sid) = session_id {
+            let found = sqlx::query(
+                "SELECT 1 FROM sessions s JOIN tasks t ON t.id = s.task_id
+                 WHERE s.id = ? AND t.project_id = ? AND t.deleted_at IS NULL",
+            )
+            .bind(sid.to_string())
+            .bind(project_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+            if found.is_none() {
+                return Err(Error::not_found("session", sid));
+            }
+        }
 
         sqlx::query(
             "INSERT INTO knowledge_items (id, type, title, content, scope,
@@ -2295,7 +2456,17 @@ impl Store {
         self.get_knowledge(project_id, id).await
     }
 
-    async fn load_depends_on_edges(&self, project_id: ProjectId) -> Result<Vec<(TaskId, TaskId)>> {
+    /// Edge loaders take an executor so callers can run them inside a
+    /// transaction (the write lock serializes check-then-insert sequences
+    /// against concurrent writers).
+    async fn load_depends_on_edges<'e, E>(
+        &self,
+        project_id: ProjectId,
+        exec: E,
+    ) -> Result<Vec<(TaskId, TaskId)>>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
         let rows = sqlx::query(
             "SELECT r.source_task_id, r.target_task_id
              FROM relations r
@@ -2305,7 +2476,7 @@ impl Store {
                AND t1.project_id = ?",
         )
         .bind(project_id.to_string())
-        .fetch_all(&self.pool)
+        .fetch_all(exec)
         .await?;
 
         rows.iter()
@@ -2325,10 +2496,14 @@ impl Store {
             .collect()
     }
 
-    async fn load_decomposition_edges(
+    async fn load_decomposition_edges<'e, E>(
         &self,
         project_id: ProjectId,
-    ) -> Result<Vec<(TaskId, TaskId)>> {
+        exec: E,
+    ) -> Result<Vec<(TaskId, TaskId)>>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
         let rows = sqlx::query(
             "SELECT r.source_task_id, r.target_task_id
              FROM relations r
@@ -2338,7 +2513,7 @@ impl Store {
                AND t1.project_id = ?",
         )
         .bind(project_id.to_string())
-        .fetch_all(&self.pool)
+        .fetch_all(exec)
         .await?;
 
         rows.iter()
@@ -2388,7 +2563,7 @@ impl Store {
             return Ok(());
         }
 
-        let edges = self.load_depends_on_edges(project_id).await?;
+        let edges = self.load_depends_on_edges(project_id, &self.pool).await?;
         let derived = dag::derive_graph_roles(&all_ids, &edges);
         let now = Utc::now();
 

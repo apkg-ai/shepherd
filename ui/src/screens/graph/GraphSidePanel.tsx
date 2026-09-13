@@ -93,9 +93,7 @@ export function GraphSidePanel({
               <button
                 type="button"
                 className={styles.jump}
-                onClick={() =>
-                  lens === "tree" ? onExpandAndFocus(task.id, s.id) : onSelect(s.id)
-                }
+                onClick={() => (lens === "tree" ? onExpandAndFocus(task.id, s.id) : onSelect(s.id))}
               >
                 {s.title}
               </button>

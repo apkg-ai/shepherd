@@ -52,9 +52,7 @@ describe("Graph screen", () => {
       "true",
     );
     // Two boundary edges: Start→Epic and Epic→End (Epic has no prereqs and nothing depends on it).
-    await waitFor(() =>
-      expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(2),
-    );
+    await waitFor(() => expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(2));
     // Epic carries a subtask count chip.
     const node = screen.getByText("Epic").closest("article")!;
     expect(within(node).getByText("2")).toBeInTheDocument();
@@ -71,9 +69,7 @@ describe("Graph screen", () => {
       "aria-selected",
       "true",
     );
-    await waitFor(() =>
-      expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(2),
-    );
+    await waitFor(() => expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(2));
   });
 
   it("collapses everything in tree lens when ?expanded= is explicitly empty", async () => {
@@ -82,9 +78,7 @@ describe("Graph screen", () => {
     expect(await screen.findByText("Epic")).toBeInTheDocument();
     expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(0);
     const node = screen.getByText("Epic").closest("article")!;
-    expect(
-      within(node).getByRole("button", { name: "Expand 2 subtasks" }),
-    ).toBeInTheDocument();
+    expect(within(node).getByRole("button", { name: "Expand 2 subtasks" })).toBeInTheDocument();
   });
 
   it("renders status language in tree lens", async () => {

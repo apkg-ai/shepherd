@@ -8,7 +8,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "../../styles/reactflow.css";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { useListProjectRelationsInfinite } from "../../api/generated/relations/relations";
 import { useListTasksInfinite } from "../../api/generated/tasks/tasks";
@@ -123,7 +123,8 @@ function ProjectGraph({ projectId }: { projectId: string }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const lens: Lens = searchParams.get("lens") === "tree" ? "tree" : "flow";
   const selectedId = searchParams.get("selected");
-  const parsedExpanded = parseExpanded(searchParams);
+  // Memoized: a fresh Set per render would defeat the layout memo below.
+  const parsedExpanded = useMemo(() => parseExpanded(searchParams), [searchParams]);
   const tabRefs = useRef(new Map<Lens, HTMLButtonElement>());
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
 
@@ -186,11 +187,29 @@ function ProjectGraph({ projectId }: { projectId: string }) {
     );
   };
 
+  /**
+   * The effective expansion for URL updates. With no `?expanded=` param the
+   * live state is the default (roots expanded in the tree lens) — seeding
+   * from an empty set would collapse every other root on the first chip
+   * click.
+   */
+  const seedExpanded = useCallback(
+    (params: URLSearchParams): Set<string> =>
+      parseExpanded(params) ??
+      (lens === "tree"
+        ? defaultExpanded(
+            flattenPages(tasksQuery.data?.pages),
+            flattenPages(relationsQuery.data?.pages),
+          )
+        : new Set<string>()),
+    [lens, tasksQuery.data, relationsQuery.data],
+  );
+
   const toggleExpand = useCallback(
     (taskId: string) => {
       setSearchParams(
         (params) => {
-          const expanded = parseExpanded(params) ?? new Set<string>();
+          const expanded = seedExpanded(params);
           if (expanded.has(taskId)) expanded.delete(taskId);
           else expanded.add(taskId);
           // Always set explicitly — even empty — so the default (roots
@@ -201,16 +220,35 @@ function ProjectGraph({ projectId }: { projectId: string }) {
         { replace: true },
       );
     },
-    [setSearchParams],
+    [setSearchParams, seedExpanded],
   );
 
-  /** Expand a parent and select + zoom to one of its children. */
+  /**
+   * Expand a parent and select + zoom to one of its children. Every
+   * decomposition ancestor up to the root is expanded too — a collapsed
+   * grandparent would keep the child hidden and turn the fitView into a
+   * silent no-op.
+   */
   const expandAndFocus = useCallback(
     (parentId: string, childId: string) => {
       setSearchParams(
         (params) => {
-          const expanded = parseExpanded(params) ?? new Set<string>();
-          expanded.add(parentId);
+          const expanded = seedExpanded(params);
+          const relations = flattenPages(relationsQuery.data?.pages);
+          const parentOf = new Map<string, string>();
+          for (const r of relations) {
+            if (r.type === "decomposition" && r.source_task_id !== r.target_task_id) {
+              parentOf.set(r.target_task_id, r.source_task_id);
+            }
+          }
+          // Walk to the root; `seen` stops malformed parent cycles.
+          const seen = new Set<string>();
+          let current: string | undefined = parentId;
+          while (current !== undefined && !seen.has(current)) {
+            seen.add(current);
+            expanded.add(current);
+            current = parentOf.get(current);
+          }
           params.set("expanded", [...expanded].join(","));
           params.set("selected", childId);
           return params;
@@ -219,14 +257,17 @@ function ProjectGraph({ projectId }: { projectId: string }) {
       );
       setFocusTarget(childId);
     },
-    [setSearchParams],
+    [setSearchParams, seedExpanded, relationsQuery.data],
   );
 
   const clearFocusTarget = useCallback(() => {
     setFocusTarget(null);
   }, []);
 
-  const onNodeClick: NodeMouseHandler<TaskNodeType> = (_event, node) => {
+  const onNodeClick: NodeMouseHandler<TaskNodeType | BoundaryNodeType> = (_event, node) => {
+    // Boundary nodes are virtual: selecting one would fade the whole canvas
+    // (no relation references a boundary id) with no side panel to explain it.
+    if (node.type === "boundary") return;
     select(node.id);
   };
 
@@ -241,40 +282,27 @@ function ProjectGraph({ projectId }: { projectId: string }) {
     );
   };
 
-  const graphActions = { toggleExpand, lens };
+  // Memoized: a fresh object per render would re-render every TaskNode
+  // consuming the context on each selection or live-data update.
+  const graphActions = useMemo(() => ({ toggleExpand, lens }), [toggleExpand, lens]);
 
-  const body = () => {
-    if (tasksQuery.isPending || relationsQuery.isPending) {
-      return <LoadingState label="Loading graph…" />;
-    }
-    if (tasksQuery.isError) {
-      return <ErrorState error={tasksQuery.error} onRetry={() => void tasksQuery.refetch()} />;
-    }
-    if (relationsQuery.isError) {
-      return (
-        <ErrorState error={relationsQuery.error} onRetry={() => void relationsQuery.refetch()} />
-      );
-    }
+  // Memoized feeds and layout: dagre runs only when the data, lens, or
+  // expansion actually changes — not on every selection or SSE-driven
+  // render. Fresh node/edge identities per render would defeat React
+  // Flow's memoization and re-render every TaskNode.
+  const tasks = useMemo(() => flattenPages(tasksQuery.data?.pages), [tasksQuery.data]);
+  const relations = useMemo(() => flattenPages(relationsQuery.data?.pages), [relationsQuery.data]);
 
-    const tasks = flattenPages(tasksQuery.data?.pages);
-    const relations = flattenPages(relationsQuery.data?.pages);
-    if (tasks.length === 0) {
-      return (
-        <EmptyState title="No tasks yet">
-          <p>
-            <Link to={`/projects/${projectId}/tasks/new`}>Create the first task</Link> to grow the
-            graph.
-          </p>
-        </EmptyState>
-      );
-    }
+  // Resolve expansion: null = no URL param → lens-dependent default.
+  // Tree lens: roots expanded so epic-level structure is visible.
+  // Flow lens: nothing expanded — start with epics only, drill in via chip.
+  const expandedIds = useMemo(
+    () =>
+      parsedExpanded ?? (lens === "tree" ? defaultExpanded(tasks, relations) : new Set<string>()),
+    [parsedExpanded, lens, tasks, relations],
+  );
 
-    // Resolve expansion: null = no URL param → lens-dependent default.
-    // Tree lens: roots expanded so epic-level structure is visible.
-    // Flow lens: nothing expanded — start with epics only, drill in via chip.
-    const expandedIds =
-      parsedExpanded ?? (lens === "tree" ? defaultExpanded(tasks, relations) : new Set<string>());
-
+  const graph = useMemo(() => {
     // Epic detection: tasks that have at least one decomposition child.
     // Used by the flow lens to show only epics (subtasks are hidden).
     const childCounts = new Map<string, number>();
@@ -289,21 +317,25 @@ function ProjectGraph({ projectId }: { projectId: string }) {
       graphNodes = decompositionGraph(tasks, relations, expandedIds);
     } else {
       // Flow lens: show only epics (tasks with decomposition children).
-      // Inline subtask expansion is tracked in #52 — for now the side panel
-      // provides the subtask drill-down.
+      // Projects with no epics fall back to all tasks — flow is the default
+      // lens, so it must never render a blank canvas. Inline subtask
+      // expansion is tracked in #52 — for now the side panel provides the
+      // subtask drill-down.
       const epicTasks = tasks.filter((t) => childCounts.has(t.id));
+      const flowTasks = epicTasks.length > 0 ? epicTasks : tasks;
       const flowMeta = new Map(
-        epicTasks.map((t) => [
-          t.id,
-          { childCount: childCounts.get(t.id) ?? 0, expanded: false },
-        ]),
+        flowTasks.map((t) => [t.id, { childCount: childCounts.get(t.id) ?? 0, expanded: false }]),
       );
-      graphNodes = dependencyGraph(epicTasks, relations, flowMeta);
+      graphNodes = dependencyGraph(flowTasks, relations, flowMeta);
     }
-    let { nodes, edges } = graphNodes;
+    let { edges } = graphNodes;
+    // Boundary nodes join in the flow lens (below), so the array holds both.
+    let nodes: (TaskNodeType | BoundaryNodeType)[] = graphNodes.nodes;
 
     // Flow lens: inject virtual Start/End boundary nodes so the graph
     // reads as a complete traversal from a single entry to a single exit.
+    // A boundary whose group is empty (e.g. an epic-level depends_on cycle)
+    // is skipped — a centroid over zero nodes would be NaN.
     if (lens === "flow" && nodes.length > 0) {
       const incomingTargets = new Set(edges.map((e) => e.target));
       const outgoingSources = new Set(edges.map((e) => e.source));
@@ -313,76 +345,102 @@ function ProjectGraph({ projectId }: { projectId: string }) {
       // TB layout: Start above, End below. Center horizontally over the group.
       const minY = Math.min(...nodes.map((n) => n.position.y));
       const maxY = Math.max(...nodes.map((n) => n.position.y));
-      const centroidX = (group: typeof nodes) =>
+      const centroidX = (group: readonly (TaskNodeType | BoundaryNodeType)[]) =>
         group.reduce((sum, n) => sum + n.position.x + NODE_WIDTH / 2, 0) / group.length -
         BOUNDARY_SIZE / 2;
 
-      const startNode: BoundaryNodeType = {
-        id: START_ID,
-        type: "boundary",
-        data: { label: "Start" },
-        position: { x: centroidX(startEpics), y: minY - BOUNDARY_SIZE - BOUNDARY_GAP },
-        width: BOUNDARY_SIZE,
-        height: BOUNDARY_SIZE,
-        draggable: false,
-        connectable: false,
-      };
-      const endNode: BoundaryNodeType = {
-        id: END_ID,
-        type: "boundary",
-        data: { label: "End" },
-        position: { x: centroidX(endEpics), y: maxY + NODE_HEIGHT + BOUNDARY_GAP },
-        width: BOUNDARY_SIZE,
-        height: BOUNDARY_SIZE,
-        draggable: false,
-        connectable: false,
-      };
-
-      const boundaryEdges = [
-        ...startEpics.map((n) => ({
-          id: `${START_ID}-${n.id}`,
-          source: START_ID,
-          target: n.id,
-          type: "smoothstep" as const,
-        })),
-        ...endEpics.map((n) => ({
-          id: `${n.id}-${END_ID}`,
-          source: n.id,
-          target: END_ID,
-          type: "smoothstep" as const,
-        })),
-      ];
-
-      nodes = [startNode as unknown as TaskNodeType, ...nodes, endNode as unknown as TaskNodeType];
-      edges = [...edges, ...boundaryEdges];
+      if (startEpics.length > 0) {
+        nodes = [
+          {
+            id: START_ID,
+            type: "boundary",
+            data: { label: "Start" },
+            position: { x: centroidX(startEpics), y: minY - BOUNDARY_SIZE - BOUNDARY_GAP },
+            width: BOUNDARY_SIZE,
+            height: BOUNDARY_SIZE,
+            draggable: false,
+            connectable: false,
+          },
+          ...nodes,
+        ];
+        edges = [
+          ...edges,
+          ...startEpics.map((n) => ({
+            id: `${START_ID}-${n.id}`,
+            source: START_ID,
+            target: n.id,
+            type: "smoothstep" as const,
+          })),
+        ];
+      }
+      if (endEpics.length > 0) {
+        nodes = [
+          ...nodes,
+          {
+            id: END_ID,
+            type: "boundary",
+            data: { label: "End" },
+            position: { x: centroidX(endEpics), y: maxY + NODE_HEIGHT + BOUNDARY_GAP },
+            width: BOUNDARY_SIZE,
+            height: BOUNDARY_SIZE,
+            draggable: false,
+            connectable: false,
+          },
+        ];
+        edges = [
+          ...edges,
+          ...endEpics.map((n) => ({
+            id: `${n.id}-${END_ID}`,
+            source: n.id,
+            target: END_ID,
+            type: "smoothstep" as const,
+          })),
+        ];
+      }
     }
 
-    const selectedTask = selectedId !== null ? tasks.find((t) => t.id === selectedId) : undefined;
+    return { nodes, edges };
+  }, [lens, tasks, relations, expandedIds]);
 
-    // Neighbor fade: when a node is selected, compute the transitive cone and
-    // dim everything outside it. The lens type determines which relation edges
-    // define "neighbor."
-    const lensType = lens === "tree" ? "decomposition" : "depends_on";
-    const neighborIds =
-      selectedId !== null ? computeNeighborIds(selectedId, relations, lensType) : null;
+  // Neighbor fade: when a node is selected, compute the transitive cone and
+  // dim everything outside it. The lens type determines which relation edges
+  // define "neighbor." Only a selection that is a task node on the canvas
+  // fades — an off-canvas selection (a subtask via the side panel in the
+  // flow lens) has no rendered neighbors, and fading everything would
+  // spotlight nothing.
+  const lensType = lens === "tree" ? "decomposition" : "depends_on";
+  const neighborIds = useMemo(
+    () =>
+      selectedId !== null && graph.nodes.some((n) => n.id === selectedId && n.type !== "boundary")
+        ? computeNeighborIds(selectedId, relations, lensType)
+        : null,
+    [selectedId, graph.nodes, relations, lensType],
+  );
 
-    const nodesWithState = nodes.map((node) => {
-      const isSelected = node.id === selectedId;
-      const isBoundary = node.id === START_ID || node.id === END_ID;
-      const faded = !isBoundary && neighborIds !== null && !neighborIds.has(node.id);
-      if (!isSelected && !faded) return node;
-      return {
-        ...node,
-        selected: isSelected || undefined,
-        data: { ...node.data, faded },
-      };
-    });
+  const nodesWithState = useMemo(
+    () =>
+      graph.nodes.map((node) => {
+        const isSelected = node.id === selectedId;
+        const isBoundary = node.id === START_ID || node.id === END_ID;
+        const faded = !isBoundary && neighborIds !== null && !neighborIds.has(node.id);
+        if (!isSelected && !faded) return node;
+        // Boundary nodes never fade; only the selection flag can change.
+        if (node.type === "boundary") return { ...node, selected: isSelected || undefined };
+        return {
+          ...node,
+          selected: isSelected || undefined,
+          data: { ...node.data, faded },
+        };
+      }),
+    [graph.nodes, selectedId, neighborIds],
+  );
 
-    // Fade edges: full opacity on edges between two neighbors, dim otherwise.
-    const edgesWithFade =
+  // Fade edges: full opacity on edges between two neighbors, dim otherwise.
+  const edgesWithFade = useMemo(
+    () =>
       neighborIds === null
-        ? edges
-        : edges.map((edge) => {
+        ? graph.edges
+        : graph.edges.map((edge) => {
             const srcIn = neighborIds.has(edge.source);
             const tgtIn = neighborIds.has(edge.target);
             if (srcIn && tgtIn) return edge;
@@ -390,7 +448,35 @@ function ProjectGraph({ projectId }: { projectId: string }) {
               ...edge,
               style: { ...edge.style, opacity: srcIn || tgtIn ? 0.3 : 0.08 },
             };
-          });
+          }),
+    [graph.edges, neighborIds],
+  );
+
+  const body = () => {
+    if (tasksQuery.isPending || relationsQuery.isPending) {
+      return <LoadingState label="Loading graph…" />;
+    }
+    if (tasksQuery.isError) {
+      return <ErrorState error={tasksQuery.error} onRetry={() => void tasksQuery.refetch()} />;
+    }
+    if (relationsQuery.isError) {
+      return (
+        <ErrorState error={relationsQuery.error} onRetry={() => void relationsQuery.refetch()} />
+      );
+    }
+
+    if (tasks.length === 0) {
+      return (
+        <EmptyState title="No tasks yet">
+          <p>
+            <Link to={`/projects/${projectId}/tasks/new`}>Create the first task</Link> to grow the
+            graph.
+          </p>
+        </EmptyState>
+      );
+    }
+
+    const selectedTask = selectedId !== null ? tasks.find((t) => t.id === selectedId) : undefined;
 
     return (
       <div

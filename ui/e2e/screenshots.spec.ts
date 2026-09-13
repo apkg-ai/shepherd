@@ -98,8 +98,8 @@ async function capture(page: Page, path: string, name: string) {
 test("captures every key screen in both themes", async ({ page }) => {
   test.setTimeout(120_000);
   await capture(page, "/#/", "registry");
-  await capture(page, `/#/projects/${project.id}`, "graph-tree-lens");
-  await capture(page, `/#/projects/${project.id}?lens=flow`, "graph-flow-lens");
+  await capture(page, `/#/projects/${project.id}`, "graph-flow-lens");
+  await capture(page, `/#/projects/${project.id}?lens=tree`, "graph-tree-lens");
   await capture(page, `/#/projects/${project.id}?selected=${epicId}`, "graph-side-panel");
   await capture(page, `/#/projects/${project.id}/tasks`, "task-tree");
   await capture(page, `/#/projects/${project.id}/tasks?status=in_review`, "task-list-filtered");
