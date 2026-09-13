@@ -50,6 +50,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("failed to open database at {}", db_path.display()))?;
 
+    store.check_integrity().await;
+
     // Background sweeper: releases expired claims so crashed agents' tasks
     // return to `ready` without waiting for the next API call (lazy sweep).
     if config.sweep_interval_seconds > 0 {

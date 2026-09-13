@@ -2,9 +2,8 @@
 # Regenerate core/shepherd-server/src/generated from openapi/shepherd.yaml.
 #
 # The generator's raw output is not rustfmt-formatted, so this script runs
-# `cargo fmt` afterwards — the committed generated code is exactly
-# regen + fmt. CI (core-generated-drift job) runs the same steps and fails
-# on any diff, so spec edits cannot silently leave the wire types stale.
+# `cargo fmt` afterwards. Generated code is gitignored — this script must
+# run before `cargo build` or `cargo test` (CI does it automatically).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,8 +17,4 @@ command -v openapi-to-rust >/dev/null 2>&1 || {
 (cd "$ROOT/core/shepherd-server" && openapi-to-rust generate)
 (cd "$ROOT/core" && cargo fmt)
 
-if git -C "$ROOT" diff --quiet -- core/shepherd-server/src/generated; then
-  echo "regen: generated code is up to date"
-else
-  echo "regen: generated code changed — commit the result"
-fi
+echo "regen: Rust wire types regenerated"

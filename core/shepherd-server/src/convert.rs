@@ -35,6 +35,7 @@ impl From<core::Task> for wire::Task {
                 core::TaskType::Refactor => wire::TaskType::Refactor,
                 core::TaskType::Review => wire::TaskType::Review,
                 core::TaskType::Research => wire::TaskType::Research,
+                core::TaskType::Epic => wire::TaskType::Epic,
             },
             status: match t.status {
                 core::TaskStatus::Proposed => wire::TaskStatus::Proposed,
@@ -344,6 +345,7 @@ impl From<wire::TaskCreate> for core::TaskCreate {
                 wire::TaskCreateType::Refactor => core::TaskType::Refactor,
                 wire::TaskCreateType::Review => core::TaskType::Review,
                 wire::TaskCreateType::Research => core::TaskType::Research,
+                wire::TaskCreateType::Epic => core::TaskType::Epic,
             },
             status: w.status.map(|s| match s {
                 wire::TaskCreateStatus::Proposed => core::TaskStatus::Proposed,
@@ -383,6 +385,7 @@ impl From<wire::TaskUpdate> for core::TaskUpdate {
                 wire::TaskUpdateType::Refactor => core::TaskType::Refactor,
                 wire::TaskUpdateType::Review => core::TaskType::Review,
                 wire::TaskUpdateType::Research => core::TaskType::Research,
+                wire::TaskUpdateType::Epic => core::TaskType::Epic,
             }),
             metadata: w
                 .metadata
@@ -539,6 +542,7 @@ impl From<wire::Task> for core::Task {
                 wire::TaskType::Refactor => core::TaskType::Refactor,
                 wire::TaskType::Review => core::TaskType::Review,
                 wire::TaskType::Research => core::TaskType::Research,
+                wire::TaskType::Epic => core::TaskType::Epic,
             },
             status: match w.status {
                 wire::TaskStatus::Proposed => core::TaskStatus::Proposed,

@@ -108,6 +108,7 @@ pub fn validate_import(doc: &ExportDocument) -> Result<(), Error> {
 
     // Referential integrity + DAG invariants over relations.
     let mut depends_on_edges: Vec<(TaskId, TaskId)> = Vec::new();
+    let mut decomposition_edges: Vec<(TaskId, TaskId)> = Vec::new();
     let mut decomposition_parent: HashMap<TaskId, TaskId> = HashMap::new();
     for rel in &doc.relations {
         if !task_ids.contains(&rel.source_task_id) {
@@ -139,6 +140,7 @@ pub fn validate_import(doc: &ExportDocument) -> Result<(), Error> {
                 depends_on_edges.push((rel.source_task_id, rel.target_task_id));
             }
             RelationType::Decomposition => {
+                decomposition_edges.push((rel.source_task_id, rel.target_task_id));
                 if decomposition_parent
                     .insert(rel.target_task_id, rel.source_task_id)
                     .is_some()
@@ -156,6 +158,11 @@ pub fn validate_import(doc: &ExportDocument) -> Result<(), Error> {
     if dag::has_cycle(&depends_on_edges) {
         return Err(Error::DependencyCycle {
             detail: "document's depends_on relations contain a cycle".into(),
+        });
+    }
+    if dag::has_cycle(&decomposition_edges) {
+        return Err(Error::DecompositionViolation {
+            detail: "document's decomposition relations contain a cycle".into(),
         });
     }
 
@@ -347,6 +354,32 @@ mod tests {
             vec![],
         );
         assert!(validate_import(&doc).is_err());
+    }
+
+    #[test]
+    fn validate_import_rejects_decomposition_cycle() {
+        let a = sample_task();
+        let b = sample_task();
+        let c = sample_task();
+        let decomp = |src: TaskId, tgt: TaskId| Relation {
+            id: RelationId::new(),
+            relation_type: RelationType::Decomposition,
+            source_task_id: src,
+            target_task_id: tgt,
+            created_at: Utc::now(),
+        };
+        let doc = build_export(
+            sample_project(),
+            vec![a.clone(), b.clone(), c.clone()],
+            vec![decomp(a.id, b.id), decomp(b.id, c.id), decomp(c.id, a.id)],
+            vec![],
+            vec![],
+        );
+        let err = validate_import(&doc).unwrap_err();
+        assert!(
+            matches!(err, Error::DecompositionViolation { .. }),
+            "expected DecompositionViolation, got {err}"
+        );
     }
 
     #[test]

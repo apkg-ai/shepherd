@@ -360,6 +360,7 @@ impl TasksApi for AppState {
             ListTasksType::Refactor => shepherd_core::TaskType::Refactor,
             ListTasksType::Review => shepherd_core::TaskType::Review,
             ListTasksType::Research => shepherd_core::TaskType::Research,
+            ListTasksType::Epic => shepherd_core::TaskType::Epic,
         });
         match self
             .store

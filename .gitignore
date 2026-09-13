@@ -93,6 +93,11 @@ aider.conf.yml
 node_modules/
 coverage/
 
+# Generated code — regenerated from openapi/shepherd.yaml at build time.
+# Run `scripts/regen-generated.sh` (Rust) and `npm run generate:api` (TS).
+core/shepherd-server/src/generated/
+ui/src/api/generated/
+
 # Asciinema terminal recordings
 *.cast
 *.mp4

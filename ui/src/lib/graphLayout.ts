@@ -36,6 +36,12 @@ export type TaskNodeData = {
   expanded: boolean;
   /** Set by the graph screen when neighbor fade is active (not a layout concern). */
   faded?: boolean;
+  /** Display-only: this child epic is waiting for its parent epic's
+   *  non-epic subtasks to complete before it becomes actionable. */
+  epicBlocked?: boolean;
+  /** Display-only: this task has unmet depends_on prerequisites — it sits
+   *  in approved but is effectively blocked until they complete. */
+  depWaiting?: boolean;
 };
 
 export type TaskNodeType = Node<TaskNodeData, "task">;

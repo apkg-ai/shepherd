@@ -131,6 +131,12 @@ const PAIRS: Pair[] = [
   { fg: "text-faint", bg: "surface", min: AA_NON_TEXT, note: "graph edges, cancelled border" },
   { fg: "on-accent", bg: "accent", min: AA_TEXT, note: "graph in_progress node title" },
   { fg: "text", bg: "surface-raised", min: AA_TEXT, note: "graph node titles" },
+
+  // Type badges (task list + graph): symbol+label on soft fill.
+  // attention/accent/pink/teal already covered above; warning and success too.
+  // Explicit entries document intent for the type badge surface.
+  { fg: "warning", bg: "warning-soft", min: AA_TEXT, note: "review type badge" },
+  { fg: "success", bg: "success-soft", min: AA_TEXT, note: "research type badge" },
 ];
 
 describe("WCAG AA token gate", () => {

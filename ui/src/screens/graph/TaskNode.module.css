@@ -133,6 +133,42 @@
   color: var(--color-surface);
 }
 
+/* Epic accent: additive to status — a left-side stripe and badge. */
+.node[data-kind="epic"] {
+  border-left: 3px solid var(--epic-accent);
+}
+
+.epicBadge {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-1);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--epic-accent);
+  background: var(--epic-accent-soft);
+  flex-shrink: 0;
+}
+
+/* Waiting: task has unmet dependencies or is a child epic whose parent's
+   subtasks aren't done yet. Dashed border + dim signals "not actionable." */
+.node[data-waiting="true"] {
+  opacity: 0.6;
+  border-style: dashed;
+}
+
+.waitingBadge {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--status-blocked-fg);
+  background: var(--status-blocked-bg);
+  border: 1px dashed var(--status-blocked-fg);
+}
+
 /* Neighbor fade: non-neighboring nodes dim to push the blocking chain forward. */
 .node[data-faded="true"] {
   opacity: 0.15;

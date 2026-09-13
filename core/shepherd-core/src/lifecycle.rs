@@ -35,6 +35,8 @@ pub enum Trigger {
     Cancel,
     /// A new dependency was added and is not `done` — demote to approved.
     DependencyAdded,
+    /// All decomposition children of this epic are Done — auto-complete.
+    EpicAutoComplete,
 }
 
 /// Apply a transition: returns the new status, or an error if the transition
@@ -55,6 +57,15 @@ pub fn transition(current: TaskStatus, trigger: &Trigger) -> Result<TaskStatus, 
 
         // Ready demotion: new dependency not done
         (Ready, DependencyAdded) => Approved,
+
+        // Epic auto-completion: all decomposition children and depends_on
+        // prerequisites are Done. Epics skip the claim/session/review flow
+        // (they are not claimable), but approval is still required — a
+        // proposed epic does not auto-complete.
+        (Approved, EpicAutoComplete) => Done,
+        (Ready, EpicAutoComplete) => Done,
+        (InProgress, EpicAutoComplete) => Done,
+        (InReview, EpicAutoComplete) => Done,
 
         // Block: any non-terminal status
         (s, Block) if !is_terminal(s) && s != Blocked => Blocked,
@@ -102,24 +113,28 @@ pub fn allowed_triggers(status: TaskStatus) -> Vec<Trigger> {
         }
         Approved => {
             triggers.push(AutoReady);
+            triggers.push(EpicAutoComplete);
             triggers.push(Block);
             triggers.push(Cancel);
         }
         Ready => {
             triggers.push(Claim);
             triggers.push(DependencyAdded);
+            triggers.push(EpicAutoComplete);
             triggers.push(Block);
             triggers.push(Cancel);
         }
         InProgress => {
             triggers.push(SessionSuccess { review_gate: true });
             triggers.push(SessionSuccess { review_gate: false });
+            triggers.push(EpicAutoComplete);
             triggers.push(Block);
             triggers.push(Cancel);
         }
         InReview => {
             triggers.push(HumanApproval);
             triggers.push(HumanRejection);
+            triggers.push(EpicAutoComplete);
             triggers.push(Block);
             triggers.push(Cancel);
         }
@@ -258,6 +273,26 @@ mod tests {
     fn cancel_from_terminal_fails() {
         assert!(transition(Done, &Cancel).is_err());
         assert!(transition(Cancelled, &Cancel).is_err());
+    }
+
+    #[test]
+    fn epic_auto_complete_from_any_approved_status() {
+        for status in [Approved, Ready, InProgress, InReview] {
+            assert_eq!(
+                transition(status, &EpicAutoComplete).unwrap(),
+                Done,
+                "epic auto-complete from {status}"
+            );
+        }
+    }
+
+    #[test]
+    fn epic_auto_complete_from_terminal_or_blocked_fails() {
+        assert!(transition(Done, &EpicAutoComplete).is_err());
+        assert!(transition(Cancelled, &EpicAutoComplete).is_err());
+        assert!(transition(Blocked, &EpicAutoComplete).is_err());
+        // A proposed epic has not been approved — no auto-completion.
+        assert!(transition(Proposed, &EpicAutoComplete).is_err());
     }
 
     #[test]

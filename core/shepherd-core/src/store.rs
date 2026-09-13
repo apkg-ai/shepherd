@@ -4,12 +4,12 @@
 //! All invariant enforcement (lifecycle, DAG, lease) is delegated to the
 //! pure-logic modules and enforced within transactions here.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 
 use chrono::{DateTime, TimeDelta, Utc};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use sqlx::{Row, SqlitePool};
+use sqlx::{Connection, Row, SqlitePool};
 
 use crate::bundle;
 use crate::dag;
@@ -115,11 +115,207 @@ impl Store {
 
     /// Run all pending migrations.
     pub async fn migrate(&self) -> Result<()> {
+        // The epic-type rebuild was migration 20260913000001. It moved to
+        // `migrate_epic_type` (below) because the rebuild cannot run inside
+        // sqlx's per-migration transaction — `PRAGMA foreign_keys` is a
+        // no-op within a transaction, so `DROP TABLE tasks` would fail on
+        // any populated database. Databases created from the experimental
+        // branch still carry the stale record; remove it so migration
+        // validation does not fail with VersionMissing. No-op elsewhere.
+        let has_migrations_table: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = '_sqlx_migrations'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        if has_migrations_table > 0 {
+            sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 20260913000001")
+                .execute(&self.pool)
+                .await?;
+        }
+
         sqlx::migrate!("./migrations")
             .run(&self.pool)
             .await
             .map_err(|e| Error::Internal(format!("migration failed: {e}")))?;
+        self.migrate_epic_type().await?;
         Ok(())
+    }
+
+    /// Widen the tasks `type` CHECK to include 'epic' (issue #53).
+    ///
+    /// SQLite cannot alter a CHECK constraint — the tasks table must be
+    /// rebuilt — and the rebuild cannot run inside sqlx's per-migration
+    /// transaction: `PRAGMA foreign_keys` is a no-op within a transaction,
+    /// so `DROP TABLE tasks` would violate the immediate FKs from
+    /// relations, claims, sessions and knowledge_items on every populated
+    /// database. The rebuild therefore runs here, on one pooled
+    /// connection, with FK enforcement genuinely disabled — the pragma
+    /// takes effect because it runs *before* the transaction opens — and
+    /// the rebuild itself wrapped in a transaction for all-or-nothing
+    /// crash safety.
+    ///
+    /// Idempotent: skips when the CHECK already includes 'epic'.
+    async fn migrate_epic_type(&self) -> Result<()> {
+        let Some(schema) = sqlx::query_scalar::<sqlx::Sqlite, String>(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'",
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(()); // no tasks table yet — nothing to widen
+        };
+        if schema.contains("'epic'") {
+            return Ok(()); // CHECK already widened
+        }
+
+        let mut conn = self.pool.acquire().await?;
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *conn)
+            .await?;
+
+        let rebuild = async {
+            let mut tx = conn.begin().await?;
+
+            sqlx::query(
+                "CREATE TABLE tasks_new (
+                    id                  TEXT    PRIMARY KEY NOT NULL,
+                    project_id          TEXT    NOT NULL REFERENCES projects(id),
+                    title               TEXT    NOT NULL,
+                    description         TEXT    NOT NULL DEFAULT '',
+                    type                TEXT    NOT NULL
+                        CHECK (type IN ('code', 'question', 'refactor', 'review', 'research', 'epic')),
+                    status              TEXT    NOT NULL DEFAULT 'proposed'
+                        CHECK (status IN ('proposed', 'approved', 'ready', 'in_progress',
+                                          'in_review', 'done', 'blocked', 'cancelled')),
+                    metadata            TEXT    NOT NULL DEFAULT '{}',
+                    assignee            TEXT,
+                    graph_role          TEXT    NOT NULL DEFAULT '[]',
+                    graph_role_explicit INTEGER NOT NULL DEFAULT 0,
+                    attempt_count       INTEGER NOT NULL DEFAULT 0,
+                    blocked_from_status TEXT
+                        CHECK (blocked_from_status IS NULL OR
+                               blocked_from_status IN ('proposed', 'approved', 'ready',
+                                                       'in_progress', 'in_review')),
+                    block_reason        TEXT,
+                    deleted_at          TEXT,
+                    created_at          TEXT    NOT NULL,
+                    updated_at          TEXT    NOT NULL
+                ) STRICT",
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query("INSERT INTO tasks_new SELECT * FROM tasks")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("DROP TABLE tasks").execute(&mut *tx).await?;
+            sqlx::query("ALTER TABLE tasks_new RENAME TO tasks")
+                .execute(&mut *tx)
+                .await?;
+
+            // Re-create the tasks indexes (DROP TABLE dropped them).
+            sqlx::query(
+                "CREATE INDEX idx_tasks_by_project
+                    ON tasks(project_id, deleted_at, created_at DESC, id DESC)",
+            )
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX idx_tasks_by_status
+                    ON tasks(project_id, status, deleted_at)",
+            )
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX idx_tasks_by_type
+                    ON tasks(project_id, type, deleted_at)",
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            tx.commit().await
+        };
+        let result = rebuild.await;
+
+        // Restore FK enforcement on this pooled connection whatever happened
+        // above — a connection with FKs disabled must not leak back into the
+        // pool.
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *conn)
+            .await?;
+        result?;
+
+        // Actually verify: `PRAGMA foreign_key_check` returns one row per
+        // violation — an empty result is the only acceptable outcome.
+        let violations = sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&mut *conn)
+            .await?;
+        if !violations.is_empty() {
+            return Err(Error::Internal(format!(
+                "epic-type rebuild introduced {} foreign key violation(s)",
+                violations.len()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Post-migration integrity check. Warns (via stderr) about data
+    /// issues that would have been prevented by validations added later —
+    /// e.g. decomposition cycles that predate the cycle-detection check.
+    /// Log-only: does not block startup or modify data.
+    pub async fn check_integrity(&self) {
+        // Decomposition cycles: the cycle check was added in issue #53.
+        // Earlier data (or hand-edited databases) could contain cycles.
+        let rows = sqlx::query(
+            "SELECT r.source_task_id, r.target_task_id
+             FROM relations r
+             JOIN tasks t1 ON t1.id = r.source_task_id AND t1.deleted_at IS NULL
+             JOIN tasks t2 ON t2.id = r.target_task_id AND t2.deleted_at IS NULL
+             WHERE r.type = 'decomposition'",
+        )
+        .fetch_all(&self.pool)
+        .await;
+
+        match rows {
+            Ok(rows) => {
+                let mut edges: Vec<(TaskId, TaskId)> = Vec::new();
+                for row in &rows {
+                    // A corrupt relation row is exactly the data this check
+                    // exists to surface — warn loudly, never silently skip.
+                    let src: uuid::Uuid = match row.get::<String, _>("source_task_id").parse() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            eprintln!(
+                                "WARNING: integrity check: unparseable source_task_id in relations: {e}"
+                            );
+                            continue;
+                        }
+                    };
+                    let tgt: uuid::Uuid = match row.get::<String, _>("target_task_id").parse() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            eprintln!(
+                                "WARNING: integrity check: unparseable target_task_id in relations: {e}"
+                            );
+                            continue;
+                        }
+                    };
+                    edges.push((TaskId::from_uuid(src), TaskId::from_uuid(tgt)));
+                }
+                if dag::has_cycle(&edges) {
+                    eprintln!(
+                        "WARNING: decomposition relations contain a cycle. \
+                         Epic auto-completion may not work correctly until \
+                         the cyclic edges are removed."
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("WARNING: integrity check failed: {e}");
+            }
+        }
     }
 
     // ── Projects ─────────────────────────────────────────────────────────
@@ -510,9 +706,12 @@ impl Store {
         }
 
         // Find dependents BEFORE soft-deleting (so edges are still visible).
+        // Soft-deleted dependents are skipped, not errored: their relation
+        // rows survive deletion but they can no longer transition.
         let dependent_ids: Vec<String> = sqlx::query_scalar(
-            "SELECT source_task_id FROM relations
-             WHERE type = 'depends_on' AND target_task_id = ?",
+            "SELECT r.source_task_id FROM relations r
+             JOIN tasks t ON t.id = r.source_task_id AND t.deleted_at IS NULL
+             WHERE r.type = 'depends_on' AND r.target_task_id = ?",
         )
         .bind(id.to_string())
         .fetch_all(&self.pool)
@@ -619,6 +818,7 @@ impl Store {
              FROM tasks t
              WHERE t.project_id = ?
                AND t.status = 'ready'
+               AND t.type != 'epic'
                AND t.deleted_at IS NULL
                AND NOT EXISTS (
                    SELECT 1 FROM claims c
@@ -687,7 +887,14 @@ impl Store {
 
         match new_status {
             // Auto-ready: check if all deps are done.
-            TaskStatus::Approved => self.try_auto_ready(project_id, id).await?,
+            TaskStatus::Approved => {
+                self.try_auto_ready(project_id, id).await?;
+                // An epic's children may have finished before approval —
+                // complete it now if they (and its deps) are all done.
+                if self.try_epic_auto_complete(project_id, id).await? {
+                    self.auto_ready_cascade(project_id, id).await?;
+                }
+            }
             // Review approval completed the task — ready its dependents.
             TaskStatus::Done => self.auto_ready_cascade(project_id, id).await?,
             _ => {}
@@ -707,7 +914,9 @@ impl Store {
 
         // Dependencies may have been added while in review; a rejected task
         // only returns to ready when they are all done (invariant 4).
-        if new_status == TaskStatus::Ready && !self.all_deps_done(project_id, id).await? {
+        if new_status == TaskStatus::Ready
+            && !self.all_deps_done(project_id, id, &self.pool).await?
+        {
             new_status = TaskStatus::Approved;
         }
 
@@ -794,14 +1003,18 @@ impl Store {
 
         // Dependencies may have been added while blocked. If restoring to
         // Ready but deps aren't all done, demote to Approved instead.
-        if new_status == TaskStatus::Ready && !self.all_deps_done(project_id, id).await? {
+        if new_status == TaskStatus::Ready
+            && !self.all_deps_done(project_id, id, &self.pool).await?
+        {
             new_status = TaskStatus::Approved;
         }
 
         // Dependencies may also have *completed* while blocked — the
         // auto-ready cascade skips blocked tasks. Promote so the task does
         // not sit approved-with-deps-done forever (invariant 4).
-        if new_status == TaskStatus::Approved && self.all_deps_done(project_id, id).await? {
+        if new_status == TaskStatus::Approved
+            && self.all_deps_done(project_id, id, &self.pool).await?
+        {
             new_status = TaskStatus::Ready;
         }
 
@@ -835,6 +1048,15 @@ impl Store {
             old_status: task.status,
             new_status,
         });
+
+        // An epic's children may have finished while it was blocked — the
+        // cascade skips blocked tasks, so complete it now if they (and its
+        // deps) are all done.
+        if matches!(new_status, TaskStatus::Approved | TaskStatus::Ready)
+            && self.try_epic_auto_complete(project_id, id).await?
+        {
+            self.auto_ready_cascade(project_id, id).await?;
+        }
 
         self.get_task(project_id, id).await
     }
@@ -932,6 +1154,16 @@ impl Store {
                         detail: format!(
                             "task {} already has a decomposition parent",
                             input.target_task_id
+                        ),
+                    });
+                }
+                // Cycle detection: reuse the same pure function used by
+                // depends_on — decomposition edges are (parent, child).
+                if dag::would_create_cycle(&decomp_edges, source_task_id, input.target_task_id) {
+                    return Err(Error::DecompositionViolation {
+                        detail: format!(
+                            "adding decomposition from {} to {} would create a cycle",
+                            source_task_id, input.target_task_id
                         ),
                     });
                 }
@@ -1093,6 +1325,15 @@ impl Store {
         lease::validate_ttl(input.ttl_seconds)?;
 
         let task = self.get_task(project_id, task_id).await?;
+
+        // Epics are containers, not work items: they complete via the
+        // decomposition cascade, never via the claim/session flow.
+        if task.task_type == TaskType::Epic {
+            return Err(Error::ValidationError {
+                detail: "epics are not claimable — they complete when their decomposition children are done".into(),
+                errors: vec![],
+            });
+        }
 
         // Claim conflict outranks status: a claimed task is also not ready,
         // but the caller should learn someone else holds the lease.
@@ -1313,7 +1554,7 @@ impl Store {
 
         // Return task to ready (or approved if new deps were added).
         if task.status == TaskStatus::InProgress {
-            let target = if self.all_deps_done(project_id, task_id).await? {
+            let target = if self.all_deps_done(project_id, task_id, &self.pool).await? {
                 TaskStatus::Ready
             } else {
                 TaskStatus::Approved
@@ -1368,7 +1609,7 @@ impl Store {
 
             if did_release && status == TaskStatus::InProgress {
                 // Check deps — new ones may have been added while claimed.
-                let target = if self.all_deps_done(project_id, task_id).await? {
+                let target = if self.all_deps_done(project_id, task_id, &self.pool).await? {
                     TaskStatus::Ready
                 } else {
                     TaskStatus::Approved
@@ -1421,7 +1662,7 @@ impl Store {
                 .map(ProjectId::from_uuid)
                 .map_err(|e| Error::Internal(format!("bad UUID: {e}")))?;
 
-            let target = if self.all_deps_done(project_id, task_id).await? {
+            let target = if self.all_deps_done(project_id, task_id, &self.pool).await? {
                 TaskStatus::Ready
             } else {
                 TaskStatus::Approved
@@ -1557,7 +1798,7 @@ impl Store {
                 // Task returns to ready/approved (failure is session
                 // outcome, not task state). Check deps because new ones
                 // may have been added while the task was in_progress.
-                let target = if self.all_deps_done(project_id, task_id).await? {
+                let target = if self.all_deps_done(project_id, task_id, &self.pool).await? {
                     TaskStatus::Ready
                 } else {
                     TaskStatus::Approved
@@ -2248,7 +2489,7 @@ impl Store {
             return Ok(());
         }
 
-        if self.all_deps_done(project_id, task_id).await? {
+        if self.all_deps_done(project_id, task_id, &self.pool).await? {
             let new_status = lifecycle::transition(task.status, &Trigger::AutoReady)?;
             self.set_task_status(project_id, task_id, task.status, new_status)
                 .await?;
@@ -2257,22 +2498,100 @@ impl Store {
         Ok(())
     }
 
-    /// When a task reaches Done, scan its dependents and auto-ready those
-    /// whose deps are now all done.
+    /// When a task reaches Done, cascade: auto-ready depends_on dependents
+    /// whose deps are now all done, and walk up the decomposition tree
+    /// auto-completing parent epics whose children are now all Done.
+    ///
+    /// Epics that complete anywhere in the cascade join a work queue —
+    /// their own dependents must be readied and their own parents checked,
+    /// the same as if they had completed directly. Every queue entry
+    /// corresponds to a task transitioning to Done, which happens at most
+    /// once per task, so the cascade terminates.
     async fn auto_ready_cascade(
         &self,
         project_id: ProjectId,
         completed_task_id: TaskId,
     ) -> Result<()> {
-        // Find tasks that depend on the completed task.
+        let mut queue = VecDeque::new();
+        queue.push_back(completed_task_id);
+
+        while let Some(completed) = queue.pop_front() {
+            // Auto-ready depends_on dependents; epic dependents whose
+            // children are all done complete and join the queue.
+            for epic_id in self.auto_ready_dependents(project_id, completed).await? {
+                queue.push_back(epic_id);
+            }
+
+            // Walk up the decomposition parent chain: if a parent epic has
+            // all children Done, auto-complete it and process its dependents
+            // too, then step to the next ancestor.
+            let mut current = completed;
+            // Defense-in-depth: cap iterations in case cycle validation
+            // missed something (create_relation prevents this, but
+            // belt-and-suspenders).
+            for _ in 0..100 {
+                let Some(parent_id) = self.decomposition_parent(current).await? else {
+                    break;
+                };
+
+                if !self.try_epic_auto_complete(project_id, parent_id).await? {
+                    break; // Parent didn't complete — no further cascading.
+                }
+
+                // Parent did complete — auto-ready its depends_on dependents.
+                for epic_id in self.auto_ready_dependents(project_id, parent_id).await? {
+                    queue.push_back(epic_id);
+                }
+
+                current = parent_id;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// The decomposition parent of a task, if any. Soft-deleted parents are
+    /// invisible: `delete_task_internal` leaves relation rows behind, and a
+    /// deleted parent must neither complete nor break the cascade.
+    async fn decomposition_parent(&self, task_id: TaskId) -> Result<Option<TaskId>> {
+        let row = sqlx::query(
+            "SELECT r.source_task_id FROM relations r
+             JOIN tasks t ON t.id = r.source_task_id AND t.deleted_at IS NULL
+             WHERE r.type = 'decomposition' AND r.target_task_id = ?",
+        )
+        .bind(task_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            row.get::<String, _>("source_task_id")
+                .parse()
+                .map(TaskId::from_uuid)
+                .map_err(|e| Error::Internal(format!("bad UUID: {e}")))
+        })
+        .transpose()
+    }
+
+    /// Auto-ready tasks whose depends_on targets are all Done. Returns the
+    /// epics among them that auto-completed, so the caller can cascade —
+    /// their dependents and parents need processing too.
+    async fn auto_ready_dependents(
+        &self,
+        project_id: ProjectId,
+        completed_task_id: TaskId,
+    ) -> Result<Vec<TaskId>> {
+        // Soft-deleted dependents are skipped, not errored: their relation
+        // rows survive deletion but they can no longer transition.
         let rows = sqlx::query(
-            "SELECT source_task_id FROM relations
-             WHERE type = 'depends_on' AND target_task_id = ?",
+            "SELECT r.source_task_id FROM relations r
+             JOIN tasks t ON t.id = r.source_task_id AND t.deleted_at IS NULL
+             WHERE r.type = 'depends_on' AND r.target_task_id = ?",
         )
         .bind(completed_task_id.to_string())
         .fetch_all(&self.pool)
         .await?;
 
+        let mut completed_epics = Vec::new();
         for row in &rows {
             let dep_id: TaskId = row
                 .get::<String, _>("source_task_id")
@@ -2281,13 +2600,165 @@ impl Store {
                 .map_err(|e| Error::Internal(format!("bad UUID: {e}")))?;
 
             self.try_auto_ready(project_id, dep_id).await?;
+            if self.try_epic_auto_complete(project_id, dep_id).await? {
+                completed_epics.push(dep_id);
+            }
         }
 
-        Ok(())
+        Ok(completed_epics)
+    }
+
+    /// Check if all decomposition children of a task are Done.
+    async fn all_children_done<'e, E>(&self, task_id: TaskId, exec: E) -> Result<bool>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
+        let row = sqlx::query(
+            "SELECT COUNT(*) as cnt FROM relations r
+             JOIN tasks t ON t.id = r.target_task_id
+             WHERE r.source_task_id = ?
+               AND r.type = 'decomposition'
+               AND t.deleted_at IS NULL
+               AND t.status != 'done'",
+        )
+        .bind(task_id.to_string())
+        .fetch_one(exec)
+        .await?;
+
+        let undone: i64 = row.get("cnt");
+        Ok(undone == 0)
+    }
+
+    /// Check if a task has any decomposition children at all.
+    async fn has_children<'e, E>(&self, task_id: TaskId, exec: E) -> Result<bool>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
+        let row = sqlx::query(
+            "SELECT COUNT(*) as cnt FROM relations r
+             JOIN tasks t ON t.id = r.target_task_id
+             WHERE r.source_task_id = ?
+               AND r.type = 'decomposition'
+               AND t.deleted_at IS NULL",
+        )
+        .bind(task_id.to_string())
+        .fetch_one(exec)
+        .await?;
+
+        let count: i64 = row.get("cnt");
+        Ok(count > 0)
+    }
+
+    /// If this task is an epic whose decomposition children and depends_on
+    /// prerequisites are all Done, auto-complete it. Returns `true` if the
+    /// epic transitioned (caller should cascade).
+    ///
+    /// The checks and the status write run in one transaction that takes
+    /// SQLite's write lock up front (same trick as claim_task /
+    /// create_relation): two concurrent completions of the last children
+    /// serialize, so neither can observe a stale "not all done" and leave
+    /// the epic stuck.
+    async fn try_epic_auto_complete(&self, project_id: ProjectId, epic_id: TaskId) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query("UPDATE projects SET name = name WHERE id = ?")
+            .bind(project_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+
+        let row = sqlx::query(
+            "SELECT type, status FROM tasks
+             WHERE id = ? AND project_id = ? AND deleted_at IS NULL",
+        )
+        .bind(epic_id.to_string())
+        .bind(project_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            return Ok(false);
+        };
+        let task_type: TaskType = row
+            .get::<String, _>("type")
+            .parse()
+            .map_err(|e| Error::Internal(format!("bad task type: {e}")))?;
+        let status: TaskStatus = row
+            .get::<String, _>("status")
+            .parse()
+            .map_err(|e| Error::Internal(format!("bad task status: {e}")))?;
+
+        // Only epics auto-complete.
+        if task_type != TaskType::Epic {
+            return Ok(false);
+        }
+
+        // An empty epic (no children) does not auto-complete.
+        if !self.has_children(epic_id, &mut *tx).await? {
+            return Ok(false);
+        }
+
+        // Only eligible statuses auto-complete: terminal, blocked and
+        // proposed epics do not (a proposed epic has not been approved).
+        if !matches!(
+            status,
+            TaskStatus::Approved
+                | TaskStatus::Ready
+                | TaskStatus::InProgress
+                | TaskStatus::InReview
+        ) {
+            return Ok(false);
+        }
+
+        // All decomposition children done, and all depends_on prerequisites
+        // done — an epic must not complete while its own dependencies are
+        // unmet.
+        if !self.all_children_done(epic_id, &mut *tx).await?
+            || !self.all_deps_done(project_id, epic_id, &mut *tx).await?
+        {
+            return Ok(false);
+        }
+
+        // All children done — auto-complete this epic.
+        let new_status = lifecycle::transition(status, &Trigger::EpicAutoComplete)?;
+        let now = Utc::now();
+        let result = sqlx::query(
+            "UPDATE tasks SET status = ?, updated_at = ?
+             WHERE id = ? AND project_id = ? AND deleted_at IS NULL AND status = ?",
+        )
+        .bind(new_status.to_string())
+        .bind(now.to_rfc3339())
+        .bind(epic_id.to_string())
+        .bind(project_id.to_string())
+        .bind(status.to_string())
+        .execute(&mut *tx)
+        .await?;
+        let changed = result.rows_affected() == 1;
+
+        tx.commit().await?;
+
+        // No phantom events: a 0-row update must not broadcast a status
+        // change that didn't happen (same discipline as set_task_status).
+        if changed {
+            self.emit(DomainEvent::TaskStatusChanged {
+                project_id,
+                task_id: epic_id,
+                old_status: status,
+                new_status,
+            });
+        }
+
+        Ok(changed)
     }
 
     /// Check if all `depends_on` targets of a task are Done.
-    async fn all_deps_done(&self, _project_id: ProjectId, task_id: TaskId) -> Result<bool> {
+    async fn all_deps_done<'e, E>(
+        &self,
+        _project_id: ProjectId,
+        task_id: TaskId,
+        exec: E,
+    ) -> Result<bool>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
         let row = sqlx::query(
             "SELECT COUNT(*) as cnt FROM relations r
              JOIN tasks t ON t.id = r.target_task_id
@@ -2297,7 +2768,7 @@ impl Store {
                AND t.status != 'done'",
         )
         .bind(task_id.to_string())
-        .fetch_one(&self.pool)
+        .fetch_one(exec)
         .await?;
 
         let undone: i64 = row.get("cnt");
@@ -3199,6 +3670,759 @@ mod tests {
         // t2 should now be ready (auto-readied by cascade).
         let t2 = store.get_task(p.id, t2.id).await.unwrap();
         assert_eq!(t2.status, TaskStatus::Ready);
+    }
+
+    /// Helper: complete a task via claim + session report (review gate off).
+    async fn complete_task(store: &Store, project_id: ProjectId, task_id: TaskId) {
+        store
+            .claim_task(
+                project_id,
+                task_id,
+                &ClaimRequest {
+                    identity: test_identity(),
+                    ttl_seconds: 300,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        store
+            .create_session(
+                project_id,
+                task_id,
+                &SessionReport {
+                    identity: test_identity(),
+                    started_at: Utc::now(),
+                    ended_at: Utc::now(),
+                    outcome: SessionOutcome::Succeeded,
+                    failure_reason: None,
+                    summary: Some("done".into()),
+                    decisions: None,
+                    knowledge_items: None,
+                    artifacts: None,
+                },
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn epic_auto_completes_when_all_children_done() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "epic-test".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+
+        let epic = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "epic".into(),
+                    description: None,
+                    task_type: TaskType::Epic,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let t1 = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "sub1".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let t2 = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "sub2".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Wire decomposition: epic → t1, epic → t2.
+        store
+            .create_relation(
+                p.id,
+                epic.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: t1.id,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .create_relation(
+                p.id,
+                epic.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: t2.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Complete t1 — epic should NOT auto-complete yet.
+        complete_task(&store, p.id, t1.id).await;
+        let epic_state = store.get_task(p.id, epic.id).await.unwrap();
+        assert_ne!(
+            epic_state.status,
+            TaskStatus::Done,
+            "epic should not be done with 1 of 2 children"
+        );
+
+        // Complete t2 — epic should auto-complete.
+        complete_task(&store, p.id, t2.id).await;
+        let epic_state = store.get_task(p.id, epic.id).await.unwrap();
+        assert_eq!(
+            epic_state.status,
+            TaskStatus::Done,
+            "epic should auto-complete"
+        );
+    }
+
+    #[tokio::test]
+    async fn nested_epic_cascade() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "nested".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+
+        // Epic A → [subtask X, Epic B → [subtask Y]]
+        let epic_a = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "A".into(),
+                    description: None,
+                    task_type: TaskType::Epic,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let epic_b = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "B".into(),
+                    description: None,
+                    task_type: TaskType::Epic,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let x = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "X".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let y = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "Y".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // A → X, A → B, B → Y
+        store
+            .create_relation(
+                p.id,
+                epic_a.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: x.id,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .create_relation(
+                p.id,
+                epic_a.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: epic_b.id,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .create_relation(
+                p.id,
+                epic_b.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: y.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Complete X — A not done (B still pending).
+        complete_task(&store, p.id, x.id).await;
+        assert_ne!(
+            store.get_task(p.id, epic_a.id).await.unwrap().status,
+            TaskStatus::Done
+        );
+
+        // Complete Y — B auto-completes, then A auto-completes.
+        complete_task(&store, p.id, y.id).await;
+        assert_eq!(
+            store.get_task(p.id, epic_b.id).await.unwrap().status,
+            TaskStatus::Done
+        );
+        assert_eq!(
+            store.get_task(p.id, epic_a.id).await.unwrap().status,
+            TaskStatus::Done
+        );
+    }
+
+    #[tokio::test]
+    async fn epic_completion_triggers_dependency_readiness() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "dep-chain".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+
+        // Epic E → [subtask S]. Task T depends_on E.
+        let epic = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "E".into(),
+                    description: None,
+                    task_type: TaskType::Epic,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let sub = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "S".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let dep = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "T".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        store
+            .create_relation(
+                p.id,
+                epic.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: sub.id,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .create_relation(
+                p.id,
+                dep.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: epic.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        // T is approved (waiting on E).
+        assert_eq!(
+            store.get_task(p.id, dep.id).await.unwrap().status,
+            TaskStatus::Approved
+        );
+
+        // Complete S → E auto-completes → T auto-readies.
+        complete_task(&store, p.id, sub.id).await;
+        assert_eq!(
+            store.get_task(p.id, epic.id).await.unwrap().status,
+            TaskStatus::Done
+        );
+        assert_eq!(
+            store.get_task(p.id, dep.id).await.unwrap().status,
+            TaskStatus::Ready
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_child_blocks_epic_auto_completion() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "cancel-test".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+
+        let epic = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "epic".into(),
+                    description: None,
+                    task_type: TaskType::Epic,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let t1 = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "sub1".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let t2 = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "sub2".into(),
+                    description: None,
+                    task_type: TaskType::Code,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        store
+            .create_relation(
+                p.id,
+                epic.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: t1.id,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .create_relation(
+                p.id,
+                epic.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: t2.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Complete t1, cancel t2.
+        complete_task(&store, p.id, t1.id).await;
+        store.cancel_task(p.id, t2.id).await.unwrap();
+
+        // Epic should NOT auto-complete — cancelled child is not "done."
+        let epic_state = store.get_task(p.id, epic.id).await.unwrap();
+        assert_ne!(
+            epic_state.status,
+            TaskStatus::Done,
+            "cancelled child should block epic auto-completion"
+        );
+    }
+
+    /// Soft-deleting a decomposition parent leaves the relation row behind;
+    /// completing the child must not walk up to the deleted parent (this
+    /// previously errored the whole session report with NotFound).
+    #[tokio::test]
+    async fn soft_deleted_parent_does_not_break_completion() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "deleted-parent".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+
+        let mk = |title: &str, tt: TaskType, status: TaskStatus| TaskCreate {
+            title: title.into(),
+            description: None,
+            task_type: tt,
+            status: Some(status),
+            metadata: None,
+            assignee: None,
+            graph_role: None,
+        };
+
+        let epic = store
+            .create_task(p.id, &mk("epic", TaskType::Epic, TaskStatus::Approved))
+            .await
+            .unwrap();
+        let child = store
+            .create_task(p.id, &mk("child", TaskType::Code, TaskStatus::Approved))
+            .await
+            .unwrap();
+
+        store
+            .create_relation(
+                p.id,
+                epic.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: child.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        store.delete_task(p.id, epic.id).await.unwrap();
+
+        // Completing the child must succeed despite the orphaned relation
+        // row pointing at the soft-deleted parent.
+        complete_task(&store, p.id, child.id).await;
+        let child_after = store.get_task(p.id, child.id).await.unwrap();
+        assert_eq!(child_after.status, TaskStatus::Done);
+    }
+
+    /// An epic must not auto-complete while its own depends_on
+    /// prerequisites are unmet; it completes when the prerequisite does.
+    #[tokio::test]
+    async fn epic_with_unmet_dependency_waits_for_it() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "epic-dep".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+
+        let mk = |title: &str, tt: TaskType| TaskCreate {
+            title: title.into(),
+            description: None,
+            task_type: tt,
+            status: Some(TaskStatus::Approved),
+            metadata: None,
+            assignee: None,
+            graph_role: None,
+        };
+
+        let epic = store
+            .create_task(p.id, &mk("epic", TaskType::Epic))
+            .await
+            .unwrap();
+        let sub = store
+            .create_task(p.id, &mk("sub", TaskType::Code))
+            .await
+            .unwrap();
+        let prereq = store
+            .create_task(p.id, &mk("prereq", TaskType::Code))
+            .await
+            .unwrap();
+
+        store
+            .create_relation(
+                p.id,
+                epic.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: sub.id,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .create_relation(
+                p.id,
+                epic.id,
+                &RelationCreate {
+                    relation_type: RelationType::DependsOn,
+                    target_task_id: prereq.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        // All children done, but the epic's prerequisite is not.
+        complete_task(&store, p.id, sub.id).await;
+        let epic_state = store.get_task(p.id, epic.id).await.unwrap();
+        assert_ne!(
+            epic_state.status,
+            TaskStatus::Done,
+            "epic must not complete while its depends_on prerequisite is unmet"
+        );
+
+        // The prerequisite completes → the epic completes via the cascade.
+        complete_task(&store, p.id, prereq.id).await;
+        let epic_state = store.get_task(p.id, epic.id).await.unwrap();
+        assert_eq!(epic_state.status, TaskStatus::Done);
+    }
+
+    /// A proposed epic does not auto-complete; approving it (with children
+    /// and deps already done) completes it.
+    #[tokio::test]
+    async fn proposed_epic_completes_on_approval() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "proposed-epic".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+
+        let mk = |title: &str, tt: TaskType, status: TaskStatus| TaskCreate {
+            title: title.into(),
+            description: None,
+            task_type: tt,
+            status: Some(status),
+            metadata: None,
+            assignee: None,
+            graph_role: None,
+        };
+
+        let epic = store
+            .create_task(p.id, &mk("epic", TaskType::Epic, TaskStatus::Proposed))
+            .await
+            .unwrap();
+        let sub = store
+            .create_task(p.id, &mk("sub", TaskType::Code, TaskStatus::Approved))
+            .await
+            .unwrap();
+
+        store
+            .create_relation(
+                p.id,
+                epic.id,
+                &RelationCreate {
+                    relation_type: RelationType::Decomposition,
+                    target_task_id: sub.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Children finish while the epic is still proposed.
+        complete_task(&store, p.id, sub.id).await;
+        let epic_state = store.get_task(p.id, epic.id).await.unwrap();
+        assert_eq!(
+            epic_state.status,
+            TaskStatus::Proposed,
+            "a proposed epic must not auto-complete"
+        );
+
+        // Approval completes it — children and deps are all done.
+        store.approve_task(p.id, epic.id).await.unwrap();
+        let epic_state = store.get_task(p.id, epic.id).await.unwrap();
+        assert_eq!(epic_state.status, TaskStatus::Done);
+    }
+
+    /// Epics are containers, not work items — they cannot be claimed.
+    #[tokio::test]
+    async fn claim_task_rejects_epic() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "claim-epic".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+
+        let epic = store
+            .create_task(
+                p.id,
+                &TaskCreate {
+                    title: "epic".into(),
+                    description: None,
+                    task_type: TaskType::Epic,
+                    status: Some(TaskStatus::Approved),
+                    metadata: None,
+                    assignee: None,
+                    graph_role: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Approved with no deps → auto-readied to Ready.
+        let epic = store.get_task(p.id, epic.id).await.unwrap();
+        assert_eq!(epic.status, TaskStatus::Ready);
+
+        let result = store
+            .claim_task(
+                p.id,
+                epic.id,
+                &ClaimRequest {
+                    identity: test_identity(),
+                    ttl_seconds: 300,
+                },
+                Utc::now(),
+            )
+            .await;
+        assert!(
+            matches!(result, Err(Error::ValidationError { .. })),
+            "claiming an epic must be rejected"
+        );
+    }
+
+    /// next_task offers work items, never epics.
+    #[tokio::test]
+    async fn next_task_skips_epics() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "next-epic".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+
+        let mk = |title: &str, tt: TaskType| TaskCreate {
+            title: title.into(),
+            description: None,
+            task_type: tt,
+            status: Some(TaskStatus::Approved),
+            metadata: None,
+            assignee: None,
+            graph_role: None,
+        };
+
+        let epic = store
+            .create_task(p.id, &mk("epic", TaskType::Epic))
+            .await
+            .unwrap();
+        let work = store
+            .create_task(p.id, &mk("work", TaskType::Code))
+            .await
+            .unwrap();
+
+        // Both auto-readied to Ready (approved, no deps).
+        assert_eq!(
+            store.get_task(p.id, epic.id).await.unwrap().status,
+            TaskStatus::Ready
+        );
+        assert_eq!(
+            store.get_task(p.id, work.id).await.unwrap().status,
+            TaskStatus::Ready
+        );
+
+        let next = store.next_task(p.id).await.unwrap().unwrap();
+        assert_eq!(next.id, work.id, "next_task must skip epics");
     }
 
     #[tokio::test]
