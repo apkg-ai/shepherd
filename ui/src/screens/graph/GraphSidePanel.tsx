@@ -139,7 +139,15 @@ export function GraphSidePanel({
       {group("Depends on", dependsOn)}
       {group("Needed by", neededBy)}
 
-      <GraphSidePanelActions projectId={projectId} task={task} hasParent={parent !== undefined} />
+      {/* Keyed by task: the relation form's state (open mode, picked target,
+          error) must reset when the selection moves to another task — a
+          retained target would link the wrong task. */}
+      <GraphSidePanelActions
+        key={task.id}
+        projectId={projectId}
+        task={task}
+        hasParent={parent !== undefined}
+      />
 
       <footer className={styles.footer}>
         <Link to={`/projects/${projectId}/tasks/${task.id}`}>Open full detail</Link>

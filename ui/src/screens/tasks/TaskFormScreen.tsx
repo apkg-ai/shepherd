@@ -143,6 +143,10 @@ function TaskFormFields({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    // No double submits: afterCreate starts a second mutation (the relation
+    // link) during which createTask.isPending is already false — without this
+    // guard a second submit would create a duplicate task.
+    if (createTask.isPending || updateTask.isPending || createRelation.isPending) return;
     const metadata = validateMetadata(metadataText);
     if (!metadata.ok) {
       setErrors({ metadata: metadata.error });
@@ -292,7 +296,7 @@ function TaskFormFields({
           <Button
             type="submit"
             variant="primary"
-            busy={createTask.isPending || updateTask.isPending}
+            busy={createTask.isPending || updateTask.isPending || createRelation.isPending}
           >
             {isEdit ? "Save changes" : "Create task"}
           </Button>
