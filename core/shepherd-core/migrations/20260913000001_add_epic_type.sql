@@ -1,5 +1,15 @@
 -- Add 'epic' to the task type CHECK constraint.
 -- SQLite cannot ALTER CHECK constraints, so the table is rebuilt.
+--
+-- The rebuild requires PRAGMA foreign_keys = OFF because child tables
+-- (relations, claims, sessions, knowledge_items) reference tasks(id).
+-- With FKs on, DROP TABLE would fail on populated databases. The PRAGMA
+-- cannot be changed inside a transaction, so this migration runs outside
+-- one (sqlx's `-- no-transaction` is not needed for SQLite — sqlx already
+-- runs SQLite migrations outside transactions when the file contains
+-- multiple statements separated by semicolons).
+
+PRAGMA foreign_keys = OFF;
 
 CREATE TABLE tasks_new (
     id                  TEXT    PRIMARY KEY NOT NULL,
@@ -37,3 +47,8 @@ CREATE INDEX idx_tasks_by_status
     ON tasks(project_id, status, deleted_at);
 CREATE INDEX idx_tasks_by_type
     ON tasks(project_id, type, deleted_at);
+
+PRAGMA foreign_keys = ON;
+
+-- Verify no FK violations were introduced by the rebuild.
+PRAGMA foreign_key_check;

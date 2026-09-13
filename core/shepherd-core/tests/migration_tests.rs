@@ -238,6 +238,50 @@ async fn seeded_data_survives_remigration() {
     assert_eq!(count, 1, "data should survive re-migration");
 }
 
+/// The epic-type migration rebuilds the tasks table (DROP + RENAME).
+/// Tasks with FK-bearing children (relations, sessions, claims) must
+/// survive — the migration disables foreign_keys around the rebuild.
+#[tokio::test]
+async fn migration_preserves_tasks_with_relations() {
+    let store = Store::new_in_memory().await.unwrap();
+    let pool = store.pool();
+
+    seed_project_and_tasks(pool, "p1", &["t1", "t2"]).await;
+
+    // Add a relation so the tasks table has FK references from children.
+    sqlx::query(
+        "INSERT INTO relations (id, type, source_task_id, target_task_id, created_at)
+         VALUES ('r1', 'depends_on', 't1', 't2', '2026-09-07T00:00:00Z')",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+
+    // Re-run migrations (the epic-type migration rebuilds the tasks table).
+    sqlx::migrate!("./migrations").run(pool).await.unwrap();
+
+    // Tasks and relation survived.
+    let task_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(task_count, 2, "tasks should survive table rebuild");
+
+    let rel_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM relations")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(rel_count, 1, "relations should survive table rebuild");
+
+    // FK constraints still enforced after the rebuild.
+    let fk_ok: Vec<(String,)> =
+        sqlx::query_as("PRAGMA foreign_key_check")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert!(fk_ok.is_empty(), "no FK violations after rebuild");
+}
+
 // ── Test helpers ─────────────────────────────────────────────────────────
 
 async fn seed_project(pool: &sqlx::SqlitePool, pid: &str) {

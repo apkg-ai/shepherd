@@ -3600,6 +3600,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelled_child_blocks_epic_auto_completion() {
+        let store = Store::new_in_memory().await.unwrap();
+        let p = store
+            .create_project(&ProjectCreate {
+                name: "cancel-test".into(),
+                description: None,
+                settings: Some(ProjectSettings { review_gate: false }),
+            })
+            .await
+            .unwrap();
+
+        let epic = store.create_task(p.id, &TaskCreate {
+            title: "epic".into(), description: None, task_type: TaskType::Epic,
+            status: Some(TaskStatus::Approved), metadata: None, assignee: None, graph_role: None,
+        }).await.unwrap();
+
+        let t1 = store.create_task(p.id, &TaskCreate {
+            title: "sub1".into(), description: None, task_type: TaskType::Code,
+            status: Some(TaskStatus::Approved), metadata: None, assignee: None, graph_role: None,
+        }).await.unwrap();
+
+        let t2 = store.create_task(p.id, &TaskCreate {
+            title: "sub2".into(), description: None, task_type: TaskType::Code,
+            status: Some(TaskStatus::Approved), metadata: None, assignee: None, graph_role: None,
+        }).await.unwrap();
+
+        store.create_relation(p.id, epic.id, &RelationCreate {
+            relation_type: RelationType::Decomposition, target_task_id: t1.id,
+        }).await.unwrap();
+        store.create_relation(p.id, epic.id, &RelationCreate {
+            relation_type: RelationType::Decomposition, target_task_id: t2.id,
+        }).await.unwrap();
+
+        // Complete t1, cancel t2.
+        complete_task(&store, p.id, t1.id).await;
+        store.cancel_task(p.id, t2.id).await.unwrap();
+
+        // Epic should NOT auto-complete — cancelled child is not "done."
+        let epic_state = store.get_task(p.id, epic.id).await.unwrap();
+        assert_ne!(
+            epic_state.status,
+            TaskStatus::Done,
+            "cancelled child should block epic auto-completion"
+        );
+    }
+
+    #[tokio::test]
     async fn export_import_roundtrip() {
         let store = Store::new_in_memory().await.unwrap();
         let p = store
