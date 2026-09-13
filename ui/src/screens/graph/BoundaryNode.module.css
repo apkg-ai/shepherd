@@ -1,0 +1,18 @@
+/* Virtual Start/End circle anchoring the epic dependency flow. */
+.boundary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid var(--color-text-faint);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-1);
+}
+
+.label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}

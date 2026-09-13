@@ -39,77 +39,101 @@ describe("Graph screen", () => {
     });
   }
 
-  it("renders the decomposition lens by default with the status language", async () => {
+  it("defaults to the dependency flow lens showing only epics with Start/End", async () => {
     renderGraph();
 
+    // Default lens is flow; only the "Epic" (a parent) is visible,
+    // subtasks are filtered out. Virtual Start/End boundary nodes anchor the graph.
     expect(await screen.findByText("Epic")).toBeInTheDocument();
+    expect(screen.getByText("Start")).toBeInTheDocument();
+    expect(screen.getByText("End")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Dependency flow" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // Two boundary edges: Start→Epic and Epic→End (Epic has no prereqs and nothing depends on it).
+    await waitFor(() =>
+      expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(2),
+    );
+    // Epic carries a subtask count chip.
+    const node = screen.getByText("Epic").closest("article")!;
+    expect(within(node).getByText("2")).toBeInTheDocument();
+  });
+
+  it("shows the tree lens with expanded roots via ?lens=tree", async () => {
+    renderGraph("?lens=tree");
+
+    // Tree lens with auto-expanded root: children visible.
+    expect(await screen.findByText("Epic")).toBeInTheDocument();
+    expect(screen.getByText("Step one")).toBeInTheDocument();
+    expect(screen.getByText("Step two")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Decomposition" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
+    await waitFor(() =>
+      expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(2),
+    );
+  });
 
-    // Decomposition edges only: parent→child twice, no dependency edge.
-    expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(2);
+  it("collapses everything in tree lens when ?expanded= is explicitly empty", async () => {
+    renderGraph("?lens=tree&expanded=");
 
-    // Status language on the node: in_progress carries the claimant chip
-    // and the attempt badge.
+    expect(await screen.findByText("Epic")).toBeInTheDocument();
+    expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(0);
+    const node = screen.getByText("Epic").closest("article")!;
+    expect(
+      within(node).getByRole("button", { name: "Expand 2 subtasks" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders status language in tree lens", async () => {
+    renderGraph("?lens=tree");
+
+    expect(await screen.findByText("Step two")).toBeInTheDocument();
     const node = screen.getByText("Step two").closest("article")!;
     expect(node).toHaveAttribute("data-status", "in_progress");
     expect(within(node).getByText("Agent A")).toBeInTheDocument();
     expect(within(node).getByText("2 attempts")).toBeInTheDocument();
   });
 
-  it("toggles to the dependency flow lens", async () => {
+  it("toggles between flow and tree lenses", async () => {
     renderGraph();
 
+    // Start in flow lens (default).
     await screen.findByText("Epic");
-    await userEvent.click(screen.getByRole("tab", { name: "Dependency flow" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Decomposition" }));
 
-    // Only the depends_on edge remains, rendered start → end.
-    await waitFor(() => expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(1));
-    expect(screen.getByRole("tab", { name: "Dependency flow" })).toHaveAttribute(
+    // Tree lens shows all tasks (root auto-expanded).
+    expect(await screen.findByText("Step one")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Decomposition" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    // All tasks stay on the canvas, connected or not.
-    expect(screen.getByText("Epic")).toBeInTheDocument();
-  });
-
-  it("honors a ?lens=flow deep link", async () => {
-    renderGraph("?lens=flow");
-
-    await screen.findByText("Epic");
-    expect(screen.getByRole("tab", { name: "Dependency flow" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(1);
   });
 
   it("mirrors node selection to ?selected= so it survives a lens switch", async () => {
-    const { router } = renderGraph();
+    // Start in tree lens so subtasks are visible.
+    const { router } = renderGraph("?lens=tree");
 
-    // The node title button (getByTitle) — the side panel repeats the text.
     const title = await screen.findByTitle("Step two");
-    // fireEvent, not userEvent: userEvent's mousedown carries a null
-    // event.view in jsdom, which crashes d3-zoom's pan handler.
     fireEvent.click(title.closest("article")!);
     await waitFor(() =>
       expect(new URLSearchParams(router.state.location.search).get("selected")).toBe(step2.id),
     );
     expect(title.closest("article")).toHaveAttribute("data-selected", "true");
 
+    // Switch to flow lens — selected task persists in the side panel even
+    // though the node isn't visible (it's a subtask, not an epic).
     await userEvent.click(screen.getByRole("tab", { name: "Dependency flow" }));
     await waitFor(() =>
-      expect(screen.getByTitle("Step two").closest("article")).toHaveAttribute(
-        "data-selected",
-        "true",
-      ),
+      expect(new URLSearchParams(router.state.location.search).get("selected")).toBe(step2.id),
     );
   });
 
   it("opens a side panel on selection with the task's context", async () => {
-    renderGraph();
+    // Tree lens: children visible and selectable.
+    renderGraph("?lens=tree");
 
     fireEvent.click((await screen.findByTitle("Step two")).closest("article")!);
 
@@ -117,23 +141,19 @@ describe("Graph screen", () => {
     expect(within(panel).getByText("In progress")).toBeInTheDocument();
     expect(within(panel).getByText("Agent A")).toBeInTheDocument();
     expect(within(panel).getByText("2 attempts")).toBeInTheDocument();
-    // Relations resolve against the loaded graph.
     expect(within(panel).getByText("Parent")).toBeInTheDocument();
     expect(within(panel).getByRole("button", { name: "Epic" })).toBeInTheDocument();
     expect(within(panel).getByText("Depends on")).toBeInTheDocument();
-    // Full detail is one link away.
     expect(within(panel).getByRole("link", { name: "Open full detail" })).toHaveAttribute(
       "href",
       `/projects/${proj.id}/tasks/${step2.id}`,
     );
 
-    // Relation entries jump the selection across the graph.
     await userEvent.click(within(panel).getByRole("button", { name: "Step one" }));
     expect(
       await screen.findByRole("complementary", { name: "Selected task: Step one" }),
     ).toBeInTheDocument();
 
-    // Close clears ?selected= and the panel.
     await userEvent.click(screen.getByRole("button", { name: "Close panel" }));
     await waitFor(() =>
       expect(
@@ -142,7 +162,7 @@ describe("Graph screen", () => {
     );
   });
 
-  it("marks real flow boundaries but not edge-less tasks", async () => {
+  it("marks real flow boundaries in tree lens", async () => {
     const start = task({ project_id: proj.id, title: "Starter", graph_role: ["start"] });
     const milestone = task({
       project_id: proj.id,
@@ -155,7 +175,8 @@ describe("Graph screen", () => {
       status: "cancelled",
       graph_role: ["start", "end"],
     });
-    renderRoute(`/projects/${proj.id}`, {
+    // Use tree lens to see all tasks (these have no children → flow would hide them).
+    renderRoute(`/projects/${proj.id}?lens=tree`, {
       handlers: [
         getGetProjectMockHandler(proj),
         getListTasksMockHandler(page([start, milestone, isolated])),
@@ -169,7 +190,6 @@ describe("Graph screen", () => {
       within(screen.getByText("Milestone").closest("article")!).getByText("milestone"),
     ).toBeInTheDocument();
 
-    // start+end together is the derived default for edge-less tasks — no chips.
     const floater = screen.getByText("Floater").closest("article")!;
     expect(within(floater).queryByText("start")).not.toBeInTheDocument();
     expect(within(floater).queryByText("end")).not.toBeInTheDocument();
@@ -209,7 +229,8 @@ describe("Graph screen", () => {
 
   it("drains every page of the task and relation feeds", async () => {
     const more = task({ title: "From page two" });
-    renderRoute(`/projects/${proj.id}`, {
+    // Use tree lens so all tasks (including non-epics) are visible.
+    renderRoute(`/projects/${proj.id}?lens=tree`, {
       handlers: [
         getGetProjectMockHandler(proj),
         getListTasksMockHandler(({ request }) =>

@@ -11,29 +11,37 @@ import styles from "./GraphSidePanel.module.css";
  * its edges, each a jump to that node's own panel. Full task detail stays
  * one link away. Data comes from the graph's already-loaded feeds, so the
  * panel is live off the same SSE invalidations for free.
+ *
+ * In the tree lens, clicking a subtask triggers expand-and-focus: the
+ * current task's children expand, and the camera pans to the target.
  */
 export function GraphSidePanel({
   task,
   projectId,
   tasks,
   relations,
+  lens,
   onSelect,
+  onExpandAndFocus,
   onClose,
 }: {
   task: Task;
   projectId: string;
   tasks: readonly Task[];
   relations: readonly Relation[];
+  lens: "tree" | "flow";
   onSelect: (taskId: string) => void;
+  onExpandAndFocus: (parentId: string, childId: string) => void;
   onClose: () => void;
 }) {
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
   const titleById = new Map(tasks.map((t) => [t.id, t.title]));
 
   const parent = relations.find(
     (r) =>
       r.type === "decomposition" && r.target_task_id === task.id && r.source_task_id !== task.id,
   )?.source_task_id;
-  const subtasks = relations
+  const subtaskIds = relations
     .filter((r) => r.type === "decomposition" && r.source_task_id === task.id)
     .map((r) => r.target_task_id);
   const dependsOn = relations
@@ -55,6 +63,43 @@ export function GraphSidePanel({
               <button type="button" className={styles.jump} onClick={() => onSelect(id)}>
                 {titleById.get(id)}
               </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
+
+  /** Rich subtask list with status badges and progress summary. */
+  const subtaskGroup = () => {
+    const subs = subtaskIds.map((id) => taskById.get(id)).filter(Boolean) as Task[];
+    if (subs.length === 0) return null;
+    const done = subs.filter((s) => s.status === "done").length;
+    return (
+      <div className={styles.group}>
+        <div className={styles.groupLabel}>
+          Subtasks — {done}/{subs.length} done
+        </div>
+        <div className={styles.progressTrack}>
+          <div
+            className={styles.progressFill}
+            style={{ width: `${(done / subs.length) * 100}%` }}
+          />
+        </div>
+        <ul className={styles.subtaskList}>
+          {subs.map((s) => (
+            <li key={s.id} className={styles.subtaskRow}>
+              <StatusBadge status={s.status} />
+              <button
+                type="button"
+                className={styles.jump}
+                onClick={() =>
+                  lens === "tree" ? onExpandAndFocus(task.id, s.id) : onSelect(s.id)
+                }
+              >
+                {s.title}
+              </button>
+              {s.assignee ? <IdentityChip identity={s.assignee} /> : null}
             </li>
           ))}
         </ul>
@@ -85,7 +130,7 @@ export function GraphSidePanel({
       )}
 
       {group("Parent", parent !== undefined ? [parent] : [])}
-      {group("Subtasks", subtasks)}
+      {subtaskGroup()}
       {group("Depends on", dependsOn)}
       {group("Needed by", neededBy)}
 
