@@ -1,29 +1,31 @@
 import { render, screen } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider } from "react-router";
-import { describe, expect, it } from "vitest";
+import { MemoryRouter } from "react-router";
+import { describe, expect, it, vi } from "vitest";
 import { RouteError } from "./RouteError";
 
-/** A route whose element throws during render — errorElement catches it. */
-function renderFailingRoute(fail: () => unknown) {
-  function Boom() {
-    fail();
-    return null;
-  }
-  const router = createMemoryRouter([
-    {
-      path: "/",
-      element: <Boom />,
-      errorElement: <RouteError />,
-    },
-  ]);
-  render(<RouterProvider router={router} />);
+// Mock only useRouteError — the component is a pure presenter over the
+// router's caught error. Driving a real render-time throw makes React
+// Router log the error and surfaces it as an unhandled error in vitest,
+// which fails the CI run; the errorElement wiring itself is exercised by
+// the router in production and by the graph screen tests' real routes.
+const useRouteErrorMock = vi.hoisted(() => vi.fn());
+vi.mock("react-router", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router")>();
+  return { ...actual, useRouteError: useRouteErrorMock };
+});
+
+function renderRouteError(error: unknown) {
+  useRouteErrorMock.mockReturnValue(error);
+  render(
+    <MemoryRouter>
+      <RouteError />
+    </MemoryRouter>,
+  );
 }
 
 describe("RouteError", () => {
   it("renders a fallback with the error message and a way back", () => {
-    renderFailingRoute(() => {
-      throw new Error("kaboom");
-    });
+    renderRouteError(new Error("kaboom"));
 
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
     expect(screen.getByText("kaboom")).toBeInTheDocument();
@@ -31,28 +33,16 @@ describe("RouteError", () => {
     expect(screen.getByRole("link", { name: "Back to projects" })).toHaveAttribute("href", "/");
   });
 
-  it("renders route error responses with status and status text", async () => {
-    // A loader rejection with a Response is react-router's ErrorResponse
-    // path (isRouteErrorResponse).
-    const router = createMemoryRouter([
-      {
-        path: "/",
-        loader: async () => {
-          throw new Response("Not Found", { status: 404, statusText: "Not Found" });
-        },
-        element: <p>never rendered</p>,
-        errorElement: <RouteError />,
-      },
-    ]);
-    render(<RouterProvider router={router} />);
+  it("renders route error responses with status and status text", () => {
+    // The ErrorResponse shape react-router passes to errorElement
+    // (isRouteErrorResponse duck-types on these fields).
+    renderRouteError({ status: 404, statusText: "Not Found", internal: false, data: null });
 
-    expect(await screen.findByText("404 Not Found")).toBeInTheDocument();
+    expect(screen.getByText("404 Not Found")).toBeInTheDocument();
   });
 
   it("renders a generic detail for non-Error throwables", () => {
-    renderFailingRoute(() => {
-      throw "just a string";
-    });
+    renderRouteError("just a string");
 
     expect(screen.getByText("Unexpected error")).toBeInTheDocument();
   });

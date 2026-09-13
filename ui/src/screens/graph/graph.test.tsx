@@ -266,7 +266,9 @@ describe("Graph screen", () => {
     await screen.findByText("Step one");
     expect(screen.getByText("Other step")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Collapse 2 subtasks" }));
+    // fireEvent (not userEvent): a full pointer sequence would hit React
+    // Flow's d3-zoom mousedown handler, which crashes under jsdom.
+    fireEvent.click(screen.getByRole("button", { name: "Collapse 2 subtasks" }));
 
     // Epic collapsed; the other root keeps its subtree.
     await waitFor(() => expect(screen.queryByText("Step one")).not.toBeInTheDocument());
@@ -281,7 +283,7 @@ describe("Graph screen", () => {
     expect(await screen.findByText("Epic")).toBeInTheDocument();
     expect(screen.queryByText("Step one")).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Expand 2 subtasks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand 2 subtasks" }));
 
     expect(await screen.findByText("Step one")).toBeInTheDocument();
     expect(new URLSearchParams(router.state.location.search).get("expanded")).toContain(parent.id);
