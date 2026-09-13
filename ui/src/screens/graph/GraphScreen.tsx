@@ -288,51 +288,19 @@ function ProjectGraph({ projectId }: { projectId: string }) {
     if (lens === "tree") {
       graphNodes = decompositionGraph(tasks, relations, expandedIds);
     } else {
-      // Flow lens: show epics + subtasks of expanded epics.
-      // An "epic" is any task with decomposition children.
-      const expandedChildren = new Set<string>();
-      for (const r of relations) {
-        if (r.type === "decomposition" && expandedIds.has(r.source_task_id)) {
-          expandedChildren.add(r.target_task_id);
-        }
-      }
-      const flowTasks = tasks.filter(
-        (t) => childCounts.has(t.id) || expandedChildren.has(t.id),
-      );
+      // Flow lens: show only epics (tasks with decomposition children).
+      // Inline subtask expansion is tracked in #52 — for now the side panel
+      // provides the subtask drill-down.
+      const epicTasks = tasks.filter((t) => childCounts.has(t.id));
       const flowMeta = new Map(
-        flowTasks.map((t) => [
+        epicTasks.map((t) => [
           t.id,
-          {
-            childCount: childCounts.get(t.id) ?? 0,
-            expanded: expandedIds.has(t.id),
-          },
+          { childCount: childCounts.get(t.id) ?? 0, expanded: false },
         ]),
       );
-      graphNodes = dependencyGraph(flowTasks, relations, flowMeta);
+      graphNodes = dependencyGraph(epicTasks, relations, flowMeta);
     }
     let { nodes, edges } = graphNodes;
-
-    // Flow lens: add dashed decomposition edges from expanded epics to their
-    // visible children so the parent-child relationship is clear on the canvas.
-    if (lens === "flow") {
-      const visibleIds = new Set(nodes.map((n) => n.id));
-      const decompEdges = relations
-        .filter(
-          (r) =>
-            r.type === "decomposition" &&
-            expandedIds.has(r.source_task_id) &&
-            visibleIds.has(r.source_task_id) &&
-            visibleIds.has(r.target_task_id),
-        )
-        .map((r) => ({
-          id: r.id,
-          source: r.source_task_id,
-          target: r.target_task_id,
-          type: "smoothstep" as const,
-          style: { strokeDasharray: "6 3" },
-        }));
-      edges = [...edges, ...decompEdges];
-    }
 
     // Flow lens: inject virtual Start/End boundary nodes so the graph
     // reads as a complete traversal from a single entry to a single exit.
