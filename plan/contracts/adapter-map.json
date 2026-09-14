@@ -1,0 +1,352 @@
+[
+  {
+    "operation_id": "getHealth",
+    "cli": "shepherd api getHealth",
+    "mcp": null
+  },
+  {
+    "operation_id": "createBrowserSession",
+    "cli": "shepherd api createBrowserSession",
+    "mcp": null
+  },
+  {
+    "operation_id": "getBrowserSession",
+    "cli": "shepherd api getBrowserSession",
+    "mcp": null
+  },
+  {
+    "operation_id": "deleteBrowserSession",
+    "cli": "shepherd api deleteBrowserSession",
+    "mcp": null
+  },
+  {
+    "operation_id": "listAgents",
+    "cli": "shepherd api listAgents",
+    "mcp": null
+  },
+  {
+    "operation_id": "createAgent",
+    "cli": "shepherd api createAgent",
+    "mcp": null
+  },
+  {
+    "operation_id": "revokeAgent",
+    "cli": "shepherd api revokeAgent",
+    "mcp": null
+  },
+  {
+    "operation_id": "listProjects",
+    "cli": "shepherd api listProjects",
+    "mcp": "shepherd_list_projects"
+  },
+  {
+    "operation_id": "createProject",
+    "cli": "shepherd api createProject",
+    "mcp": null
+  },
+  {
+    "operation_id": "getProject",
+    "cli": "shepherd api getProject",
+    "mcp": "shepherd_get_project"
+  },
+  {
+    "operation_id": "updateProject",
+    "cli": "shepherd api updateProject",
+    "mcp": null
+  },
+  {
+    "operation_id": "archiveProject",
+    "cli": "shepherd api archiveProject",
+    "mcp": null
+  },
+  {
+    "operation_id": "listGoals",
+    "cli": "shepherd api listGoals",
+    "mcp": "shepherd_list_goals"
+  },
+  {
+    "operation_id": "createGoal",
+    "cli": "shepherd api createGoal",
+    "mcp": null
+  },
+  {
+    "operation_id": "getGoal",
+    "cli": "shepherd api getGoal",
+    "mcp": "shepherd_get_goal"
+  },
+  {
+    "operation_id": "updateGoal",
+    "cli": "shepherd api updateGoal",
+    "mcp": null
+  },
+  {
+    "operation_id": "archiveGoal",
+    "cli": "shepherd api archiveGoal",
+    "mcp": null
+  },
+  {
+    "operation_id": "getGoalGraph",
+    "cli": "shepherd api getGoalGraph",
+    "mcp": "shepherd_get_goal_graph"
+  },
+  {
+    "operation_id": "listEpics",
+    "cli": "shepherd api listEpics",
+    "mcp": "shepherd_list_epics"
+  },
+  {
+    "operation_id": "createEpic",
+    "cli": "shepherd api createEpic",
+    "mcp": "shepherd_create_epic"
+  },
+  {
+    "operation_id": "getEpic",
+    "cli": "shepherd api getEpic",
+    "mcp": "shepherd_get_epic"
+  },
+  {
+    "operation_id": "updateEpic",
+    "cli": "shepherd api updateEpic",
+    "mcp": "shepherd_update_epic"
+  },
+  {
+    "operation_id": "archiveEpic",
+    "cli": "shepherd api archiveEpic",
+    "mcp": null
+  },
+  {
+    "operation_id": "acceptEpic",
+    "cli": "shepherd api acceptEpic",
+    "mcp": null
+  },
+  {
+    "operation_id": "blockEpic",
+    "cli": "shepherd api blockEpic",
+    "mcp": "shepherd_block_epic"
+  },
+  {
+    "operation_id": "unblockEpic",
+    "cli": "shepherd api unblockEpic",
+    "mcp": null
+  },
+  {
+    "operation_id": "cancelEpic",
+    "cli": "shepherd api cancelEpic",
+    "mcp": null
+  },
+  {
+    "operation_id": "completeEpic",
+    "cli": "shepherd api completeEpic",
+    "mcp": null
+  },
+  {
+    "operation_id": "getEpicGraph",
+    "cli": "shepherd api getEpicGraph",
+    "mcp": "shepherd_get_epic_graph"
+  },
+  {
+    "operation_id": "listTasks",
+    "cli": "shepherd api listTasks",
+    "mcp": "shepherd_list_tasks"
+  },
+  {
+    "operation_id": "createTask",
+    "cli": "shepherd api createTask",
+    "mcp": "shepherd_create_task"
+  },
+  {
+    "operation_id": "getTask",
+    "cli": "shepherd api getTask",
+    "mcp": "shepherd_get_task"
+  },
+  {
+    "operation_id": "updateTask",
+    "cli": "shepherd api updateTask",
+    "mcp": "shepherd_update_task"
+  },
+  {
+    "operation_id": "archiveTask",
+    "cli": "shepherd api archiveTask",
+    "mcp": null
+  },
+  {
+    "operation_id": "acceptTask",
+    "cli": "shepherd api acceptTask",
+    "mcp": null
+  },
+  {
+    "operation_id": "blockTask",
+    "cli": "shepherd api blockTask",
+    "mcp": "shepherd_block_task"
+  },
+  {
+    "operation_id": "unblockTask",
+    "cli": "shepherd api unblockTask",
+    "mcp": null
+  },
+  {
+    "operation_id": "cancelTask",
+    "cli": "shepherd api cancelTask",
+    "mcp": null
+  },
+  {
+    "operation_id": "waiveTask",
+    "cli": "shepherd api waiveTask",
+    "mcp": null
+  },
+  {
+    "operation_id": "listTaskTypes",
+    "cli": "shepherd api listTaskTypes",
+    "mcp": "shepherd_list_task_types"
+  },
+  {
+    "operation_id": "createTaskType",
+    "cli": "shepherd api createTaskType",
+    "mcp": null
+  },
+  {
+    "operation_id": "updateTaskType",
+    "cli": "shepherd api updateTaskType",
+    "mcp": null
+  },
+  {
+    "operation_id": "listDependencies",
+    "cli": "shepherd api listDependencies",
+    "mcp": "shepherd_list_dependencies"
+  },
+  {
+    "operation_id": "createDependency",
+    "cli": "shepherd api createDependency",
+    "mcp": "shepherd_create_dependency"
+  },
+  {
+    "operation_id": "deleteDependency",
+    "cli": "shepherd api deleteDependency",
+    "mcp": null
+  },
+  {
+    "operation_id": "listWork",
+    "cli": "shepherd api listWork",
+    "mcp": "shepherd_list_work"
+  },
+  {
+    "operation_id": "getTaskContext",
+    "cli": "shepherd api getTaskContext",
+    "mcp": "shepherd_get_task_context"
+  },
+  {
+    "operation_id": "claimTask",
+    "cli": "shepherd api claimTask",
+    "mcp": "shepherd_claim_task"
+  },
+  {
+    "operation_id": "listClaims",
+    "cli": "shepherd api listClaims",
+    "mcp": "shepherd_list_claims"
+  },
+  {
+    "operation_id": "renewClaim",
+    "cli": "shepherd api renewClaim",
+    "mcp": "shepherd_renew_claim"
+  },
+  {
+    "operation_id": "releaseClaim",
+    "cli": "shepherd api releaseClaim",
+    "mcp": "shepherd_release_claim"
+  },
+  {
+    "operation_id": "reportClaim",
+    "cli": "shepherd api reportClaim",
+    "mcp": "shepherd_report_claim"
+  },
+  {
+    "operation_id": "listTaskSessions",
+    "cli": "shepherd api listTaskSessions",
+    "mcp": "shepherd_list_task_sessions"
+  },
+  {
+    "operation_id": "listDocuments",
+    "cli": "shepherd api listDocuments",
+    "mcp": "shepherd_list_documents"
+  },
+  {
+    "operation_id": "createDocument",
+    "cli": "shepherd api createDocument",
+    "mcp": "shepherd_create_document"
+  },
+  {
+    "operation_id": "getDocument",
+    "cli": "shepherd api getDocument",
+    "mcp": "shepherd_get_document"
+  },
+  {
+    "operation_id": "listDocumentRevisions",
+    "cli": "shepherd api listDocumentRevisions",
+    "mcp": "shepherd_list_document_revisions"
+  },
+  {
+    "operation_id": "createDocumentRevision",
+    "cli": "shepherd api createDocumentRevision",
+    "mcp": "shepherd_create_document_revision"
+  },
+  {
+    "operation_id": "getDocumentRevision",
+    "cli": "shepherd api getDocumentRevision",
+    "mcp": "shepherd_get_document_revision"
+  },
+  {
+    "operation_id": "selectTaskPlan",
+    "cli": "shepherd api selectTaskPlan",
+    "mcp": "shepherd_select_task_plan"
+  },
+  {
+    "operation_id": "listSubmissions",
+    "cli": "shepherd api listSubmissions",
+    "mcp": "shepherd_list_submissions"
+  },
+  {
+    "operation_id": "getSubmission",
+    "cli": "shepherd api getSubmission",
+    "mcp": "shepherd_get_submission"
+  },
+  {
+    "operation_id": "withdrawSubmission",
+    "cli": "shepherd api withdrawSubmission",
+    "mcp": "shepherd_withdraw_submission"
+  },
+  {
+    "operation_id": "reviewSubmission",
+    "cli": "shepherd api reviewSubmission",
+    "mcp": "shepherd_review_submission"
+  },
+  {
+    "operation_id": "listSubmissionReviews",
+    "cli": "shepherd api listSubmissionReviews",
+    "mcp": "shepherd_list_submission_reviews"
+  },
+  {
+    "operation_id": "listHistory",
+    "cli": "shepherd api listHistory",
+    "mcp": "shepherd_list_history"
+  },
+  {
+    "operation_id": "exportProject",
+    "cli": "shepherd api exportProject",
+    "mcp": null
+  },
+  {
+    "operation_id": "importProject",
+    "cli": "shepherd api importProject",
+    "mcp": null
+  },
+  {
+    "operation_id": "getEvents",
+    "cli": "shepherd api getEvents",
+    "mcp": null
+  },
+  {
+    "operation_id": "getPrincipal",
+    "cli": "shepherd api getPrincipal",
+    "mcp": null
+  }
+]

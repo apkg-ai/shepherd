@@ -1,0 +1,366 @@
+[
+  {
+    "id": 1,
+    "file": "001-contract-baseline.md",
+    "title": "Contract baseline and isolated generation",
+    "requires": [],
+    "requirements": [
+      "API-01"
+    ],
+    "area": "contracts"
+  },
+  {
+    "id": 2,
+    "file": "002-storage-foundation.md",
+    "title": "Fresh database and command infrastructure",
+    "requires": [
+      1
+    ],
+    "requirements": [
+      "DATA-01"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 3,
+    "file": "003-projects-and-goals.md",
+    "title": "Project and goal ownership",
+    "requires": [
+      2
+    ],
+    "requirements": [
+      "HIER-01",
+      "HIER-02"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 4,
+    "file": "004-epics-and-tasks.md",
+    "title": "Separate epic and task resources",
+    "requires": [
+      3
+    ],
+    "requirements": [
+      "HIER-01",
+      "FLOW-01"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 5,
+    "file": "005-dependencies-and-eligibility.md",
+    "title": "Scoped dependencies and pure eligibility",
+    "requires": [
+      4
+    ],
+    "requirements": [
+      "DEP-01",
+      "FLOW-02"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 6,
+    "file": "006-completion-and-blocking.md",
+    "title": "Epic completion, block, cancellation and archive",
+    "requires": [
+      5
+    ],
+    "requirements": [
+      "FLOW-03",
+      "CLAIM-01"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 7,
+    "file": "007-identity-and-permissions.md",
+    "title": "Local owner and agent credentials",
+    "requires": [
+      6
+    ],
+    "requirements": [
+      "AUTH-01"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 8,
+    "file": "008-proposals-and-policy.md",
+    "title": "Proposal and policy configuration",
+    "requires": [
+      7
+    ],
+    "requirements": [
+      "REVIEW-01",
+      "AUTH-01"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 9,
+    "file": "009-phase-claims.md",
+    "title": "Planning and execution leases",
+    "requires": [
+      8
+    ],
+    "requirements": [
+      "CLAIM-01",
+      "FLOW-02"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 10,
+    "file": "010-reports-and-retries.md",
+    "title": "Atomic reports and failure recovery",
+    "requires": [
+      9
+    ],
+    "requirements": [
+      "DATA-01",
+      "CLAIM-01"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 11,
+    "file": "011-documents-and-submissions.md",
+    "title": "Versioned documents and plan selection",
+    "requires": [
+      10
+    ],
+    "requirements": [
+      "CONTENT-01",
+      "REVIEW-02"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 12,
+    "file": "012-reviews.md",
+    "title": "Human and independent agent review",
+    "requires": [
+      11
+    ],
+    "requirements": [
+      "REVIEW-01",
+      "REVIEW-02"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 13,
+    "file": "013-context-and-history.md",
+    "title": "Context assembly and durable history",
+    "requires": [
+      12
+    ],
+    "requirements": [
+      "CONTENT-01",
+      "DATA-01"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 14,
+    "file": "014-portability.md",
+    "title": "Snapshot export and full backup/restore",
+    "requires": [
+      13
+    ],
+    "requirements": [
+      "OPS-01",
+      "DATA-01"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 15,
+    "file": "015-api-cutover.md",
+    "title": "REST cutover and resumable SSE",
+    "requires": [
+      13,
+      14
+    ],
+    "requirements": [
+      "API-01",
+      "DATA-01"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 16,
+    "file": "016-ui-shell-and-hierarchy.md",
+    "title": "Browser session and hierarchy navigation",
+    "requires": [
+      15
+    ],
+    "requirements": [
+      "UI-01",
+      "AUTH-01"
+    ],
+    "area": "frontend"
+  },
+  {
+    "id": 17,
+    "file": "017-ui-task-details.md",
+    "title": "Task and epic forms, phases and actions",
+    "requires": [
+      16
+    ],
+    "requirements": [
+      "UI-01",
+      "FLOW-01"
+    ],
+    "area": "frontend"
+  },
+  {
+    "id": 18,
+    "file": "018-ui-graphs.md",
+    "title": "Navigable scoped dependency graphs",
+    "requires": [
+      17
+    ],
+    "requirements": [
+      "UI-01",
+      "DEP-01"
+    ],
+    "area": "frontend"
+  },
+  {
+    "id": 19,
+    "file": "019-ui-documents-and-reviews.md",
+    "title": "Document editor and review workflows",
+    "requires": [
+      17
+    ],
+    "requirements": [
+      "UI-01",
+      "CONTENT-01",
+      "REVIEW-02"
+    ],
+    "area": "frontend"
+  },
+  {
+    "id": 20,
+    "file": "020-ui-live-settings.md",
+    "title": "Settings, identities and real-time integration",
+    "requires": [
+      18,
+      19
+    ],
+    "requirements": [
+      "UI-01",
+      "AUTH-01",
+      "DATA-01"
+    ],
+    "area": "frontend"
+  },
+  {
+    "id": 21,
+    "file": "021-shared-rest-client.md",
+    "title": "Shared Rust REST client",
+    "requires": [
+      15
+    ],
+    "requirements": [
+      "API-01"
+    ],
+    "area": "client"
+  },
+  {
+    "id": 22,
+    "file": "022-cli.md",
+    "title": "Complete CLI adapter",
+    "requires": [
+      21
+    ],
+    "requirements": [
+      "API-01"
+    ],
+    "area": "client"
+  },
+  {
+    "id": 23,
+    "file": "023-mcp.md",
+    "title": "MCP stdio adapter",
+    "requires": [
+      21
+    ],
+    "requirements": [
+      "API-01"
+    ],
+    "area": "client"
+  },
+  {
+    "id": 24,
+    "file": "024-agent-guide.md",
+    "title": "Runnable agent handoff guide",
+    "requires": [
+      22,
+      23
+    ],
+    "requirements": [
+      "API-01",
+      "CONTENT-01"
+    ],
+    "area": "docs"
+  },
+  {
+    "id": 25,
+    "file": "025-diagnostics.md",
+    "title": "Integrity diagnostics and graceful shutdown",
+    "requires": [
+      15,
+      14
+    ],
+    "requirements": [
+      "OPS-01"
+    ],
+    "area": "backend"
+  },
+  {
+    "id": 26,
+    "file": "026-release-packaging.md",
+    "title": "macOS and Linux packaging",
+    "requires": [
+      20,
+      22,
+      23,
+      25
+    ],
+    "requirements": [
+      "OPS-01"
+    ],
+    "area": "ops"
+  },
+  {
+    "id": 27,
+    "file": "027-acceptance-and-performance.md",
+    "title": "Cross-interface and performance acceptance",
+    "requires": [
+      24,
+      26
+    ],
+    "requirements": [
+      "API-01",
+      "OPS-01",
+      "DATA-01"
+    ],
+    "area": "tests"
+  },
+  {
+    "id": 28,
+    "file": "028-cutover-and-release-docs.md",
+    "title": "Documentation cutover and release readiness",
+    "requires": [
+      27
+    ],
+    "requirements": [
+      "OPS-01"
+    ],
+    "area": "docs"
+  }
+]

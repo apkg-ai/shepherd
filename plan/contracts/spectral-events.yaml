@@ -1,0 +1,9 @@
+extends:
+  - spectral:asyncapi
+rules:
+  asyncapi-info-contact: off
+  asyncapi-info-license: off
+  # Project contact is its repository; do not invent a maintainer email.
+  asyncapi-info-contact-properties: off
+  # Keep the existing AsyncAPI 3.0 dialect; no 3.1 feature is required.
+  asyncapi-latest-version: off
