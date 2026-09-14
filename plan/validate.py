@@ -26,6 +26,9 @@ def main():
     steps = load('steps/manifest.json')
     by_id = {s['id']: s for s in steps}
     assert len(by_id) == len(steps)
+    issue_map = load('steps/github-issues.json')
+    assert set(issue_map['steps']) == {f'{i:03d}' for i in by_id}
+    assert len(set(issue_map['steps'].values())) == len(by_id)
     visited, active = set(), set()
 
     def visit(i):

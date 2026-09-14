@@ -38,6 +38,8 @@ Shepherd is a local coordination hub for one human and multiple external agents.
 
 Executable artifacts: [OpenAPI](contracts/openapi.yaml), [AsyncAPI](contracts/asyncapi.yaml), [SQLite baseline](contracts/schema.sql), [export JSON Schema](contracts/export.schema.json), [operation catalog](contracts/operations.json), [adapter mapping](contracts/adapter-map.json), [examples](examples/README.md), [step manifest](steps/manifest.json).
 
+GitHub tracking: [PR #56](https://github.com/apkg-ai/shepherd/pull/56), [v1 roadmap #12](https://github.com/apkg-ai/shepherd/issues/12), and [stable-v1 milestone](https://github.com/apkg-ai/shepherd/milestone/2). The durable step-to-issue mapping is stored in [steps/github-issues.json](steps/github-issues.json).
+
 ## Authority and exclusions
 
 Scope/glossary establish meaning. Workflow/domain define invariants. Contract files define wire fields; schema.sql defines persistence. Backend/frontend/adapters implement those same rules. Step documents sequence work and link to authoritative sections, not a competing workflow. Existing docs/ are MVP context and superseded wherever they conflict. Keep Rust/SQLite/Axum/Tokio and React/TypeScript/Vite/TanStack Query/React Flow/Dagre/CSS modules; retain current package versions except scoped additions listed in dependencies.md.

@@ -4,6 +4,8 @@ Use one step per implementation session unless its handoff explicitly identifies
 
 All steps are initially not started. The generated manifest records prerequisites only, not runtime status. Independent branches after REST cutover are UI (016–020), clients (021–024), and operations (025); they join for packaging and acceptance. Do not edit the same files concurrently without explicit coordination.
 
+GitHub issue numbers are recorded in [github-issues.json](github-issues.json). Issue #12 is the umbrella roadmap; all implementation issues belong to the `v1 — stable agentic SDLC` milestone.
+
 ## Intermediate compilation rule
 
 Steps 002–014 develop new core under v1/ beside MVP core so existing server/tests still compile. Use v1::Store only in new tests; no preview endpoints. Step 015 promotes the complete contract, moves v1 modules to final locations, removes MVP core imports/routes and replaces legacy semantic fixtures. This is an intentional backend integration boundary. Frontend steps 016–020 regenerate once and keep unfinished routes unavailable; use MSW for screens not yet linked. Step 020 removes the route switch. No production release of intermediate work is required.
