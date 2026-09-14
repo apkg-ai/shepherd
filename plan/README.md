@@ -1,6 +1,6 @@
 # Shepherd stable v1 — implementation handbook
 
-**This folder is the complete target specification, not implemented application behavior.** The deliverable in this change is documentation. The existing repository remains the MVP. All implementation steps start not started; the application must be built in the sequence below.
+**This folder is the complete target specification, not implemented application behavior.** The deliverable in this change is documentation. The existing repository remains the MVP. All implementation steps start not started; step 000 first removes the MVP product implementation while retaining a green engineering scaffold, then the application is built in the sequence below.
 
 Shepherd is a local coordination hub for one human and multiple external agents. Hierarchy: **Project → Goal → Epic → Task**. Goals are independent outcomes. Epics and tasks have separate lifecycle and dependency rules; tasks can plan early, persist reviewed revisions, and hand execution to another agent. Browser UI, REST, CLI, MCP and an agent guide ship together. No agent spawning, hosted teams, Jira scheduling suite, recursive decomposition or MVP data converter.
 
@@ -22,7 +22,7 @@ Shepherd is a local coordination hub for one human and multiple external agents.
 | [02-current-codebase-audit.md](02-current-codebase-audit.md) | MVP findings, reusable code and replacement map |
 | [03-domain-model.md](03-domain-model.md) | Ownership, fields, mutability and counts |
 | [04-workflow-state-machines.md](04-workflow-state-machines.md) | Transitions, eligibility, cancellation and failure rules |
-| [05-backend.md](05-backend.md) | Rust modules, transactions, queries and cutover |
+| [05-backend.md](05-backend.md) | Rust modules, transactions, queries and staged integration |
 | [06-frontend.md](06-frontend.md) | Routes, screens, graph behavior, forms and UI states |
 | [07-rest-contract.md](07-rest-contract.md) | HTTP protocol, errors and every operation |
 | [08-events-and-history.md](08-events-and-history.md) | Durable events, replay and cache invalidation |
@@ -42,7 +42,7 @@ GitHub tracking: [PR #56](https://github.com/apkg-ai/shepherd/pull/56), [v1 road
 
 ## Authority and exclusions
 
-Scope/glossary establish meaning. Workflow/domain define invariants. Contract files define wire fields; schema.sql defines persistence. Backend/frontend/adapters implement those same rules. Step documents sequence work and link to authoritative sections, not a competing workflow. Existing docs/ are MVP context and superseded wherever they conflict. Keep Rust/SQLite/Axum/Tokio and React/TypeScript/Vite/TanStack Query/React Flow/Dagre/CSS modules; retain current package versions except scoped additions listed in dependencies.md.
+Scope/glossary establish meaning. Workflow/domain define invariants. Contract files define wire fields; schema.sql defines persistence. Backend/frontend/adapters implement those same rules. Step documents sequence work and link to authoritative sections, not a competing workflow. Step 000 preserves repository plumbing and removes tracked MVP product behavior; Git history is the source for any later selectively reused algorithm. Keep Rust/SQLite/Axum/Tokio and React/TypeScript/Vite/TanStack Query/React Flow/Dagre/CSS modules; retain current package versions except scoped additions listed in dependencies.md.
 
 Fresh v1 data lives separately; never mutate an MVP database to satisfy new ownership. Preserve user-owned untracked docs/agent-quickstart.md and example/. Do not install global tools, publish releases or change repository application code as part of the documentation handoff.
 
@@ -50,10 +50,11 @@ Fresh v1 data lives separately; never mutate an MVP database to satisfy new owne
 
 ```mermaid
 flowchart TD
-  A[001 Contracts] --> B[002–006 Storage, hierarchy, dependency rules]
+  Z[000 Green scaffold reset] --> A[001 Contracts]
+  A --> B[002–006 Storage, hierarchy, dependency rules]
   B --> C[007–013 Identity, claims, reports, content, reviews, context]
   C --> P[014 Portability core]
-  P --> D[015 REST and SSE cutover]
+  P --> D[015 REST and SSE integration]
   D --> E[016–020 Browser workflows]
   D --> F[021 Shared REST client]
   F --> G[022 CLI]
@@ -67,7 +68,7 @@ flowchart TD
   J --> K
   K --> L[027 Acceptance and performance]
   I --> L
-  L --> M[028 Final cutover documentation]
+  L --> M[028 Documentation and release readiness]
 ```
 
 Full instructions and per-step prerequisites are in [steps/README.md](steps/README.md). Each step contains concrete edits, required reading, acceptance scenarios, verification commands and a handoff checklist. Backend, frontend, clients and operations converge only after their required foundations pass.

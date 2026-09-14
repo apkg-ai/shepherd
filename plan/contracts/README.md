@@ -8,6 +8,6 @@ Run `python3 plan/validate.py` and `PATH=/Users/sheplu/.nvm/versions/node/v24.19
 
 ## Stable-v1 lint policy
 
-Run `node_modules/.bin/spectral lint plan/contracts/openapi.yaml --ruleset plan/contracts/spectral.yaml --fail-severity=warn` and the analogous events check with spectral-events.yaml. At REST cutover, promote these profiles and update package lint scripts to their installed locations. Retain standard OpenAPI/AsyncAPI schema, operation and example checks.
+Run `node_modules/.bin/spectral lint plan/contracts/openapi.yaml --ruleset plan/contracts/spectral.yaml --fail-severity=warn` and the analogous events check with spectral-events.yaml. At REST integration, promote these profiles and update package lint scripts to their installed locations. Retain standard OpenAPI/AsyncAPI schema, operation and example checks.
 
 The MVP profile is not carried over unchanged: it requires HTTPS for a plain-loopback daemon, fake rate headers/429 responses without a limiter, IBM-specific enum naming incompatible with event names/version enums, model-only responses incompatible with SSE, and maximum array sizes incompatible with streaming project portability. V1 uses truthful transport, explicit per-record limits and authenticated streaming import. No security claim is satisfied by decorative headers. Additional semantic/auth/range checks live in plan/validate.py and the core/HTTP acceptance tests. Lint policy changes are an explicit step-015 change, not silent suppressions in application code.

@@ -4,7 +4,7 @@ Status: not started. Requirements: OPS-01.
 
 ## Objective and prerequisites
 
-Deliver integrity diagnostics and graceful shutdown. Required completed steps: [015](015-api-cutover.md), [014](014-portability.md)
+Deliver integrity diagnostics and graceful shutdown. Required completed steps: [015](015-rest-integration.md), [014](014-portability.md)
 
 Read [execution rules](README.md) first, then:
 
@@ -25,7 +25,7 @@ Tests: `Adjacent component tests / resource HTTP tests named for the changed beh
 
 ## Ordered implementation
 
-1. Read the existing related implementation and targeted tests. Record which functions/queries currently enforce the invariant and which need replacing.
+1. Read the current scaffold and targeted tests. Identify the reusable plumbing and final modules owned by this step; do not restore removed MVP product behavior.
 2. Add structured tracing subscriber/log redaction, request IDs, schema/integrity checks, health fail behavior, doctor command and signal shutdown. Exercise storage_busy response and sweeper failures. Keep diagnostic-only mode on corruption/key mismatch; no silent repair.
 3. Implement the negative scenarios below using public domain commands or live HTTP at the appropriate boundary. Include actor, resource revision and expected state in fixtures.
 4. Run the checks, repair regressions caused by this change, and update the handoff record with exact results.
@@ -51,7 +51,7 @@ cargo test --workspace
 cargo clippy --all-targets -- -D warnings
 ```
 
-Run Rust commands from core/, not the repository root. Before step 015, generated MVP sources remain needed for full workspace checks; run scripts/regen-generated.sh if missing, knowing it formats Rust. At step 015 and later generate from promoted v1 contract. For UI generation run npm run generate:api --prefix ui before typecheck when contract changed. Hurl/Playwright need a fresh isolated database and their installed tools; use existing scripts rather than a personal running daemon.
+Run Rust commands from core/, not the repository root. Keep the minimal scaffold contract until step 015 wires the complete v1 REST surface; never expose successful placeholder operations. Run scripts/regen-generated.sh only when the owning contract step requires generated application files, knowing it formats Rust. For UI generation run npm run generate:api --prefix ui before typecheck when the contract changed. Hurl/Playwright need a fresh isolated database and their installed tools; use existing scripts rather than a personal running daemon.
 
 Expected: zero exit status, all named acceptance cases pass, no changes outside this step's scope. These are future implementation checks, not claims that tests ran during document creation.
 

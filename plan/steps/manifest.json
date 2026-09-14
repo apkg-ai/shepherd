@@ -1,9 +1,21 @@
 [
   {
+    "id": 0,
+    "file": "000-scaffold-reset.md",
+    "title": "Reset to a green v1 scaffold",
+    "requires": [],
+    "requirements": [
+      "OPS-01"
+    ],
+    "area": "foundation"
+  },
+  {
     "id": 1,
     "file": "001-contract-baseline.md",
-    "title": "Contract baseline and isolated generation",
-    "requires": [],
+    "title": "Contract baseline and generation scaffolding",
+    "requires": [
+      0
+    ],
     "requirements": [
       "API-01"
     ],
@@ -178,8 +190,8 @@
   },
   {
     "id": 15,
-    "file": "015-api-cutover.md",
-    "title": "REST cutover and resumable SSE",
+    "file": "015-rest-integration.md",
+    "title": "REST integration and resumable SSE",
     "requires": [
       13,
       14
@@ -353,8 +365,8 @@
   },
   {
     "id": 28,
-    "file": "028-cutover-and-release-docs.md",
-    "title": "Documentation cutover and release readiness",
+    "file": "028-release-docs.md",
+    "title": "Documentation and release readiness",
     "requires": [
       27
     ],

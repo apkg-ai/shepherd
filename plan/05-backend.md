@@ -59,7 +59,7 @@ Context response budget: 256 KiB UTF-8 JSON; selected plan always first (one max
 
 ## Generation and staged integration
 
-Keep plan contracts separate until the cutover step. During steps 002–014 keep existing server compiling and develop new core under src/v1/ with a separate fresh test database. There are no preview HTTP endpoints. Both versions must never open one database. Step 015 performs the complete authenticated REST cutover. After core semantics land, switch the existing generated server contract atomically and remove MVP routes/types/tests in the same cutover batch. Update the generator operation whitelist. UI cutover is similarly one integration step after isolated screens work with MSW.
+Step 000 reduces the application to a health-only server and UI shell while retaining the generation toolchain. Steps 002–014 build the new core directly in the final module tree against a fresh stable-v1 test database. There is no compiled MVP core, preview endpoint or compatibility namespace. Keep the full plan contracts separate from the health-only application contract until all core semantics exist. Step 015 promotes the complete authenticated REST/AsyncAPI contracts, updates the generator operation allowlist and wires every operation; no successful placeholder endpoint is allowed. Frontend work starts from the retained shell after this integration and adds stable-v1 screens directly.
 
 Generator incompatibilities must be documented with a minimal fixture and resolved in contract/configuration, never by hand-editing generated output. Preserve generator version 0.16.0 unless a reproduced incompatibility forces a separately justified update. See validation-report.md for actual planning-generation checks.
 

@@ -2,21 +2,22 @@
 
 Use one step per implementation session unless its handoff explicitly identifies a smaller subtask. Start with an eligible step whose prerequisites are complete. Read linked specifications before code. Implement its behavior and tests, run checks, fill the handoff, then mark it complete. No agent needs the original conversation.
 
-All steps are initially not started. The generated manifest records prerequisites only, not runtime status. Independent branches after REST cutover are UI (016–020), clients (021–024), and operations (025); they join for packaging and acceptance. Do not edit the same files concurrently without explicit coordination.
+All steps are initially not started. The generated manifest records prerequisites only, not runtime status. Independent branches after REST integration are UI (016–020), clients (021–024), and operations (025); they join for packaging and acceptance. Do not edit the same files concurrently without explicit coordination.
 
 GitHub issue numbers are recorded in [github-issues.json](github-issues.json). Issue #12 is the umbrella roadmap; all implementation issues belong to the `v1 — stable agentic SDLC` milestone.
 
-## Intermediate compilation rule
+## Green-scaffold rule
 
-Steps 002–014 develop new core under v1/ beside MVP core so existing server/tests still compile. Use v1::Store only in new tests; no preview endpoints. Step 015 promotes the complete contract, moves v1 modules to final locations, removes MVP core imports/routes and replaces legacy semantic fixtures. This is an intentional backend integration boundary. Frontend steps 016–020 regenerate once and keep unfinished routes unavailable; use MSW for screens not yet linked. Step 020 removes the route switch. No production release of intermediate work is required.
+Step 000 removes the MVP product implementation but preserves the compiling workspace, dependency pins, CI/security jobs, generators, test runners, minimal health server and accessible React shell. It must not touch user data. Later steps implement directly in final module paths; no `v1/` namespace, legacy source tree, preview endpoint, compatibility layer or route switch is allowed. Step 015 replaces the health-only scaffold contract with the complete implemented REST/SSE surface. Frontend steps 016–020 add only routes whose behavior is complete; use MSW for component isolation. No production release of intermediate work is required.
 
-The dependency tree remains green at each boundary; don't add public NotImplemented endpoints. Existing MVP tests that encode obsolete behavior are replaced with mapped v1 tests at cutover, not retained as contradictory compatibility requirements. Do not disable unrelated tests to hide regressions.
+The dependency tree remains green at each boundary; do not add public NotImplemented endpoints. Step 000 removes tests that solely encode deleted MVP behavior while retaining applicable infrastructure, security and accessibility assertions. Subsequent tests describe stable-v1 behavior only. Do not disable a quality category to hide regressions.
 
 ## Ordered step index
 
 | Step | Outcome | Requires |
 |---|---|---|
-| [001](001-contract-baseline.md) | Contract baseline and isolated generation | — |
+| [000](000-scaffold-reset.md) | Reset to a green v1 scaffold | — |
+| [001](001-contract-baseline.md) | Contract baseline and generation scaffolding | 000 |
 | [002](002-storage-foundation.md) | Fresh database and command infrastructure | 001 |
 | [003](003-projects-and-goals.md) | Project and goal ownership | 002 |
 | [004](004-epics-and-tasks.md) | Separate epic and task resources | 003 |
@@ -30,7 +31,7 @@ The dependency tree remains green at each boundary; don't add public NotImplemen
 | [012](012-reviews.md) | Human and independent agent review | 011 |
 | [013](013-context-and-history.md) | Context assembly and durable history | 012 |
 | [014](014-portability.md) | Snapshot export and full backup/restore | 013 |
-| [015](015-api-cutover.md) | REST cutover and resumable SSE | 013, 014 |
+| [015](015-rest-integration.md) | REST integration and resumable SSE | 013, 014 |
 | [016](016-ui-shell-and-hierarchy.md) | Browser session and hierarchy navigation | 015 |
 | [017](017-ui-task-details.md) | Task and epic forms, phases and actions | 016 |
 | [018](018-ui-graphs.md) | Navigable scoped dependency graphs | 017 |
@@ -43,4 +44,4 @@ The dependency tree remains green at each boundary; don't add public NotImplemen
 | [025](025-diagnostics.md) | Integrity diagnostics and graceful shutdown | 015, 014 |
 | [026](026-release-packaging.md) | macOS and Linux packaging | 020, 022, 023, 025 |
 | [027](027-acceptance-and-performance.md) | Cross-interface and performance acceptance | 024, 026 |
-| [028](028-cutover-and-release-docs.md) | Documentation cutover and release readiness | 027 |
+| [028](028-release-docs.md) | Documentation and release readiness | 027 |

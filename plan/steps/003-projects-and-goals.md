@@ -18,15 +18,15 @@ Starting state: prerequisite step completion checks pass and their handoff recor
 
 ## Files and boundaries
 
-- `core/shepherd-core/src/v1/model/{project,goal}.rs`
-- `core/shepherd-core/src/v1/commands/hierarchy.rs`
-- `core/shepherd-core/src/v1/queries/hierarchy.rs`
+- `core/shepherd-core/src/model/{project,goal}.rs`
+- `core/shepherd-core/src/commands/hierarchy.rs`
+- `core/shepherd-core/src/queries/hierarchy.rs`
 
 Tests: `core/shepherd-core/tests/v1_projects_and_goals.rs`. Braces denote concrete sibling filenames, not optional modules. Update related module declarations/imports and only the documented dependency manifests. Never hand-edit generated files. Follow the final backend/frontend module map and retain existing primitives.
 
 ## Ordered implementation
 
-1. Read the existing related implementation and targeted tests. Record which functions/queries currently enforce the invariant and which need replacing.
+1. Read the current scaffold and targeted tests. Identify the reusable plumbing and final modules owned by this step; do not restore removed MVP product behavior.
 2. Implement project/goal create/list/get/update with revision checks, settings snapshots and explicit ownership. Seed built-in task types per project. Add cursor codec and query filters. Return derived zero counts for empty resources. Use authenticated test actor context; no preview HTTP exposure yet.
 3. Implement the negative scenarios below using public domain commands or live HTTP at the appropriate boundary. Include actor, resource revision and expected state in fixtures.
 4. Run the checks, repair regressions caused by this change, and update the handoff record with exact results.
@@ -52,7 +52,7 @@ cargo test --workspace
 cargo clippy --all-targets -- -D warnings
 ```
 
-Run Rust commands from core/, not the repository root. Before step 015, generated MVP sources remain needed for full workspace checks; run scripts/regen-generated.sh if missing, knowing it formats Rust. At step 015 and later generate from promoted v1 contract. For UI generation run npm run generate:api --prefix ui before typecheck when contract changed. Hurl/Playwright need a fresh isolated database and their installed tools; use existing scripts rather than a personal running daemon.
+Run Rust commands from core/, not the repository root. Keep the minimal scaffold contract until step 015 wires the complete v1 REST surface; never expose successful placeholder operations. Run scripts/regen-generated.sh only when the owning contract step requires generated application files, knowing it formats Rust. For UI generation run npm run generate:api --prefix ui before typecheck when the contract changed. Hurl/Playwright need a fresh isolated database and their installed tools; use existing scripts rather than a personal running daemon.
 
 Expected: zero exit status, all named acceptance cases pass, no changes outside this step's scope. These are future implementation checks, not claims that tests ran during document creation.
 

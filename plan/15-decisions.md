@@ -20,6 +20,7 @@
 | D16 | Atomic synchronous completion cascades | Claims/reports must never observe partially advanced graphs. |
 | D17 | Count archived history, no hard-delete endpoint | Visibility must not change dependency/completion meaning. |
 | D18 | Local credentials, not same-user process isolation | Tokens enforce API roles; OS access controls determine actual file isolation. |
-| D19 | No MVP/v1 mixed database | Preview and cutover must never mutate a legacy schema accidentally. |
+| D19 | No MVP/v1 mixed database | The reset and later implementation must never mutate a legacy schema accidentally. |
+| D20 | Reset product code, retain engineering plumbing | User chose a green scaffold before implementation: keep workspace, CI, generators and generic UI/build primitives; remove MVP domain behavior and use Git history for selective recovery. |
 
 Matt Pocock's [grill-me](https://github.com/mattpocock/skills/blob/main/skills/productivity/grill-me/SKILL.md) now delegates to [grilling](https://github.com/mattpocock/skills/blob/main/skills/productivity/grilling/SKILL.md). Its source was read and its decision rounds used in the design conversation; the skill was not installed in this repository. Product decisions above were confirmed in that conversation; D13 onward records explicit implementation defaults selected to make the handoff complete. No additional confirmation is required to implement the documented scope.

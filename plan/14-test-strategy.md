@@ -2,7 +2,7 @@
 
 ## Principles
 
-Preserve existing Rust unit/property/migration/API tests, Hurl, Vitest/MSW, Playwright/a11y, coverage and dependency checks. Replace obsolete MVP semantics at cutover with mapped stable-v1 behavior, not silent test deletion. No tests for prose wording; validate executable contracts, example schemas, link/reference integrity and step DAG during document authoring.
+Preserve the Rust, Hurl, Vitest/MSW, Playwright/accessibility, coverage, dependency and security test infrastructure. Step 000 removes tests whose only purpose is deleted MVP behavior, retains still-valid infrastructure/security assertions, and proves the reduced scaffold through every quality category. Later steps add stable-v1 unit, property, migration, API and interface behavior incrementally. No tests for prose wording; validate executable contracts, example schemas, link/reference integrity and the step DAG during document authoring.
 
 ## Acceptance scenarios
 
@@ -70,7 +70,7 @@ scripts/playwright-e2e.sh
 scripts/smoke.sh
 ```
 
-Retain migrated existing test target names for the last three Rust commands, or update commands and CI together if split. Never report a filtered command's zero tests as passing coverage. Use new v1_* test files during core development; run cargo test --workspace to include them. Existing quality-gates.yaml coverage collection and scripts/coverage-report.mjs thresholds remain mandatory at release. Fuzz remains a later enhancement; deterministic race/recovery/property cases are v1 release gates.
+Retain test target names when they remain meaningful, or update commands and CI together when step 000 removes an obsolete target. Never report a filtered command's zero tests as passing coverage. Use new `v1_*` test files during core development and run `cargo test --workspace` to include them. Existing `quality-gates.yaml` coverage collection and `scripts/coverage-report.mjs` thresholds remain mandatory at release. Fuzz remains a later enhancement; deterministic race/recovery/property cases are v1 release gates.
 
 ## Planning validation versus application validation
 

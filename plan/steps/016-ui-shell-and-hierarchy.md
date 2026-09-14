@@ -4,7 +4,7 @@ Status: not started. Requirements: UI-01 AUTH-01.
 
 ## Objective and prerequisites
 
-Deliver browser session and hierarchy navigation. Required completed steps: [015](015-api-cutover.md)
+Deliver browser session and hierarchy navigation. Required completed steps: [015](015-rest-integration.md)
 
 Read [execution rules](README.md) first, then:
 
@@ -28,14 +28,14 @@ Tests: `Adjacent component tests / resource HTTP tests named for the changed beh
 
 ## Ordered implementation
 
-1. Read the existing related implementation and targeted tests. Record which functions/queries currently enforce the invariant and which need replacing.
-2. Extend central fetch with cookies/CSRF/revision/idempotency. Add login/session boundary and new project/goal/epic routes, breadcrumbs and hierarchy list screens behind a local development v1 route switch until complete. Regenerate Orval models/hooks/Zod from promoted spec and update fixtures/MSW. Preserve old visual primitives; remove obsolete generated hook imports at the same cutover.
+1. Read the current scaffold and targeted tests. Identify the reusable plumbing and final modules owned by this step; do not restore removed MVP product behavior.
+2. Extend the scaffold fetch client with cookies, CSRF, revisions and idempotency. Add the login/session boundary and project/goal/epic routes, breadcrumbs and hierarchy list screens. Generate Orval models/hooks/Zod from the promoted specification and add fixtures/MSW alongside each screen. Preserve the retained visual primitives; no feature switch or legacy route is required.
 3. Implement the negative scenarios below using public domain commands or live HTTP at the appropriate boundary. Include actor, resource revision and expected state in fixtures.
 4. Run the checks, repair regressions caused by this change, and update the handoff record with exact results.
 
 ## Acceptance tests and expected results
 
-Deep links resolve; login expires cleanly; project with two goals navigates independently. Empty hierarchy has correct CTA. Fields never submit before defaults load. Existing shell/a11y tests migrate to v1 routes and pass.
+Deep links resolve; login expires cleanly; a project with two goals navigates independently. Empty hierarchy has the correct CTA. Fields never submit before defaults load. Scaffold shell/accessibility checks remain green and the new v1 route tests pass.
 
 For each sentence above create a named regression test with setup → action → expected status/error → persisted state checks. Mutation failures must leave resource revision/history unchanged except an independently committed prior command. Use file-backed SQLite and independent pools for concurrency, controllable clock for TTL; do not test only a mocked helper that mirrors implementation. For UI, cover loading/empty/error plus keyboard interaction for new controls, using MSW for component tests and real server for critical E2E.
 
@@ -55,7 +55,7 @@ npm run build --prefix ui
 scripts/playwright-e2e.sh
 ```
 
-Run Rust commands from core/, not the repository root. Before step 015, generated MVP sources remain needed for full workspace checks; run scripts/regen-generated.sh if missing, knowing it formats Rust. At step 015 and later generate from promoted v1 contract. For UI generation run npm run generate:api --prefix ui before typecheck when contract changed. Hurl/Playwright need a fresh isolated database and their installed tools; use existing scripts rather than a personal running daemon.
+Run Rust commands from core/, not the repository root. Keep the minimal scaffold contract until step 015 wires the complete v1 REST surface; never expose successful placeholder operations. Run scripts/regen-generated.sh only when the owning contract step requires generated application files, knowing it formats Rust. For UI generation run npm run generate:api --prefix ui before typecheck when the contract changed. Hurl/Playwright need a fresh isolated database and their installed tools; use existing scripts rather than a personal running daemon.
 
 Expected: zero exit status, all named acceptance cases pass, no changes outside this step's scope. These are future implementation checks, not claims that tests ran during document creation.
 
