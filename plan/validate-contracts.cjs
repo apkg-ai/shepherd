@@ -10,7 +10,7 @@ ajv.addFormat('uuid', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 ajv.addFormat('date-time', v => /^\d{4}-\d\d-\d\dT/.test(v) && !Number.isNaN(Date.parse(v)));
 ajv.addFormat('uri', v => {try {return Boolean(new URL(v).protocol)} catch {return false}});
 const api = read('contracts/openapi.yaml');
-const defs = JSON.parse(JSON.stringify(api.components.schemas).replaceAll('#/components/schemas/', '#/$defs/'));
+const defs = JSON.parse(JSON.stringify(api.components.schemas).replace(/#\/components\/schemas\//g, '#/$defs/'));
 ajv.addSchema({$id: 'https://shepherd.local/plan/models', $defs: defs});
 let checked = 0;
 function validate(name, value) {
