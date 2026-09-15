@@ -13,7 +13,7 @@
 | Owner cancels required task | Epic does not auto-complete; task dependency stays unmet. |
 | Owner waives cancelled task | Excluded from epic required-work test, not marked done and not a satisfied task prerequisite. |
 | Empty or all-waived epic | No automatic completion; owner explicitly complete with reason and prerequisites done. |
-| Add link between goals / tasks in different epics | 409 scope_mismatch; no edge inserted. |
+| Add dependency between epics in different goals / tasks in different epics | 409 scope_mismatch; no edge inserted. |
 | Add opposing edges concurrently | At most one inserted; dependency_cycle for other. |
 | Add task races last-task epic completion | Serialized: task created before completion keeps epic open, or terminal epic rejects creation. |
 | Replace selected plan during execute claim | 409 active_work; pinned plan unchanged. |

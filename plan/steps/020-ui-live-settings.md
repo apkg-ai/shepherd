@@ -17,6 +17,7 @@ Starting state: prerequisite step completion checks pass and their handoff recor
 ## Files and boundaries
 
 - `ui/src/screens/projects/ProjectSettingsScreen.tsx`
+- `ui/src/screens/projects/ProjectOverviewScreen.tsx`
 - `ui/src/screens/identity/AgentsScreen.tsx`
 - `ui/src/lib/events.ts`
 - `ui/src/api/invalidate.ts`
@@ -27,13 +28,13 @@ Tests: `Adjacent component tests / resource HTTP tests named for the changed beh
 ## Ordered implementation
 
 1. Read the current scaffold and targeted tests. Identify the reusable plumbing and final modules owned by this step; do not restore removed MVP product behavior.
-2. Complete project defaults/type registry, archive/export/import dialogs and the agent credential screen. Implement the durable replay/resynchronization catalog and invalidation map in `events.ts`. Add connection/session states and structured error display; all routes are stable-v1 routes added by their owning frontend step.
+2. Complete project defaults/type registry and archive/export controls in project settings, the import dialog in the project registry, and the agent credential screen. Implement the durable replay/resynchronization catalog and invalidation map in `events.ts`. An `epic.changed` or epic-scoped `dependency.changed` event invalidates the active goal graph; a `task.changed` or task-scoped `dependency.changed` event invalidates the active epic graph. Claim changes update node style/detail without topology relayout. Add connection/session states and structured error display; all routes are stable-v1 routes added by their owning frontend step.
 3. Implement the negative scenarios below using public domain commands or live HTTP at the appropriate boundary. Include actor, resource revision and expected state in fixtures.
 4. Run the checks, repair regressions caused by this change, and update the handoff record with exact results.
 
 ## Acceptance tests and expected results
 
-New token shown once; revoke invalidates claims in UI. Default edits do not change existing task policy. SSE reconnect updates all affected graphs/counts/queues without losing unsaved editor. No old review_gate/type=epic logic remains.
+New token shown once; revoke invalidates claims in UI. Default edits do not change existing task policy. Named regressions prove that epic status/topology changes refresh the active goal graph, task status/topology changes refresh the active epic graph, and claim-only changes preserve graph layout while refreshing style/detail. SSE reconnect updates all affected graphs/counts/queues without losing unsaved editor. No old review_gate/type=epic logic remains.
 
 For each sentence above create a named regression test with setup → action → expected status/error → persisted state checks. Mutation failures must leave resource revision/history unchanged except an independently committed prior command. Use file-backed SQLite and independent pools for concurrency, controllable clock for TTL; do not test only a mocked helper that mirrors implementation. For UI, cover loading/empty/error plus keyboard interaction for new controls, using MSW for component tests and real server for critical E2E.
 

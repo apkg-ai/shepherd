@@ -12,7 +12,7 @@ All routes below are hash paths. p, g, e, t denote UUID parameters. All forms sh
 
 | Route | Data/operations | Layout and actions | Empty/error behavior |
 |---|---|---|---|
-| / | listProjects/createProject | Project cards: name and epic counts; Create; archived toggle | Explain project purpose + Create; retry list failure |
+| / | listProjects/createProject/importProject | Project cards: name and epic counts; Create, Import; archived toggle | Explain project purpose + Create or Import; show schema errors and retry list failure |
 | /login | createBrowserSession | Owner-token password input, explain where local token file is; Sign in | No token persistence in localStorage; clear input after success/failure |
 | /projects/:p | getProject/listGoals | Project title, goal cards, epic counts, New goal, Review queue, Knowledge, Settings | 0 goals CTA; no empty full-project graph |
 | /projects/:p/goals/new | createGoal | Title required, description Markdown textarea | Owner only |
@@ -31,7 +31,7 @@ All routes below are hash paths. p, g, e, t denote UUID parameters. All forms sh
 | /projects/:p/documents/:d/edit | createDocumentRevision | Plain textarea + preview; edit starts from selected latest revision | No rich text dependency; Save creates new revision |
 | /projects/:p/knowledge | listDocuments owner_kind=project | Project notes/decisions/briefs with kind filters; New document | Replaces knowledge-items screen semantics |
 | /projects/:p/history | listHistory | Actor, action, resource links, reason via detail records; Load more | Chronological audit, not editable |
-| /projects/:p/settings | getProject/updateProject/listTaskTypes/createTaskType/updateTaskType | Four defaults, archive project, export/import, type registry | Explicit warning defaults affect new tasks only |
+| /projects/:p/settings | getProject/updateProject/archiveProject/exportProject/listTaskTypes/createTaskType/updateTaskType | Four defaults, archive project, export, type registry | Explicit warning defaults affect new tasks only |
 | /settings/agents | listAgents/createAgent/revokeAgent | Label, status, issue/revoke token; show new token once with Copy | Token hidden after dismissal; revoke explains claim revocation |
 
 Add fixed-scope query parameters to document-new route: owner_kind, owner_id, kind; validate against loaded project entities. Project import lives in registry dialog calling importProject; show schema errors and import success link. Archive controls appear on detail/settings; no Delete. Owner can claim and report plan/execute work in task action panel: Claim phase, Save output, Report success/failure, Release; store lease token only in memory, lose/release via TTL on browser close. Human reviews require no review claim. This makes manual tasks usable through browser while agent execution remains external.

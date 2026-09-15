@@ -31,13 +31,13 @@ Tests: `Adjacent component tests / resource HTTP tests named for the changed beh
 ## Ordered implementation
 
 1. Read the current scaffold and targeted tests. Identify the reusable plumbing and final modules owned by this step; do not restore removed MVP product behavior.
-2. Promote `contracts/openapi.yaml` and `asyncapi.yaml` into `openapi/`. Replace the health-only scaffold allowlist, generate full server traits and implement every operation handler using the completed core commands. Replace scaffold wire/contract fixtures with stable-v1 fixtures. Add SSE authentication, persisted replay, explicit resynchronization and truthful errors.
+2. Copy `plan/contracts/openapi.yaml` to `openapi/shepherd.yaml` and `plan/contracts/asyncapi.yaml` to `openapi/shepherd-events.asyncapi.yaml`. Replace the health-only scaffold allowlist, generate full server traits and implement every operation handler using the completed core commands. Replace scaffold wire/contract fixtures with stable-v1 fixtures. Add SSE authentication, persisted replay, explicit resynchronization and truthful errors. For staged import, enforce the specified 30-second idle-progress timeout across body receipt and record validation; reset it on each received chunk or validated record, delete staging state on timeout/disconnect, and do not impose a total-duration cap.
 3. Implement the negative scenarios below using public domain commands or live HTTP at the appropriate boundary. Include actor, resource revision and expected state in fixtures.
 4. Run the checks, repair regressions caused by this change, and update the handoff record with exact results.
 
 ## Acceptance tests and expected results
 
-Every catalog operation is implemented with no success stubs. Real HTTP tests validate responses and errors against the contract. A non-v1 database refuses startup. SSE lost-connection, restart and history-gap scenarios resynchronize correctly. `cargo test --workspace` passes with the stable-v1 suites and no MVP behavior restored.
+Every catalog operation is implemented with no success stubs. Real HTTP tests validate responses and errors against the contract. A stalled import returns 408 `import_timeout` after 30 seconds without progress and commits no project; an import that makes progress more often than every 30 seconds may run beyond 30 seconds and complete. Disconnect also removes staging state. A non-v1 database refuses startup. SSE lost-connection, restart and history-gap scenarios resynchronize correctly. `cargo test --workspace` passes with the stable-v1 suites and no MVP behavior restored.
 
 For each sentence above create a named regression test with setup → action → expected status/error → persisted state checks. Mutation failures must leave resource revision/history unchanged except an independently committed prior command. Use file-backed SQLite and independent pools for concurrency, controllable clock for TTL; do not test only a mocked helper that mirrors implementation. For UI, cover loading/empty/error plus keyboard interaction for new controls, using MSW for component tests and real server for critical E2E.
 

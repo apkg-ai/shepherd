@@ -3537,6 +3537,11 @@
         "status": 403,
         "code": "forbidden",
         "detail": "This operation requires the owner."
+      },
+      {
+        "status": 408,
+        "code": "import_timeout",
+        "detail": "Import stream made no progress for 30 seconds; no project was committed."
       }
     ]
   },

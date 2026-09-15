@@ -20,6 +20,7 @@ Maximum normal body 2 MiB; import is an authenticated owner-only streaming excep
 | 401 | unauthenticated | Renew human session or configure token. |
 | 403 | forbidden, reviewer_policy, producer_cannot_review | Do not retry as another claimed role. |
 | 404 | not_found | Refresh parent navigation. |
+| 408 | import_timeout | Restart import; the staging database was deleted and no project was committed. |
 | 409 | not_eligible, active_work, terminal, dependency_cycle, scope_mismatch, lease_invalid, submission_superseded, idempotency_conflict | Refetch and explain; do not repeat with a new key automatically. |
 | 412 | revision_conflict | Preserve local form, refetch, offer explicit comparison/resubmit. |
 | 413 | payload_too_large | Reduce content. |
@@ -112,4 +113,4 @@ Roles are refined in [security](12-security-and-local-identity.md); generic writ
 
 ## Streaming route exception
 
-+getEvents, exportProject and importProject remain in OpenAPI but are excluded from generated Axum handler whitelist. Implement them as handwritten Axum Body/stream routes with the same authentication/errors/schema conformance. Normal generated validation has a 2 MiB body cap; import must use the separate authenticated staged streaming parser. Shared client/CLI export/import copy byte streams rather than deserialize a whole ExportDocument into memory. Typed record models still come from the same contract. Other 67 operations use generated handlers.
+getEvents, exportProject and importProject remain in OpenAPI but are excluded from generated Axum handler whitelist. Implement them as handwritten Axum Body/stream routes with the same authentication/errors/schema conformance. Normal generated validation has a 2 MiB body cap; import must use the separate authenticated staged streaming parser. If import makes no progress for 30 seconds while receiving body chunks or validating records, delete the staging database, roll back, and return 408 `import_timeout`; reset this timer after each received chunk or validated record. There is no total-duration cap. Shared client/CLI export/import copy byte streams rather than deserialize a whole ExportDocument into memory. Typed record models still come from the same contract. Other 67 operations use generated handlers.

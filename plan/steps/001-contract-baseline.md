@@ -45,8 +45,10 @@ Do not implement subsequent steps or change confirmed product decisions. No exte
 # Repository root.
 python3 plan/validate.py
 node plan/validate-contracts.cjs
-openapi-to-rust generate plan/contracts/openapi.yaml --types-only --dry-run --json
+python3 plan/check-generation.py
 ```
+
+If Node from `.nvmrc` is not active in the shell, pass its binary directory explicitly with `python3 plan/check-generation.py --node-dir <node-bin-directory>`. This single check must generate and compile temporary Rust models/server code and generate/typecheck the Orval React Query and Zod output.
 
 Run Rust commands from core/, not the repository root. Keep the minimal scaffold contract until step 015 wires the complete v1 REST surface; never expose successful placeholder operations. Run scripts/regen-generated.sh only when the owning contract step requires generated application files, knowing it formats Rust. For UI generation run npm run generate:api --prefix ui before typecheck when the contract changed. Hurl/Playwright need a fresh isolated database and their installed tools; use existing scripts rather than a personal running daemon.
 

@@ -2,7 +2,7 @@
 
 Use one step per implementation session unless its handoff explicitly identifies a smaller subtask. Start with an eligible step whose prerequisites are complete. Read linked specifications before code. Implement its behavior and tests, run checks, fill the handoff, then mark it complete. No agent needs the original conversation.
 
-All steps are initially not started. The generated manifest records prerequisites only, not runtime status. Independent branches after REST integration are UI (016–020), clients (021–024), and operations (025); they join for packaging and acceptance. Do not edit the same files concurrently without explicit coordination.
+All steps are initially not started. The generated manifest records prerequisites only, not runtime status. Independent branches after REST integration are UI (016–020), executable clients (021–023), the agent guide (024), and operations (025). UI, executable clients and operations join for packaging in 026; the guide joins them for acceptance in 027. Do not edit the same files concurrently without explicit coordination.
 
 GitHub issue numbers are recorded in [github-issues.json](github-issues.json). Issue #12 is the umbrella roadmap; all implementation issues belong to the `v1 — stable agentic SDLC` milestone.
 

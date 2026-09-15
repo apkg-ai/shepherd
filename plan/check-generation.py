@@ -19,13 +19,13 @@ def main():
     args = parser.parse_args()
     plan = Path(__file__).resolve().parent
     repo = plan.parent
-    scratch = Path(tempfile.mkdtemp(prefix='shepherd-plan-generation-'))
     env = dict(os.environ)
     if args.node_dir:
         env['PATH'] = str(args.node_dir) + os.pathsep + env.get('PATH', '')
     node = shutil.which('node', path=env.get('PATH'))
     if not node:
         parser.error('Activate Node from .nvmrc or pass --node-dir.')
+    scratch = Path(tempfile.mkdtemp(prefix='shepherd-plan-generation-'))
 
     def run(*cmd):
         print('+ ' + ' '.join(map(str, cmd)), flush=True)
@@ -85,6 +85,7 @@ def main():
         'noUnusedLocals': True, 'noUnusedParameters': True
     }, 'include': ['api', 'validation']}))
     run(repo / 'ui/node_modules/.bin/tsc', '--project', frontend / 'tsconfig.json')
+    shutil.rmtree(scratch)
     print('PASS: generated Rust models/server and React Query v5/Zod output compile.')
 
 

@@ -20,21 +20,20 @@ Starting state: prerequisite step completion checks pass and their handoff recor
 
 - `core/shepherd-core/src/export.rs`
 - `core/shepherd-server/src/maintenance.rs (offline functions only; REST wiring in 015)`
-- `core/shepherd-server/src/maintenance.rs`
 - `core/shepherd-server/src/main.rs`
 
-Tests: `core/shepherd-core/tests/v1_portability.rs` and offline maintenance tests with fresh v1 databases.. Braces denote concrete sibling filenames, not optional modules. Update related module declarations/imports and only the documented dependency manifests. Never hand-edit generated files. Follow the final backend/frontend module map and retain existing primitives.
+Tests: `core/shepherd-core/tests/v1_portability.rs` and offline maintenance tests with fresh v1 databases. Braces denote concrete sibling filenames, not optional modules. Update related module declarations/imports and only the documented dependency manifests. Never hand-edit generated files. Follow the final backend/frontend module map and retain existing primitives.
 
 ## Ordered implementation
 
 1. Read the current scaffold and targeted tests. Identify the reusable plumbing and final modules owned by this step; do not restore removed MVP product behavior.
-2. Implement core format-2 export/import (REST streaming wiring is step 015) per schema and invariants, UUID remapping and normalization of active states. Implement offline server backup/restore maintenance with manifests and replay-key/owner-token inclusion. Refuse live daemon lock and existing output destination.
+2. Implement core format-2 export/import (REST streaming wiring is step 015) per schema and invariants, UUID remapping and normalization of active states. Implement offline server backup/restore maintenance with replay-key/owner-token inclusion. Treat the full backup as equivalent to the live credential store: create its directory as 0700 and files as 0600; keep token contents out of manifests and logs; allow only filenames and SHA-256 digests in the manifest. Refuse a live daemon lock and an existing output destination.
 3. Implement the negative scenarios below using public domain commands or live HTTP at the appropriate boundary. Include actor, resource revision and expected state in fixtures.
 4. Run the checks, repair regressions caused by this change, and update the handoff record with exact results.
 
 ## Acceptance tests and expected results
 
-Concurrent exporter sees one valid snapshot. Bad scope/cycle/revision refs cause atomic import failure. Import never reactivates claims/credentials. Full backup restores completed state, identities and idempotent replay; wrong checksum fails before replacement.
+Concurrent exporter sees one valid snapshot. Bad scope/cycle/revision refs cause atomic import failure. Import never reactivates claims/credentials. Full backup restores completed state, credential contents and modes, identities and idempotent replay; wrong checksum or group/world-readable credential files fail before replacement. Backup manifests and logs contain no token content, and backup directories/files are created with 0700/0600 modes.
 
 For each sentence above create a named regression test with setup → action → expected status/error → persisted state checks. Mutation failures must leave resource revision/history unchanged except an independently committed prior command. Use file-backed SQLite and independent pools for concurrency, controllable clock for TTL; do not test only a mocked helper that mirrors implementation. For UI, cover loading/empty/error plus keyboard interaction for new controls, using MSW for component tests and real server for critical E2E.
 

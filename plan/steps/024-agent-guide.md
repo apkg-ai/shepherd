@@ -17,6 +17,7 @@ Starting state: prerequisite step completion checks pass and their handoff recor
 ## Files and boundaries
 
 - `docs/agent-guide.md`
+- `scripts/v1-agent-handoff-e2e.sh`
 - `tests/hurl/10-v1-agent-handoff.hurl`
 - `tests/v1-agent-workflow.py`
 
@@ -25,13 +26,15 @@ Tests: `Adjacent component tests / resource HTTP tests named for the changed beh
 ## Ordered implementation
 
 1. Read the current scaffold and targeted tests. Identify the reusable plumbing and final modules owned by this step; do not restore removed MVP product behavior.
-2. Promote plan/11-agent-guide.md and validated examples into stable docs/agent-guide.md while preserving user untracked files. Turn example operation sequences into live Hurl/CLI/MCP acceptance scenarios with captured IDs and revisions. Explain polling/renewal, unknown response retry and handoff content.
+2. Promote plan/11-agent-guide.md and validated examples into stable docs/agent-guide.md while preserving user untracked files. Turn example operation sequences into live Hurl/CLI/MCP acceptance scenarios with captured IDs and revisions. Add `scripts/v1-agent-handoff-e2e.sh`: it starts the daemon with an isolated fresh data directory, bootstraps owner plus distinct planner/reviewer/executor credential files, runs `tests/hurl/10-v1-agent-handoff.hurl` and `tests/v1-agent-workflow.py` against that daemon, and always tears the process and data directory down. Explain polling/renewal, unknown response retry and handoff content.
 3. Implement the negative scenarios below using public domain commands or live HTTP at the appropriate boundary. Include actor, resource revision and expected state in fixtures.
 4. Run the checks, repair regressions caused by this change, and update the handoff record with exact results.
 
 ## Acceptance tests and expected results
 
 Fresh independent agent can follow instructions without old conversation. All example operations exist. Planner/reviewer/executor use distinct credentials; guide never tells agent to impersonate owner or bypass human gates.
+
+The wrapper proves both live workflows against one freshly bootstrapped daemon and leaves no daemon or data directory behind on success or failure.
 
 For each sentence above create a named regression test with setup → action → expected status/error → persisted state checks. Mutation failures must leave resource revision/history unchanged except an independently committed prior command. Use file-backed SQLite and independent pools for concurrency, controllable clock for TTL; do not test only a mocked helper that mirrors implementation. For UI, cover loading/empty/error plus keyboard interaction for new controls, using MSW for component tests and real server for critical E2E.
 
@@ -45,7 +48,7 @@ Do not implement subsequent steps or change confirmed product decisions. No exte
 # Repository root.
 python3 plan/validate.py
 node plan/validate-contracts.cjs
-openapi-to-rust generate plan/contracts/openapi.yaml --types-only --dry-run --json
+scripts/v1-agent-handoff-e2e.sh
 ```
 
 Run Rust commands from core/, not the repository root. Keep the minimal scaffold contract until step 015 wires the complete v1 REST surface; never expose successful placeholder operations. Run scripts/regen-generated.sh only when the owning contract step requires generated application files, knowing it formats Rust. For UI generation run npm run generate:api --prefix ui before typecheck when the contract changed. Hurl/Playwright need a fresh isolated database and their installed tools; use existing scripts rather than a personal running daemon.

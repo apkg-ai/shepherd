@@ -14243,6 +14243,16 @@
               }
             }
           },
+          "408": {
+            "description": "Import stream made no progress for 30 seconds; no project was committed.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Resource not found",
             "content": {
