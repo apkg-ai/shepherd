@@ -20,7 +20,7 @@ export function RouteError() {
       <p className={styles.errorTitle}>Something went wrong</p>
       <p className={styles.errorDetail}>{detail}</p>
       <p>
-        <Link to="/">Back to projects</Link>
+        <Link to="/">Back home</Link>
       </p>
     </div>
   );

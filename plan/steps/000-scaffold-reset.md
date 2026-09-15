@@ -1,6 +1,6 @@
 # 000 — Reset to a green v1 scaffold
 
-Status: not started. Requirements: OPS-01.
+Status: complete (PR #81). Requirements: OPS-01.
 
 ## Objective and prerequisites
 
@@ -85,14 +85,72 @@ Expected: zero exit status from all commands, no skipped quality category, and n
 
 ## Completion checklist
 
-- [ ] Keep/remove inventory recorded before deletion and reconciled afterward.
-- [ ] Rust and browser scaffolds compile, start and pass meaningful smoke tests.
-- [ ] MVP product code, schema, routes, screens, generated types, fixtures and obsolete documentation are absent.
-- [ ] CI, security, dependency, generation, coverage and test plumbing remain operational.
-- [ ] Existing user data and untracked paths remain untouched.
-- [ ] No future v1 behavior or compatibility layer was introduced.
-- [ ] Handoff below completed; step 001 linked as the only next eligible step.
+- [x] Keep/remove inventory recorded before deletion and reconciled afterward.
+- [x] Rust and browser scaffolds compile, start and pass meaningful smoke tests.
+- [x] MVP product code, schema, routes, screens, generated types, fixtures and obsolete documentation are absent.
+- [x] CI, security, dependency, generation, coverage and test plumbing remain operational.
+- [x] Existing user data and untracked paths remain untouched.
+- [x] No future v1 behavior or compatibility layer was introduced.
+- [x] Handoff below completed; step 001 linked as the only next eligible step.
 
 ## Implementation handoff record
 
-Fill when implementing, not during planning: commit/branch; exact retained and removed paths; test commands and results; CI run; any generic helper intentionally deferred; confirmation that user data/untracked paths were untouched; next eligible step 001. If any retained quality gate cannot pass, leave this step incomplete and explain the concrete blocker.
+Branch: `000-scaffold-reset` (off `main` at `4b565e2`). Commit/PR/CI run: recorded at completion below.
+
+### Keep/remove inventory (recorded before deletion)
+
+Removed (tracked paths):
+
+- `core/shepherd-core/src/{model,lifecycle,dag,lease,bundle,export,event,error,store}.rs`
+- `core/shepherd-core/migrations/` (8 SQL files, 20260907–20260910)
+- `core/shepherd-core/tests/{migration_tests.rs,proptest_invariants.rs}` and proptest regression files
+- `core/shepherd-server/src/convert.rs`
+- `openapi/shepherd-events.asyncapi.yaml`, `.spectral-asyncapi.yaml`, root `lint:events` script
+- `docs/` (8 tracked MVP documents; superseded by `plan/`)
+- `tests/hurl/02…09-*.hurl` (8 MVP scenario files)
+- `ui/src/screens/{AppLayout.tsx,AppLayout.module.css,shell.test.tsx,error-paths.test.tsx}` and `ui/src/screens/{graph,knowledge,projects,review,tasks}/**`
+- `ui/src/components/{ReasonDialog,AttemptBadge,StatusBadge,TypeBadge,IdentityChip}.{tsx,module.css}`
+- `ui/src/lib/{events.ts,events.test.tsx,graphLayout.*,graphNeighbors.*,taskTree.*,download.*,links.*}`
+- `ui/src/api/{invalidate.ts,paging.ts,paging.test.ts}`
+- `ui/src/styles/reactflow.css`, `ui/src/test/fixtures.ts`
+- `ui/e2e/{a11y,detail,graph,keyboard,knowledge,registry,review,screenshots,settings,tasks,theme,tree}.spec.ts`, `ui/e2e/helpers/api.ts`
+- CI jobs `core-test-property` and `core-test-migration` (their entire subject — the domain store and MVP migrations — is deleted; suites return with their owning steps)
+- Dependencies that become unused: shepherd-core `sqlx,base64,chrono,uuid,thiserror,tokio,serde,serde_json,proptest`; shepherd-server `dirs,tokio-stream` (+`chrono,uuid` if the regenerated `REQUIRED_DEPS.toml` no longer declares them); ui `@dagrejs/dagre,@xyflow/react`; root `@axe-core/playwright`; RUSTSEC-2023-0071 ignores in `osv-scanner.toml`/`.cargo/audit.toml` (sqlx leaves the tree)
+
+Retained (adapted where noted):
+
+- Repository metadata, `LICENSE`, `.gitignore`, `rust-toolchain.toml`, `.nvmrc`, root/`core/`/`ui/` manifests and lockfiles (trimmed/regenerated)
+- `openapi/shepherd.yaml` replaced by a health-only scaffold contract (strict subset of the MVP spec: `getHealth` verbatim, shared error/header components)
+- `core/Cargo.toml` workspace; `shepherd-core/src/lib.rs` reduced to the `version()` shell + its test; `shepherd-server/src/{main.rs,lib.rs,middleware.rs}` reduced to config/startup, health, spec serving, static UI, CORS and rate-limit headers; `openapi-to-rust.toml` allowlist reduced to `getHealth`; `tests/api.rs` retargeted to scaffold checks; new `tests/boot.rs` (unrelated-cwd boot + `~/.shepherd` guard)
+- `.github/workflows/{quality-gates,dependency-scan,sast}.yaml` (quality-gates minus the two removed jobs and the AsyncAPI lint step; scan/SAST untouched)
+- `scripts/{regen-generated.sh,coverage-report.mjs,smoke.sh,hurl-e2e.sh,playwright-e2e.sh}` (the last three lose temp-DB/`--db` plumbing; hurl runner loses the SSE section); `tests/hurl/01-health-and-spec.hurl`
+- `ui/`: `index.html`, `public/favicon.svg`, `vite.config.ts`, `orval.config.ts`, `playwright.config.ts`, all tsconfigs, `.oxlintrc.json`, `.oxfmtrc.json`; `src/main.tsx`, `src/index.css`, `src/router.tsx` (rewritten to one scaffold route), `src/styles/tokens.css` (status/type/epic families pruned) + `surfaces.module.css`; components `Button, Dialog, ConfirmDialog, FormField, CopyButton, PageHeader, LoadMore, Toast, ThemeToggle, states` (+ rewritten `components.test.tsx`); `src/lib/{theme,contrast,format,forms,queryClient}` (+tests, contrast pairs pruned in lockstep); `src/api/{client,problem}` (+tests); `src/test-setup.ts` (React Flow shims removed), `src/test/{msw.ts (reduced),test-utils.tsx}`; screens `RouteError` (+test), `NotFound`, new `AppShell`/`HomeScreen` (+tests); `e2e/helpers/{coverage.ts,global-teardown.ts}` + new `shell.spec.ts`/`a11y.spec.ts`
+- The entire `plan/` handbook (only this handoff section changes)
+
+Generic helpers intentionally deferred (recover from Git history at the owning step after checking assumptions against the v1 specification): `ProblemDetailRemapLayer` (step 015), `ui/src/lib/download.ts` (step 014), `ui/src/lib/links.ts` (step 019), `ui/src/api/paging.ts` and `ui/src/api/invalidate.ts` (step 016), React Flow jsdom shims in `test-setup.ts` (step 018).
+
+### Results (completed at end of implementation)
+
+Additions beyond the inventory (created, not retained): `core/shepherd-server/tests/boot.rs` (unrelated-cwd boot + HOME guard), `ui/src/screens/{AppShell,HomeScreen}.tsx` (+css), `ui/src/screens/shell.test.tsx`, `ui/e2e/{shell,a11y}.spec.ts`. The inventory above was reconciled against `git status` after implementation — no unplanned path was touched.
+
+Test commands and results (from the reset tree, Node via nvm, Rust 1.98.1):
+
+- `python3 plan/validate.py` — PASS (29 step DAG; 70 operations).
+- `node plan/validate-contracts.cjs` — PASS (108 examples).
+- `npm run lint:specs` — PASS (spectral, zero errors on the health-only contract).
+- `npm run lint --prefix ui` / `fmt:check` / `typecheck` — PASS (3 pre-existing fast-refresh warnings, zero errors).
+- `npm run test:unit:cov --prefix ui` — 127/127 passed, 97.1% lines (gate ≥95%).
+- `npm run build --prefix ui` — PASS.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` — PASS.
+- `cargo test --workspace` (incl. `--doc`) — 10/10 passed: 1 core unit, 8 api integration/contract, 1 boot guard.
+- `scripts/hurl-e2e.sh` — 1/1 hurl file passed.
+- `scripts/playwright-e2e.sh` — 7/7 specs passed (shell, theme, axe WCAG-AA both themes).
+- `scripts/smoke.sh` — OK (health, spec, UI index).
+- `node scripts/coverage-report.mjs --check` with all four lcov suites — thresholds met: core unit 100%, integration 100%, total 100%; ui unit 97.1%, e2e 69.7%, total 94.5%.
+- Negative sweep: `grep -riE 'epic|knowledge|lease|claim|proposed|in_review|depends_on|decomposition|sqlite|sqlx'` over compiled sources, tests, specs and scripts — zero MVP-domain hits.
+
+CI run: PR [#81](https://github.com/apkg-ai/shepherd/pull/81) — all checks green: [Quality Gates](https://github.com/apkg-ai/shepherd/actions/runs/34939434689) (16 jobs incl. coverage gate), [Dependency Scan](https://github.com/apkg-ai/shepherd/actions/runs/34939434603), [SAST](https://github.com/apkg-ai/shepherd/actions/runs/34939434666). One follow-up commit on the branch bumps transitive `rustls` 0.23.44→0.23.45 in `core/Cargo.lock` for RUSTSEC-2026-0285 (advisory published 2026-09-14, unrelated to the reset).
+
+User data and untracked paths untouched: `~/.shepherd/shepherd.db` (+wal/shm) last modified 2026-09-13, before this implementation; no test or script resolves that path anymore, and `tests/boot.rs` asserts the server never creates `~/.shepherd`. `docs/agent-quickstart.md` and `example/` do not exist in this working tree; nothing was created there.
+
+Next eligible step: 001.

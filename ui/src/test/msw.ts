@@ -1,11 +1,6 @@
 import { setupServer } from "msw/node";
 import { HttpResponse } from "msw";
-import { getExportImportMock } from "../api/generated/export-import/export-import.msw";
-import { getKnowledgeMock } from "../api/generated/knowledge/knowledge.msw";
-import { getProjectsMock } from "../api/generated/projects/projects.msw";
-import { getRelationsMock } from "../api/generated/relations/relations.msw";
-import { getSessionsMock } from "../api/generated/sessions/sessions.msw";
-import { getTasksMock } from "../api/generated/tasks/tasks.msw";
+import { getSystemMock } from "../api/generated/system/system.msw";
 import type { ProblemDetail, ValidationErrorDetail } from "../api/problem";
 
 /**
@@ -13,14 +8,7 @@ import type { ProblemDetail, ValidationErrorDetail } from "../api/problem";
  * spec-shaped faker data as background noise; tests seed the responses they
  * assert on with `server.use(get<Op>MockHandler(fixture))`.
  */
-export const server = setupServer(
-  ...getProjectsMock(),
-  ...getExportImportMock(),
-  ...getTasksMock(),
-  ...getSessionsMock(),
-  ...getRelationsMock(),
-  ...getKnowledgeMock(),
-);
+export const server = setupServer(...getSystemMock());
 
 /** Builds a problem+json response for error-path tests. */
 export function problemResponse(

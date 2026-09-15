@@ -4,13 +4,13 @@ import { errorSlug, fieldErrors, isShepherdError, ShepherdError } from "./proble
 describe("ShepherdError", () => {
   it("uses detail as the message when present", () => {
     const err = new ShepherdError({
-      type: "urn:shepherd:error:claim-conflict",
-      title: "Claim conflict",
+      type: "urn:shepherd:error:edit-conflict",
+      title: "Edit conflict",
       status: 409,
-      detail: "Task is already claimed",
+      detail: "The resource changed underneath the request",
     });
-    expect(err.message).toBe("Task is already claimed");
-    expect(err.title).toBe("Claim conflict");
+    expect(err.message).toBe("The resource changed underneath the request");
+    expect(err.title).toBe("Edit conflict");
     expect(err.status).toBe(409);
     expect(err.name).toBe("ShepherdError");
   });

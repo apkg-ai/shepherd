@@ -1,0 +1,28 @@
+.facts {
+  margin: var(--space-5) 0 0;
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+}
+
+.fact {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.factLabel {
+  margin: 0;
+  min-width: 80px;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.factValue {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-md);
+}

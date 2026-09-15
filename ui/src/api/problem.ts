@@ -1,5 +1,5 @@
 /**
- * RFC 9457 problem+json error domain (docs/03-api.md).
+ * RFC 9457 problem+json error domain (openapi/shepherd.yaml).
  *
  * Every server error carries a `ProblemDetail` body with a stable
  * `urn:shepherd:error:*` type slug. `shepherdFetch` (client.ts) normalizes
@@ -48,7 +48,7 @@ export function isShepherdError(err: unknown): err is ShepherdError {
   return err instanceof ShepherdError;
 }
 
-/** Strips the URN prefix: `urn:shepherd:error:claim-conflict` → `claim-conflict`. */
+/** Strips the URN prefix: `urn:shepherd:error:edit-conflict` → `edit-conflict`. */
 export function errorSlug(err: ShepherdError): string {
   return err.type.replace(/^urn:shepherd:error:/, "");
 }

@@ -1,26 +1,11 @@
 [package]
 name = "shepherd-core"
-description = "shepherd domain core: entities, lifecycle, DAG operations, storage"
+description = "shepherd domain core (v1 scaffold shell — rebuilt from step 001 onward)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-base64 = "0.22"
-chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sqlx = { version = "0.8", default-features = false, features = [
-    "macros",
-    "migrate",
-    "runtime-tokio",
-    "sqlite",
-] }
-thiserror = "2"
-tokio = { version = "1", default-features = false, features = ["sync"] }
-uuid = { version = "1", features = ["v7", "serde"] }
 
 [dev-dependencies]
-proptest = "1"
-tokio = { version = "1", features = ["macros", "rt", "sync"] }

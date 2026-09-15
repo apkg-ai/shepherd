@@ -1,72 +1,18 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
-import type { TaskStatus } from "../api/generated/model";
 import { ShepherdError } from "../api/problem";
-import { AttemptBadge } from "./AttemptBadge";
 import { Button } from "./Button";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
 import { FormField } from "./FormField";
-import { IdentityChip } from "./IdentityChip";
 import { LoadMore } from "./LoadMore";
-import { ReasonDialog } from "./ReasonDialog";
+import { PageHeader } from "./PageHeader";
 import { ThemeToggle } from "./ThemeToggle";
-import { StatusBadge } from "./StatusBadge";
 import { EmptyState, ErrorState, LoadingState } from "./states";
 import { ToastProvider, useToast } from "./Toast";
-
-describe("StatusBadge", () => {
-  const cases: [TaskStatus, string][] = [
-    ["proposed", "Proposed"],
-    ["approved", "Approved"],
-    ["ready", "Ready"],
-    ["in_progress", "In progress"],
-    ["in_review", "In review"],
-    ["done", "Done"],
-    ["blocked", "Blocked"],
-    ["cancelled", "Cancelled"],
-  ];
-  it.each(cases)("renders %s with its data-status", (status, label) => {
-    render(<StatusBadge status={status} />);
-    const badge = screen.getByText(label);
-    expect(badge).toHaveAttribute("data-status", status);
-  });
-});
-
-describe("AttemptBadge", () => {
-  it("renders nothing before the first attempt", () => {
-    const { container } = render(<AttemptBadge attempts={0} />);
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it("renders singular and plural attempt counts", () => {
-    render(<AttemptBadge attempts={1} />);
-    expect(screen.getByText("1 attempt")).toBeInTheDocument();
-    render(<AttemptBadge attempts={3} />);
-    expect(screen.getByText("3 attempts")).toBeInTheDocument();
-  });
-
-  it("surfaces failures", () => {
-    render(<AttemptBadge attempts={4} failures={2} />);
-    expect(screen.getByText("4 attempts, 2 failed")).toBeInTheDocument();
-  });
-});
-
-describe("IdentityChip", () => {
-  const base = { harness: "claude-code", agent_model: "opus-5", session_id: "s1" };
-
-  it("prefers the label", () => {
-    render(<IdentityChip identity={{ ...base, label: "Reviewer" }} />);
-    expect(screen.getByText("Reviewer")).toBeInTheDocument();
-  });
-
-  it("falls back to model · harness", () => {
-    render(<IdentityChip identity={base} />);
-    expect(screen.getByText("opus-5 · claude-code")).toBeInTheDocument();
-  });
-});
 
 describe("Button", () => {
   it("disables and marks busy", () => {
@@ -111,7 +57,7 @@ describe("ConfirmDialog", () => {
     render(
       <ConfirmDialog
         open
-        title="Delete task"
+        title="Delete item"
         confirmLabel="Delete"
         danger
         onConfirm={onConfirm}
@@ -124,6 +70,64 @@ describe("ConfirmDialog", () => {
     expect(onConfirm).toHaveBeenCalledOnce();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+});
+
+describe("CopyButton", () => {
+  // fireEvent, not userEvent: userEvent.setup() installs its own clipboard
+  // stub, which would silently override the mocks these tests assert on.
+  it("copies the value and confirms briefly", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    render(<CopyButton value="secret-value" label="Copy the value" />);
+    const button = screen.getByRole("button", { name: "Copy the value" });
+    expect(button).toHaveTextContent("Copy");
+
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toHaveTextContent("Copied ✓"));
+    expect(writeText).toHaveBeenCalledWith("secret-value");
+  });
+
+  it("stays quiet when the clipboard is unavailable", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    render(<CopyButton value="secret-value" label="Copy the value" />);
+    const button = screen.getByRole("button", { name: "Copy the value" });
+    fireEvent.click(button);
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    expect(button).toHaveTextContent("Copy");
+  });
+});
+
+describe("PageHeader", () => {
+  it("renders title, description, actions, and children slots", () => {
+    render(
+      <PageHeader
+        title="Shepherd"
+        description="v1 scaffold"
+        actions={<button type="button">Act</button>}
+      >
+        <p>slot content</p>
+      </PageHeader>,
+    );
+    expect(screen.getByRole("heading", { name: "Shepherd" })).toBeInTheDocument();
+    expect(screen.getByText("v1 scaffold")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Act" })).toBeInTheDocument();
+    expect(screen.getByText("slot content")).toBeInTheDocument();
+  });
+
+  it("omits the description paragraph when absent", () => {
+    render(<PageHeader title="Bare" />);
+    expect(screen.getByRole("heading", { name: "Bare" })).toBeInTheDocument();
+    expect(screen.queryByRole("paragraph")).not.toBeInTheDocument();
   });
 });
 
@@ -252,58 +256,6 @@ describe("Toast", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(() => render(<Probe />)).toThrow(/within ToastProvider/);
     spy.mockRestore();
-  });
-});
-
-describe("ReasonDialog", () => {
-  it("resets reason and error state on every open", async () => {
-    const user = userEvent.setup();
-    const onSubmit = vi.fn();
-    function Host() {
-      const [open, setOpen] = useState(false);
-      return (
-        <>
-          <button type="button" onClick={() => setOpen(true)}>
-            open
-          </button>
-          <ReasonDialog
-            open={open}
-            title="Reject work"
-            label="Reason"
-            confirmLabel="Reject"
-            validate={(reason) => (reason ? null : "required")}
-            onSubmit={onSubmit}
-            onCancel={() => setOpen(false)}
-          />
-        </>
-      );
-    }
-    render(<Host />);
-
-    // First open: trigger a validation error, then type a reason, then cancel.
-    await user.click(screen.getByRole("button", { name: "open" }));
-    await user.click(screen.getByRole("button", { name: "Reject" }));
-    expect(screen.getByText("required")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Reason"), "task A's reason");
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-
-    // Reopen (e.g. for a different task): both reason and error are gone.
-    await user.click(screen.getByRole("button", { name: "open" }));
-    expect(screen.getByLabelText("Reason")).toHaveValue("");
-    expect(screen.queryByText("required")).not.toBeInTheDocument();
-    expect(onSubmit).not.toHaveBeenCalled();
-  });
-});
-
-describe("AttemptBadge atLeast", () => {
-  it("marks partially counted failures with ≥", () => {
-    render(<AttemptBadge attempts={30} failures={4} atLeast />);
-    expect(screen.getByText("30 attempts, ≥4 failed")).toBeInTheDocument();
-  });
-
-  it("claims exact counts when fully loaded", () => {
-    render(<AttemptBadge attempts={5} failures={2} atLeast={false} />);
-    expect(screen.getByText("5 attempts, 2 failed")).toBeInTheDocument();
   });
 });
 

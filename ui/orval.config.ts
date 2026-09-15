@@ -1,7 +1,7 @@
 /**
  * Spec-derived API client (S7). Pairs with scripts/regen-generated.sh on the
  * Rust side: committed generated code is exactly `npm run generate:api`
- * (orval + oxfmt), gated in CI by the ui-generated-drift job.
+ * (orval + oxfmt), regenerated in every CI job before build/test.
  */
 import { defineConfig } from "orval";
 
