@@ -1,0 +1,3581 @@
+[
+  {
+    "operation_id": "getHealth",
+    "path": "/health",
+    "headers": {},
+    "request": null,
+    "response": {
+      "status": "pass",
+      "version": "1.0.0",
+      "schema_version": 1
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "createBrowserSession",
+    "path": "/api/v1/session",
+    "headers": {},
+    "request": {
+      "owner_token": "Example"
+    },
+    "response": {
+      "actor": {
+        "id": "01994a00-0000-7000-8000-000000000001",
+        "kind": "human",
+        "label": "Example",
+        "revoked": false
+      },
+      "csrf_token": "Example",
+      "expires_at": "2026-09-14T09:00:00Z"
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "getBrowserSession",
+    "path": "/api/v1/session",
+    "headers": {},
+    "request": null,
+    "response": {
+      "actor": {
+        "id": "01994a00-0000-7000-8000-000000000001",
+        "kind": "human",
+        "label": "Example",
+        "revoked": false
+      },
+      "csrf_token": "Example",
+      "expires_at": "2026-09-14T09:00:00Z"
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "deleteBrowserSession",
+    "path": "/api/v1/session",
+    "headers": {},
+    "request": null,
+    "response": {
+      "ok": false
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      }
+    ]
+  },
+  {
+    "operation_id": "listAgents",
+    "path": "/api/v1/agents",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      }
+    ]
+  },
+  {
+    "operation_id": "createAgent",
+    "path": "/api/v1/agents",
+    "headers": {},
+    "request": {
+      "label": "Example"
+    },
+    "response": {
+      "actor": {
+        "id": "01994a00-0000-7000-8000-000000000001",
+        "kind": "human",
+        "label": "Example",
+        "revoked": false
+      },
+      "token": "Example"
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      }
+    ]
+  },
+  {
+    "operation_id": "revokeAgent",
+    "path": "/api/v1/agents/{agent_id}/revoke",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384"
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "ok": false
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      }
+    ]
+  },
+  {
+    "operation_id": "listProjects",
+    "path": "/api/v1/projects",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "createProject",
+    "path": "/api/v1/projects",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384"
+    },
+    "request": {
+      "name": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "name": "Space Game",
+      "description": "Build independent combat and colony prototypes.",
+      "settings": {
+        "proposal_gate": true,
+        "planning_required": false,
+        "plan_review": "human",
+        "work_review": "human"
+      },
+      "archived": false,
+      "epic_counts": {
+        "total": 6,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      }
+    ]
+  },
+  {
+    "operation_id": "getProject",
+    "path": "/api/v1/projects/{project_id}",
+    "headers": {},
+    "request": null,
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "name": "Space Game",
+      "description": "Build independent combat and colony prototypes.",
+      "settings": {
+        "proposal_gate": true,
+        "planning_required": false,
+        "plan_review": "human",
+        "work_review": "human"
+      },
+      "archived": false,
+      "epic_counts": {
+        "total": 6,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "updateProject",
+    "path": "/api/v1/projects/{project_id}",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {},
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "name": "Space Game",
+      "description": "Build independent combat and colony prototypes.",
+      "settings": {
+        "proposal_gate": true,
+        "planning_required": false,
+        "plan_review": "human",
+        "work_review": "human"
+      },
+      "archived": false,
+      "epic_counts": {
+        "total": 6,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "archiveProject",
+    "path": "/api/v1/projects/{project_id}/archive",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "name": "Space Game",
+      "description": "Build independent combat and colony prototypes.",
+      "settings": {
+        "proposal_gate": true,
+        "planning_required": false,
+        "plan_review": "human",
+        "work_review": "human"
+      },
+      "archived": true,
+      "epic_counts": {
+        "total": 6,
+        "done": 6,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": [
+        {
+          "actor_id": "01994a00-0000-7000-8000-0000000000c8",
+          "reason": "Example",
+          "created_at": "2026-09-14T09:00:00Z"
+        }
+      ]
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "listGoals",
+    "path": "/api/v1/projects/{project_id}/goals",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "createGoal",
+    "path": "/api/v1/projects/{project_id}/goals",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384"
+    },
+    "request": {
+      "title": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000000a",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "title": "Playable combat prototype",
+      "description": "A standalone combat loop.",
+      "archived": false,
+      "epic_counts": {
+        "total": 4,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "completed": false,
+      "archives": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      }
+    ]
+  },
+  {
+    "operation_id": "getGoal",
+    "path": "/api/v1/projects/{project_id}/goals/{goal_id}",
+    "headers": {},
+    "request": null,
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000000a",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "title": "Playable combat prototype",
+      "description": "A standalone combat loop.",
+      "archived": false,
+      "epic_counts": {
+        "total": 4,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "completed": false,
+      "archives": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "updateGoal",
+    "path": "/api/v1/projects/{project_id}/goals/{goal_id}",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {},
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000000a",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "title": "Playable combat prototype",
+      "description": "A standalone combat loop.",
+      "archived": false,
+      "epic_counts": {
+        "total": 4,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "completed": false,
+      "archives": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "archiveGoal",
+    "path": "/api/v1/projects/{project_id}/goals/{goal_id}/archive",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000000a",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "title": "Playable combat prototype",
+      "description": "A standalone combat loop.",
+      "archived": true,
+      "epic_counts": {
+        "total": 4,
+        "done": 4,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "completed": false,
+      "archives": [
+        {
+          "actor_id": "01994a00-0000-7000-8000-0000000000c8",
+          "reason": "Example",
+          "created_at": "2026-09-14T09:00:00Z"
+        }
+      ]
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "getGoalGraph",
+    "path": "/api/v1/projects/{project_id}/goals/{goal_id}/graph",
+    "headers": {},
+    "request": null,
+    "response": {
+      "level": "epic",
+      "scope_id": "01994a00-0000-7000-8000-000000000001",
+      "nodes": [],
+      "dependencies": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "listEpics",
+    "path": "/api/v1/projects/{project_id}/epics",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "createEpic",
+    "path": "/api/v1/projects/{project_id}/epics",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384"
+    },
+    "request": {
+      "goal_id": "01994a00-0000-7000-8000-000000000001",
+      "title": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000014",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "goal_id": "01994a00-0000-7000-8000-00000000000a",
+      "title": "Combat foundation",
+      "description": "",
+      "status": "open",
+      "archived": false,
+      "blocks": [],
+      "eligibility": {
+        "can_plan": true,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "task_counts": {
+        "total": 2,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "getEpic",
+    "path": "/api/v1/projects/{project_id}/epics/{epic_id}",
+    "headers": {},
+    "request": null,
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000014",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "goal_id": "01994a00-0000-7000-8000-00000000000a",
+      "title": "Combat foundation",
+      "description": "",
+      "status": "open",
+      "archived": false,
+      "blocks": [],
+      "eligibility": {
+        "can_plan": true,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "task_counts": {
+        "total": 2,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "updateEpic",
+    "path": "/api/v1/projects/{project_id}/epics/{epic_id}",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {},
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000014",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "goal_id": "01994a00-0000-7000-8000-00000000000a",
+      "title": "Combat foundation",
+      "description": "",
+      "status": "open",
+      "archived": false,
+      "blocks": [],
+      "eligibility": {
+        "can_plan": true,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "task_counts": {
+        "total": 2,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "archiveEpic",
+    "path": "/api/v1/projects/{project_id}/epics/{epic_id}/archive",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000014",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "goal_id": "01994a00-0000-7000-8000-00000000000a",
+      "title": "Combat foundation",
+      "description": "",
+      "status": "done",
+      "archived": true,
+      "blocks": [],
+      "eligibility": {
+        "can_plan": true,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "task_counts": {
+        "total": 2,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": [
+        {
+          "actor_id": "01994a00-0000-7000-8000-0000000000c8",
+          "reason": "Example",
+          "created_at": "2026-09-14T09:00:00Z"
+        }
+      ],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "acceptEpic",
+    "path": "/api/v1/projects/{project_id}/epics/{epic_id}/accept",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {},
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000014",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "goal_id": "01994a00-0000-7000-8000-00000000000a",
+      "title": "Combat foundation",
+      "description": "",
+      "status": "open",
+      "archived": false,
+      "blocks": [],
+      "eligibility": {
+        "can_plan": true,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "task_counts": {
+        "total": 2,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "blockEpic",
+    "path": "/api/v1/projects/{project_id}/epics/{epic_id}/block",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000014",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "goal_id": "01994a00-0000-7000-8000-00000000000a",
+      "title": "Combat foundation",
+      "description": "",
+      "status": "open",
+      "archived": false,
+      "blocks": [
+        {
+          "actor_id": "01994a00-0000-7000-8000-0000000000c8",
+          "reason": "Example",
+          "created_at": "2026-09-14T09:00:00Z"
+        }
+      ],
+      "eligibility": {
+        "can_plan": true,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "task_counts": {
+        "total": 2,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "unblockEpic",
+    "path": "/api/v1/projects/{project_id}/epics/{epic_id}/unblock",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {},
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000014",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "goal_id": "01994a00-0000-7000-8000-00000000000a",
+      "title": "Combat foundation",
+      "description": "",
+      "status": "open",
+      "archived": false,
+      "blocks": [],
+      "eligibility": {
+        "can_plan": true,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "task_counts": {
+        "total": 2,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "cancelEpic",
+    "path": "/api/v1/projects/{project_id}/epics/{epic_id}/cancel",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000014",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "goal_id": "01994a00-0000-7000-8000-00000000000a",
+      "title": "Combat foundation",
+      "description": "",
+      "status": "cancelled",
+      "archived": false,
+      "blocks": [],
+      "eligibility": {
+        "can_plan": true,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "task_counts": {
+        "total": 2,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": [],
+      "cancellations": [
+        {
+          "actor_id": "01994a00-0000-7000-8000-0000000000c8",
+          "reason": "Explicit owner decision for this example.",
+          "created_at": "2026-09-14T09:00:00Z"
+        }
+      ]
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "completeEpic",
+    "path": "/api/v1/projects/{project_id}/epics/{epic_id}/complete",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000014",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "goal_id": "01994a00-0000-7000-8000-00000000000a",
+      "title": "Combat foundation",
+      "description": "",
+      "status": "done",
+      "archived": false,
+      "blocks": [],
+      "eligibility": {
+        "can_plan": true,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "task_counts": {
+        "total": 0,
+        "done": 0,
+        "cancelled": 0,
+        "waived": 0
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "getEpicGraph",
+    "path": "/api/v1/projects/{project_id}/epics/{epic_id}/graph",
+    "headers": {},
+    "request": null,
+    "response": {
+      "level": "epic",
+      "scope_id": "01994a00-0000-7000-8000-000000000001",
+      "nodes": [],
+      "dependencies": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "listTasks",
+    "path": "/api/v1/projects/{project_id}/tasks",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "createTask",
+    "path": "/api/v1/projects/{project_id}/tasks",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384"
+    },
+    "request": {
+      "epic_id": "01994a00-0000-7000-8000-000000000015",
+      "title": "Implement targeting",
+      "type_key": "code",
+      "planning_required": true,
+      "plan_review": "agent",
+      "work_review": "human"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000020",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "epic_id": "01994a00-0000-7000-8000-000000000015",
+      "title": "Implement targeting",
+      "description": "Complete the named unit and record evidence.",
+      "type_key": "code",
+      "status": "open",
+      "phase": "planning",
+      "planning_required": true,
+      "plan_review": "agent",
+      "work_review": "human",
+      "selected_plan_revision_ids": [],
+      "accepted_plan_submission_ids": [],
+      "archived": false,
+      "blocks": [],
+      "waivers": [],
+      "attempt_count": 0,
+      "eligibility": {
+        "can_plan": true,
+        "can_execute": false,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "getTask",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}",
+    "headers": {},
+    "request": null,
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000001e",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "epic_id": "01994a00-0000-7000-8000-000000000014",
+      "title": "Research combat rules",
+      "description": "Complete the named unit and record evidence.",
+      "type_key": "research",
+      "status": "open",
+      "phase": "execution",
+      "planning_required": false,
+      "plan_review": "human",
+      "work_review": "none",
+      "selected_plan_revision_ids": [],
+      "accepted_plan_submission_ids": [],
+      "archived": false,
+      "blocks": [],
+      "waivers": [],
+      "attempt_count": 0,
+      "eligibility": {
+        "can_plan": false,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "updateTask",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {},
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000001e",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "epic_id": "01994a00-0000-7000-8000-000000000014",
+      "title": "Research combat rules",
+      "description": "Complete the named unit and record evidence.",
+      "type_key": "research",
+      "status": "open",
+      "phase": "execution",
+      "planning_required": false,
+      "plan_review": "human",
+      "work_review": "none",
+      "selected_plan_revision_ids": [],
+      "accepted_plan_submission_ids": [],
+      "archived": false,
+      "blocks": [],
+      "waivers": [],
+      "attempt_count": 0,
+      "eligibility": {
+        "can_plan": false,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "archiveTask",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}/archive",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000001e",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "epic_id": "01994a00-0000-7000-8000-000000000014",
+      "title": "Research combat rules",
+      "description": "Complete the named unit and record evidence.",
+      "type_key": "research",
+      "status": "done",
+      "phase": "complete",
+      "planning_required": false,
+      "plan_review": "human",
+      "work_review": "none",
+      "selected_plan_revision_ids": [],
+      "accepted_plan_submission_ids": [],
+      "archived": true,
+      "blocks": [],
+      "waivers": [],
+      "attempt_count": 0,
+      "eligibility": {
+        "can_plan": false,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "archives": [
+        {
+          "actor_id": "01994a00-0000-7000-8000-0000000000c8",
+          "reason": "Example",
+          "created_at": "2026-09-14T09:00:00Z"
+        }
+      ],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "acceptTask",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}/accept",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {},
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000001e",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "epic_id": "01994a00-0000-7000-8000-000000000014",
+      "title": "Research combat rules",
+      "description": "Complete the named unit and record evidence.",
+      "type_key": "research",
+      "status": "open",
+      "phase": "execution",
+      "planning_required": false,
+      "plan_review": "human",
+      "work_review": "none",
+      "selected_plan_revision_ids": [],
+      "accepted_plan_submission_ids": [],
+      "archived": false,
+      "blocks": [],
+      "waivers": [],
+      "attempt_count": 0,
+      "eligibility": {
+        "can_plan": false,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "blockTask",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}/block",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000001e",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "epic_id": "01994a00-0000-7000-8000-000000000014",
+      "title": "Research combat rules",
+      "description": "Complete the named unit and record evidence.",
+      "type_key": "research",
+      "status": "open",
+      "phase": "execution",
+      "planning_required": false,
+      "plan_review": "human",
+      "work_review": "none",
+      "selected_plan_revision_ids": [],
+      "accepted_plan_submission_ids": [],
+      "archived": false,
+      "blocks": [
+        {
+          "actor_id": "01994a00-0000-7000-8000-0000000000c8",
+          "reason": "Example",
+          "created_at": "2026-09-14T09:00:00Z"
+        }
+      ],
+      "waivers": [],
+      "attempt_count": 0,
+      "eligibility": {
+        "can_plan": false,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "unblockTask",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}/unblock",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {},
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000001e",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "epic_id": "01994a00-0000-7000-8000-000000000014",
+      "title": "Research combat rules",
+      "description": "Complete the named unit and record evidence.",
+      "type_key": "research",
+      "status": "open",
+      "phase": "execution",
+      "planning_required": false,
+      "plan_review": "human",
+      "work_review": "none",
+      "selected_plan_revision_ids": [],
+      "accepted_plan_submission_ids": [],
+      "archived": false,
+      "blocks": [],
+      "waivers": [],
+      "attempt_count": 0,
+      "eligibility": {
+        "can_plan": false,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "cancelTask",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}/cancel",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000001e",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "epic_id": "01994a00-0000-7000-8000-000000000014",
+      "title": "Research combat rules",
+      "description": "Complete the named unit and record evidence.",
+      "type_key": "research",
+      "status": "cancelled",
+      "phase": "complete",
+      "planning_required": false,
+      "plan_review": "human",
+      "work_review": "none",
+      "selected_plan_revision_ids": [],
+      "accepted_plan_submission_ids": [],
+      "archived": false,
+      "blocks": [],
+      "waivers": [],
+      "attempt_count": 0,
+      "eligibility": {
+        "can_plan": false,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "archives": [],
+      "cancellations": [
+        {
+          "actor_id": "01994a00-0000-7000-8000-0000000000c8",
+          "reason": "Explicit owner decision for this example.",
+          "created_at": "2026-09-14T09:00:00Z"
+        }
+      ]
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "waiveTask",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}/waive",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000001e",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "epic_id": "01994a00-0000-7000-8000-000000000014",
+      "title": "Research combat rules",
+      "description": "Complete the named unit and record evidence.",
+      "type_key": "research",
+      "status": "cancelled",
+      "phase": "complete",
+      "planning_required": false,
+      "plan_review": "human",
+      "work_review": "none",
+      "selected_plan_revision_ids": [],
+      "accepted_plan_submission_ids": [],
+      "archived": false,
+      "blocks": [],
+      "waivers": [
+        {
+          "actor_id": "01994a00-0000-7000-8000-0000000000c8",
+          "reason": "Example",
+          "created_at": "2026-09-14T09:00:00Z"
+        }
+      ],
+      "attempt_count": 0,
+      "eligibility": {
+        "can_plan": false,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "archives": [],
+      "cancellations": [
+        {
+          "actor_id": "01994a00-0000-7000-8000-0000000000c8",
+          "reason": "Explicit owner decision for this example.",
+          "created_at": "2026-09-14T09:00:00Z"
+        }
+      ]
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "listTaskTypes",
+    "path": "/api/v1/projects/{project_id}/task-types",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "createTaskType",
+    "path": "/api/v1/projects/{project_id}/task-types",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384"
+    },
+    "request": {
+      "key": "code",
+      "label": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "key": "code",
+      "label": "Example",
+      "archived": false,
+      "builtin": false
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      }
+    ]
+  },
+  {
+    "operation_id": "updateTaskType",
+    "path": "/api/v1/projects/{project_id}/task-types/{type_id}",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {},
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "key": "code",
+      "label": "Example",
+      "archived": false,
+      "builtin": false
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "listDependencies",
+    "path": "/api/v1/projects/{project_id}/dependencies",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "createDependency",
+    "path": "/api/v1/projects/{project_id}/dependencies",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384"
+    },
+    "request": {
+      "level": "epic",
+      "dependent_id": "01994a00-0000-7000-8000-000000000015",
+      "prerequisite_id": "01994a00-0000-7000-8000-000000000014"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000032",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "level": "epic",
+      "dependent_id": "01994a00-0000-7000-8000-000000000015",
+      "prerequisite_id": "01994a00-0000-7000-8000-000000000014"
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "deleteDependency",
+    "path": "/api/v1/projects/{project_id}/dependencies/{dependency_id}",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": null,
+    "response": {
+      "ok": false
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "listWork",
+    "path": "/api/v1/projects/{project_id}/work",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "getTaskContext",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}/context",
+    "headers": {},
+    "request": null,
+    "response": {
+      "task": {
+        "id": "01994a00-0000-7000-8000-000000000001",
+        "revision": 1,
+        "created_at": "2026-09-14T09:00:00Z",
+        "updated_at": "2026-09-14T09:00:00Z",
+        "project_id": "01994a00-0000-7000-8000-000000000001",
+        "epic_id": "01994a00-0000-7000-8000-000000000001",
+        "title": "Example",
+        "description": "Example",
+        "type_key": "Example",
+        "status": "proposed",
+        "phase": "planning",
+        "planning_required": false,
+        "plan_review": "human",
+        "work_review": "human",
+        "selected_plan_revision_ids": [],
+        "accepted_plan_submission_ids": [],
+        "archived": false,
+        "blocks": [],
+        "waivers": [],
+        "attempt_count": 1,
+        "eligibility": {
+          "can_plan": false,
+          "can_execute": false,
+          "can_review": false,
+          "reasons": [],
+          "allowed_actions": []
+        },
+        "archives": [],
+        "cancellations": []
+      },
+      "epic": {
+        "id": "01994a00-0000-7000-8000-000000000001",
+        "revision": 1,
+        "created_at": "2026-09-14T09:00:00Z",
+        "updated_at": "2026-09-14T09:00:00Z",
+        "project_id": "01994a00-0000-7000-8000-000000000001",
+        "goal_id": "01994a00-0000-7000-8000-000000000001",
+        "title": "Example",
+        "description": "Example",
+        "status": "proposed",
+        "archived": false,
+        "blocks": [],
+        "eligibility": {
+          "can_plan": false,
+          "can_execute": false,
+          "can_review": false,
+          "reasons": [],
+          "allowed_actions": []
+        },
+        "task_counts": {
+          "total": 1,
+          "done": 1,
+          "cancelled": 1,
+          "waived": 1
+        },
+        "archives": [],
+        "cancellations": []
+      },
+      "goal": {
+        "id": "01994a00-0000-7000-8000-000000000001",
+        "revision": 1,
+        "created_at": "2026-09-14T09:00:00Z",
+        "updated_at": "2026-09-14T09:00:00Z",
+        "project_id": "01994a00-0000-7000-8000-000000000001",
+        "title": "Example",
+        "description": "Example",
+        "archived": false,
+        "epic_counts": {
+          "total": 1,
+          "done": 1,
+          "cancelled": 1,
+          "waived": 1
+        },
+        "completed": false,
+        "archives": []
+      },
+      "project": {
+        "id": "01994a00-0000-7000-8000-000000000001",
+        "revision": 1,
+        "created_at": "2026-09-14T09:00:00Z",
+        "updated_at": "2026-09-14T09:00:00Z",
+        "name": "Example",
+        "description": "Example",
+        "settings": {
+          "proposal_gate": false,
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "human"
+        },
+        "archived": false,
+        "epic_counts": {
+          "total": 1,
+          "done": 1,
+          "cancelled": 1,
+          "waived": 1
+        },
+        "archives": []
+      },
+      "selected_plan": [],
+      "documents": [],
+      "submissions": [],
+      "reviews": [],
+      "sessions": [],
+      "dependencies": [],
+      "sibling_claims": [],
+      "truncated": false,
+      "continuation_paths": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "claimTask",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}/claims",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "phase": "plan",
+      "ttl_seconds": 300
+    },
+    "response": {
+      "claim": {
+        "id": "01994a00-0000-7000-8000-00000000012c",
+        "task_id": "01994a00-0000-7000-8000-000000000020",
+        "actor_id": "01994a00-0000-7000-8000-0000000000c9",
+        "phase": "plan",
+        "submission_ids": [],
+        "acquired_at": "2026-09-14T09:00:00Z",
+        "expires_at": "2026-09-14T09:05:00Z",
+        "status": "active",
+        "task_revision": 2,
+        "plan_revision_ids": []
+      },
+      "lease_token": "Example",
+      "context": {
+        "task": {
+          "id": "01994a00-0000-7000-8000-000000000020",
+          "revision": 2,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000015",
+          "title": "Implement targeting",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "code",
+          "status": "active",
+          "phase": "planning",
+          "planning_required": true,
+          "plan_review": "agent",
+          "work_review": "human",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        "epic": {
+          "id": "01994a00-0000-7000-8000-000000000015",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000a",
+          "title": "Targeting",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 1,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        "goal": {
+          "id": "01994a00-0000-7000-8000-00000000000a",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "title": "Playable combat prototype",
+          "description": "A standalone combat loop.",
+          "archived": false,
+          "epic_counts": {
+            "total": 4,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "completed": false,
+          "archives": []
+        },
+        "project": {
+          "id": "01994a00-0000-7000-8000-000000000001",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "name": "Space Game",
+          "description": "Build independent combat and colony prototypes.",
+          "settings": {
+            "proposal_gate": true,
+            "planning_required": false,
+            "plan_review": "human",
+            "work_review": "human"
+          },
+          "archived": false,
+          "epic_counts": {
+            "total": 6,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": []
+        },
+        "selected_plan": [],
+        "documents": [],
+        "submissions": [],
+        "reviews": [],
+        "sessions": [],
+        "dependencies": [],
+        "sibling_claims": [],
+        "truncated": false,
+        "continuation_paths": []
+      }
+    },
+    "failure_cases": [
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "listClaims",
+    "path": "/api/v1/projects/{project_id}/claims",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "renewClaim",
+    "path": "/api/v1/projects/{project_id}/claims/{claim_id}/renew",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "X-Lease-Token": "illustrative-lease-secret"
+    },
+    "request": {},
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "task_id": "01994a00-0000-7000-8000-000000000001",
+      "actor_id": "01994a00-0000-7000-8000-000000000001",
+      "phase": "plan",
+      "submission_ids": [],
+      "acquired_at": "2026-09-14T09:00:00Z",
+      "expires_at": "2026-09-14T09:05:00Z",
+      "status": "active",
+      "task_revision": 1,
+      "plan_revision_ids": []
+    },
+    "failure_cases": [
+      {
+        "status": 409,
+        "code": "lease_invalid",
+        "detail": "Claim expired or revoked."
+      }
+    ]
+  },
+  {
+    "operation_id": "releaseClaim",
+    "path": "/api/v1/projects/{project_id}/claims/{claim_id}/release",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "X-Lease-Token": "illustrative-lease-secret"
+    },
+    "request": {},
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "task_id": "01994a00-0000-7000-8000-000000000001",
+      "actor_id": "01994a00-0000-7000-8000-000000000001",
+      "phase": "plan",
+      "submission_ids": [],
+      "acquired_at": "2026-09-14T09:00:00Z",
+      "expires_at": "2026-09-14T09:00:00Z",
+      "status": "released",
+      "task_revision": 1,
+      "plan_revision_ids": []
+    },
+    "failure_cases": [
+      {
+        "status": 409,
+        "code": "lease_invalid",
+        "detail": "Claim expired or revoked."
+      }
+    ]
+  },
+  {
+    "operation_id": "reportClaim",
+    "path": "/api/v1/projects/{project_id}/claims/{claim_id}/report",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "X-Lease-Token": "illustrative-lease-secret"
+    },
+    "request": {
+      "outcome": "succeeded",
+      "summary": "Plan prepared with validation cases.",
+      "document_revision_ids": [
+        "01994a00-0000-7000-8000-000000000191"
+      ],
+      "links": []
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-0000000001f4",
+      "task_id": "01994a00-0000-7000-8000-000000000020",
+      "claim_id": "01994a00-0000-7000-8000-00000000012c",
+      "actor_id": "01994a00-0000-7000-8000-0000000000c9",
+      "phase": "plan",
+      "started_at": "2026-09-14T09:00:00Z",
+      "ended_at": "2026-09-14T09:00:00Z",
+      "outcome": "succeeded",
+      "summary": "Plan prepared with validation cases.",
+      "failure_reason": "",
+      "document_revision_ids": [
+        "01994a00-0000-7000-8000-000000000191"
+      ],
+      "links": []
+    },
+    "failure_cases": [
+      {
+        "status": 409,
+        "code": "lease_invalid",
+        "detail": "Claim expired or revoked."
+      }
+    ]
+  },
+  {
+    "operation_id": "listTaskSessions",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}/sessions",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "listDocuments",
+    "path": "/api/v1/projects/{project_id}/documents",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "createDocument",
+    "path": "/api/v1/projects/{project_id}/documents",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384"
+    },
+    "request": {
+      "owner_kind": "task",
+      "owner_id": "01994a00-0000-7000-8000-000000000020",
+      "kind": "plan",
+      "title": "Targeting plan",
+      "body": "Choose nearest valid target. Test empty and tied candidate sets.",
+      "links": []
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000190",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "owner_kind": "task",
+      "owner_id": "01994a00-0000-7000-8000-000000000020",
+      "kind": "plan",
+      "title": "Targeting plan",
+      "latest_revision_id": "01994a00-0000-7000-8000-000000000191"
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "getDocument",
+    "path": "/api/v1/projects/{project_id}/documents/{document_id}",
+    "headers": {},
+    "request": null,
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "owner_kind": "project",
+      "owner_id": "01994a00-0000-7000-8000-000000000001",
+      "kind": "brief",
+      "title": "Example",
+      "latest_revision_id": "01994a00-0000-7000-8000-000000000001"
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "listDocumentRevisions",
+    "path": "/api/v1/projects/{project_id}/documents/{document_id}/revisions",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "createDocumentRevision",
+    "path": "/api/v1/projects/{project_id}/documents/{document_id}/revisions",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "body": "Example",
+      "links": []
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000191",
+      "document_id": "01994a00-0000-7000-8000-000000000190",
+      "number": 1,
+      "body": "Example",
+      "links": [],
+      "actor_id": "01994a00-0000-7000-8000-0000000000c9",
+      "created_at": "2026-09-14T09:00:00Z"
+    },
+    "failure_cases": [
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "getDocumentRevision",
+    "path": "/api/v1/projects/{project_id}/document-revisions/{revision_id}",
+    "headers": {},
+    "request": null,
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000191",
+      "document_id": "01994a00-0000-7000-8000-000000000190",
+      "number": 1,
+      "body": "Example",
+      "links": [],
+      "actor_id": "01994a00-0000-7000-8000-0000000000c9",
+      "created_at": "2026-09-14T09:00:00Z"
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "selectTaskPlan",
+    "path": "/api/v1/projects/{project_id}/tasks/{task_id}/plan",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "document_revision_id": "01994a00-0000-7000-8000-000000000001"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-00000000001e",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "epic_id": "01994a00-0000-7000-8000-000000000014",
+      "title": "Research combat rules",
+      "description": "Complete the named unit and record evidence.",
+      "type_key": "research",
+      "status": "open",
+      "phase": "execution",
+      "planning_required": false,
+      "plan_review": "human",
+      "work_review": "none",
+      "selected_plan_revision_ids": [],
+      "accepted_plan_submission_ids": [],
+      "archived": false,
+      "blocks": [],
+      "waivers": [],
+      "attempt_count": 0,
+      "eligibility": {
+        "can_plan": false,
+        "can_execute": true,
+        "can_review": false,
+        "reasons": [],
+        "allowed_actions": []
+      },
+      "archives": [],
+      "cancellations": []
+    },
+    "failure_cases": [
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "listSubmissions",
+    "path": "/api/v1/projects/{project_id}/submissions",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "getSubmission",
+    "path": "/api/v1/projects/{project_id}/submissions/{submission_id}",
+    "headers": {},
+    "request": null,
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "task_id": "01994a00-0000-7000-8000-000000000001",
+      "kind": "plan",
+      "producer_id": "01994a00-0000-7000-8000-000000000001",
+      "document_revision_ids": [],
+      "session_id": "01994a00-0000-7000-8000-000000000001",
+      "policy": "human",
+      "status": "pending",
+      "created_context_revision": 1
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "withdrawSubmission",
+    "path": "/api/v1/projects/{project_id}/submissions/{submission_id}/withdraw",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\""
+    },
+    "request": {
+      "reason": "Example"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "revision": 1,
+      "created_at": "2026-09-14T09:00:00Z",
+      "updated_at": "2026-09-14T09:00:00Z",
+      "task_id": "01994a00-0000-7000-8000-000000000001",
+      "kind": "plan",
+      "producer_id": "01994a00-0000-7000-8000-000000000001",
+      "document_revision_ids": [],
+      "session_id": "01994a00-0000-7000-8000-000000000001",
+      "policy": "human",
+      "status": "pending",
+      "created_context_revision": 1
+    },
+    "failure_cases": [
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      }
+    ]
+  },
+  {
+    "operation_id": "reviewSubmission",
+    "path": "/api/v1/projects/{project_id}/submissions/{submission_id}/reviews",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384",
+      "If-Match": "\"1\"",
+      "X-Lease-Token": "illustrative-lease-secret"
+    },
+    "request": {
+      "decision": "reject",
+      "reason": "Add deterministic tie-breaking tests.",
+      "claim_id": "01994a00-0000-7000-8000-00000000012c"
+    },
+    "response": {
+      "id": "01994a00-0000-7000-8000-0000000002bc",
+      "submission_id": "01994a00-0000-7000-8000-000000000258",
+      "actor_id": "01994a00-0000-7000-8000-0000000000ca",
+      "decision": "reject",
+      "reason": "Add deterministic tie-breaking tests.",
+      "created_at": "2026-09-14T09:00:00Z"
+    },
+    "failure_cases": [
+      {
+        "status": 412,
+        "code": "revision_conflict",
+        "detail": "Resource changed; refetch before a new intent."
+      },
+      {
+        "status": 409,
+        "code": "lease_invalid",
+        "detail": "Claim expired or revoked."
+      }
+    ]
+  },
+  {
+    "operation_id": "listSubmissionReviews",
+    "path": "/api/v1/projects/{project_id}/submissions/{submission_id}/reviews",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "listHistory",
+    "path": "/api/v1/projects/{project_id}/history",
+    "headers": {},
+    "request": null,
+    "response": {
+      "items": []
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "exportProject",
+    "path": "/api/v1/projects/{project_id}/export",
+    "headers": {},
+    "request": null,
+    "response": {
+      "version": "2.0.0",
+      "exported_at": "2026-09-14T09:00:00Z",
+      "project": {
+        "id": "01994a00-0000-7000-8000-000000000001",
+        "revision": 1,
+        "created_at": "2026-09-14T09:00:00Z",
+        "updated_at": "2026-09-14T09:00:00Z",
+        "name": "Space Game",
+        "description": "Build independent combat and colony prototypes.",
+        "settings": {
+          "proposal_gate": true,
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "human"
+        },
+        "archived": false,
+        "epic_counts": {
+          "total": 6,
+          "done": 0,
+          "cancelled": 0,
+          "waived": 0
+        },
+        "archives": []
+      },
+      "goals": [
+        {
+          "id": "01994a00-0000-7000-8000-00000000000a",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "title": "Playable combat prototype",
+          "description": "A standalone combat loop.",
+          "archived": false,
+          "epic_counts": {
+            "total": 4,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "completed": false,
+          "archives": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-00000000000b",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "title": "Colony prototype",
+          "description": "Independent resource loop.",
+          "archived": false,
+          "epic_counts": {
+            "total": 2,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "completed": false,
+          "archives": []
+        }
+      ],
+      "epics": [
+        {
+          "id": "01994a00-0000-7000-8000-000000000014",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000a",
+          "title": "Combat foundation",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": true,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 2,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000015",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000a",
+          "title": "Targeting",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 1,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000016",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000a",
+          "title": "Damage",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 1,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000017",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000a",
+          "title": "Combat integration",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 2,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000018",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000b",
+          "title": "Resource model",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": true,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 1,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000019",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000b",
+          "title": "Colony loop",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 1,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        }
+      ],
+      "tasks": [
+        {
+          "id": "01994a00-0000-7000-8000-00000000001e",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000014",
+          "title": "Research combat rules",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "research",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "none",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": true,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-00000000001f",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000014",
+          "title": "Code combat foundation",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "code",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "human",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000020",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000015",
+          "title": "Implement targeting",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "code",
+          "status": "open",
+          "phase": "planning",
+          "planning_required": true,
+          "plan_review": "agent",
+          "work_review": "human",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000021",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000016",
+          "title": "Implement damage",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "code",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "agent",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000022",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000017",
+          "title": "Integrate combat",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "code",
+          "status": "open",
+          "phase": "planning",
+          "planning_required": true,
+          "plan_review": "human",
+          "work_review": "human",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000023",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000017",
+          "title": "Validate combat",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "test",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "none",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000024",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000018",
+          "title": "Research resource model",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "research",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "none",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": true,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000025",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000019",
+          "title": "Document colony loop",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "documentation",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "human",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        }
+      ],
+      "task_types": [
+        {
+          "id": "01994a00-0000-7000-8000-000000000064",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "code",
+          "label": "Code",
+          "archived": false,
+          "builtin": true
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000065",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "research",
+          "label": "Research",
+          "archived": false,
+          "builtin": true
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000066",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "design",
+          "label": "Design",
+          "archived": false,
+          "builtin": true
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000067",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "documentation",
+          "label": "Documentation",
+          "archived": false,
+          "builtin": true
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000068",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "test",
+          "label": "Test",
+          "archived": false,
+          "builtin": true
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000069",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "other",
+          "label": "Other",
+          "archived": false,
+          "builtin": true
+        }
+      ],
+      "dependencies": [
+        {
+          "id": "01994a00-0000-7000-8000-000000000032",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "epic",
+          "dependent_id": "01994a00-0000-7000-8000-000000000015",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000014"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000033",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "epic",
+          "dependent_id": "01994a00-0000-7000-8000-000000000016",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000014"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000034",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "epic",
+          "dependent_id": "01994a00-0000-7000-8000-000000000017",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000015"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000035",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "epic",
+          "dependent_id": "01994a00-0000-7000-8000-000000000017",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000016"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000036",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "epic",
+          "dependent_id": "01994a00-0000-7000-8000-000000000019",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000018"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000037",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "task",
+          "dependent_id": "01994a00-0000-7000-8000-00000000001f",
+          "prerequisite_id": "01994a00-0000-7000-8000-00000000001e"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000038",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "task",
+          "dependent_id": "01994a00-0000-7000-8000-000000000023",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000022"
+        }
+      ],
+      "documents": [],
+      "document_revisions": [],
+      "sessions": [],
+      "submissions": [],
+      "reviews": [],
+      "actors": [
+        {
+          "id": "01994a00-0000-7000-8000-0000000000c8",
+          "kind": "human",
+          "label": "Owner",
+          "revoked": false
+        },
+        {
+          "id": "01994a00-0000-7000-8000-0000000000c9",
+          "kind": "agent",
+          "label": "Planner A",
+          "revoked": false
+        },
+        {
+          "id": "01994a00-0000-7000-8000-0000000000ca",
+          "kind": "agent",
+          "label": "Reviewer B",
+          "revoked": false
+        },
+        {
+          "id": "01994a00-0000-7000-8000-0000000000cb",
+          "kind": "agent",
+          "label": "Executor C",
+          "revoked": false
+        }
+      ]
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      }
+    ]
+  },
+  {
+    "operation_id": "importProject",
+    "path": "/api/v1/imports",
+    "headers": {
+      "Idempotency-Key": "01994a00-0000-7000-8000-000000000384"
+    },
+    "request": {
+      "version": "2.0.0",
+      "exported_at": "2026-09-14T09:00:00Z",
+      "project": {
+        "id": "01994a00-0000-7000-8000-000000000001",
+        "revision": 1,
+        "created_at": "2026-09-14T09:00:00Z",
+        "updated_at": "2026-09-14T09:00:00Z",
+        "name": "Space Game",
+        "description": "Build independent combat and colony prototypes.",
+        "settings": {
+          "proposal_gate": true,
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "human"
+        },
+        "archived": false,
+        "epic_counts": {
+          "total": 6,
+          "done": 0,
+          "cancelled": 0,
+          "waived": 0
+        },
+        "archives": []
+      },
+      "goals": [
+        {
+          "id": "01994a00-0000-7000-8000-00000000000a",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "title": "Playable combat prototype",
+          "description": "A standalone combat loop.",
+          "archived": false,
+          "epic_counts": {
+            "total": 4,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "completed": false,
+          "archives": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-00000000000b",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "title": "Colony prototype",
+          "description": "Independent resource loop.",
+          "archived": false,
+          "epic_counts": {
+            "total": 2,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "completed": false,
+          "archives": []
+        }
+      ],
+      "epics": [
+        {
+          "id": "01994a00-0000-7000-8000-000000000014",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000a",
+          "title": "Combat foundation",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": true,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 2,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000015",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000a",
+          "title": "Targeting",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 1,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000016",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000a",
+          "title": "Damage",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 1,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000017",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000a",
+          "title": "Combat integration",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 2,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000018",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000b",
+          "title": "Resource model",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": true,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 1,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000019",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "goal_id": "01994a00-0000-7000-8000-00000000000b",
+          "title": "Colony loop",
+          "description": "",
+          "status": "open",
+          "archived": false,
+          "blocks": [],
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "task_counts": {
+            "total": 1,
+            "done": 0,
+            "cancelled": 0,
+            "waived": 0
+          },
+          "archives": [],
+          "cancellations": []
+        }
+      ],
+      "tasks": [
+        {
+          "id": "01994a00-0000-7000-8000-00000000001e",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000014",
+          "title": "Research combat rules",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "research",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "none",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": true,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-00000000001f",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000014",
+          "title": "Code combat foundation",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "code",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "human",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000020",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000015",
+          "title": "Implement targeting",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "code",
+          "status": "open",
+          "phase": "planning",
+          "planning_required": true,
+          "plan_review": "agent",
+          "work_review": "human",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000021",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000016",
+          "title": "Implement damage",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "code",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "agent",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000022",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000017",
+          "title": "Integrate combat",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "code",
+          "status": "open",
+          "phase": "planning",
+          "planning_required": true,
+          "plan_review": "human",
+          "work_review": "human",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": true,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000023",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000017",
+          "title": "Validate combat",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "test",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "none",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000024",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000018",
+          "title": "Research resource model",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "research",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "none",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": true,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000025",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "epic_id": "01994a00-0000-7000-8000-000000000019",
+          "title": "Document colony loop",
+          "description": "Complete the named unit and record evidence.",
+          "type_key": "documentation",
+          "status": "open",
+          "phase": "execution",
+          "planning_required": false,
+          "plan_review": "human",
+          "work_review": "human",
+          "selected_plan_revision_ids": [],
+          "accepted_plan_submission_ids": [],
+          "archived": false,
+          "blocks": [],
+          "waivers": [],
+          "attempt_count": 0,
+          "eligibility": {
+            "can_plan": false,
+            "can_execute": false,
+            "can_review": false,
+            "reasons": [],
+            "allowed_actions": []
+          },
+          "archives": [],
+          "cancellations": []
+        }
+      ],
+      "task_types": [
+        {
+          "id": "01994a00-0000-7000-8000-000000000064",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "code",
+          "label": "Code",
+          "archived": false,
+          "builtin": true
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000065",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "research",
+          "label": "Research",
+          "archived": false,
+          "builtin": true
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000066",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "design",
+          "label": "Design",
+          "archived": false,
+          "builtin": true
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000067",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "documentation",
+          "label": "Documentation",
+          "archived": false,
+          "builtin": true
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000068",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "test",
+          "label": "Test",
+          "archived": false,
+          "builtin": true
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000069",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "key": "other",
+          "label": "Other",
+          "archived": false,
+          "builtin": true
+        }
+      ],
+      "dependencies": [
+        {
+          "id": "01994a00-0000-7000-8000-000000000032",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "epic",
+          "dependent_id": "01994a00-0000-7000-8000-000000000015",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000014"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000033",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "epic",
+          "dependent_id": "01994a00-0000-7000-8000-000000000016",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000014"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000034",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "epic",
+          "dependent_id": "01994a00-0000-7000-8000-000000000017",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000015"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000035",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "epic",
+          "dependent_id": "01994a00-0000-7000-8000-000000000017",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000016"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000036",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "epic",
+          "dependent_id": "01994a00-0000-7000-8000-000000000019",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000018"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000037",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "task",
+          "dependent_id": "01994a00-0000-7000-8000-00000000001f",
+          "prerequisite_id": "01994a00-0000-7000-8000-00000000001e"
+        },
+        {
+          "id": "01994a00-0000-7000-8000-000000000038",
+          "revision": 1,
+          "created_at": "2026-09-14T09:00:00Z",
+          "updated_at": "2026-09-14T09:00:00Z",
+          "project_id": "01994a00-0000-7000-8000-000000000001",
+          "level": "task",
+          "dependent_id": "01994a00-0000-7000-8000-000000000023",
+          "prerequisite_id": "01994a00-0000-7000-8000-000000000022"
+        }
+      ],
+      "documents": [],
+      "document_revisions": [],
+      "sessions": [],
+      "submissions": [],
+      "reviews": [],
+      "actors": [
+        {
+          "id": "01994a00-0000-7000-8000-0000000000c8",
+          "kind": "human",
+          "label": "Owner",
+          "revoked": false
+        },
+        {
+          "id": "01994a00-0000-7000-8000-0000000000c9",
+          "kind": "agent",
+          "label": "Planner A",
+          "revoked": false
+        },
+        {
+          "id": "01994a00-0000-7000-8000-0000000000ca",
+          "kind": "agent",
+          "label": "Reviewer B",
+          "revoked": false
+        },
+        {
+          "id": "01994a00-0000-7000-8000-0000000000cb",
+          "kind": "agent",
+          "label": "Executor C",
+          "revoked": false
+        }
+      ]
+    },
+    "response": {
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "id_map": []
+    },
+    "failure_cases": [
+      {
+        "status": 403,
+        "code": "forbidden",
+        "detail": "This operation requires the owner."
+      },
+      {
+        "status": 408,
+        "code": "import_timeout",
+        "detail": "Import stream made no progress for 30 seconds; no project was committed."
+      }
+    ]
+  },
+  {
+    "operation_id": "getEvents",
+    "path": "/api/v1/projects/{project_id}/events",
+    "headers": {},
+    "request": null,
+    "response": {
+      "id": "1",
+      "project_id": "01994a00-0000-7000-8000-000000000001",
+      "actor_id": "01994a00-0000-7000-8000-000000000001",
+      "command_id": "01994a00-0000-7000-8000-000000000001",
+      "type": "project.changed",
+      "resource_id": "01994a00-0000-7000-8000-000000000001",
+      "resource_revision": 1,
+      "occurred_at": "2026-09-14T09:00:00Z",
+      "affected_ids": [],
+      "action": "updateTask",
+      "reason": ""
+    },
+    "failure_cases": []
+  },
+  {
+    "operation_id": "getPrincipal",
+    "path": "/api/v1/principal",
+    "headers": {},
+    "request": null,
+    "response": {
+      "id": "01994a00-0000-7000-8000-000000000001",
+      "kind": "human",
+      "label": "Example",
+      "revoked": false
+    },
+    "failure_cases": []
+  }
+]

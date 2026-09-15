@@ -1,0 +1,3036 @@
+{
+  "$ref": "#/$defs/ExportDocument",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shepherd.local/schemas/export-2.0.0.json",
+  "$defs": {
+    "EntityStatus": {
+      "type": "string",
+      "enum": [
+        "proposed",
+        "open",
+        "active",
+        "done",
+        "cancelled"
+      ],
+      "description": "EntityStatus contract; see the domain and workflow specifications for invariants."
+    },
+    "TaskPhase": {
+      "type": "string",
+      "enum": [
+        "planning",
+        "plan_review",
+        "execution",
+        "work_review",
+        "complete"
+      ],
+      "description": "TaskPhase contract; see the domain and workflow specifications for invariants."
+    },
+    "ReviewPolicy": {
+      "type": "string",
+      "enum": [
+        "human",
+        "agent",
+        "none"
+      ],
+      "description": "ReviewPolicy contract; see the domain and workflow specifications for invariants."
+    },
+    "Actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "human",
+            "agent"
+          ],
+          "description": "Kind. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Label. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "revoked": {
+          "type": "boolean",
+          "description": "Revoked. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "revoked"
+      ],
+      "description": "Actor contract; see the domain and workflow specifications for invariants."
+    },
+    "Block": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Actor id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 2000,
+          "minLength": 1,
+          "description": "Reason. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        }
+      },
+      "required": [
+        "actor_id",
+        "reason",
+        "created_at"
+      ],
+      "description": "Block contract; see the domain and workflow specifications for invariants."
+    },
+    "GateReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "proposal_required",
+            "epic_proposal_required",
+            "explicit_block",
+            "epic_block",
+            "epic_prerequisite",
+            "task_prerequisite",
+            "plan_required",
+            "plan_review_required",
+            "work_review_required",
+            "claimed",
+            "terminal",
+            "archived",
+            "wrong_phase",
+            "reviewer_policy",
+            "producer_cannot_review"
+          ],
+          "description": "Code. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "resource_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Resource id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Message. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "code",
+        "resource_id",
+        "message"
+      ],
+      "description": "GateReason contract; see the domain and workflow specifications for invariants."
+    },
+    "Eligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "can_plan": {
+          "type": "boolean",
+          "description": "Can plan. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "can_execute": {
+          "type": "boolean",
+          "description": "Can execute. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "can_review": {
+          "type": "boolean",
+          "description": "Can review. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GateReason"
+          },
+          "maxItems": 1000,
+          "description": "Reasons. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "allowed_actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "maxItems": 40,
+          "description": "Allowed actions. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "can_plan",
+        "can_execute",
+        "can_review",
+        "reasons",
+        "allowed_actions"
+      ],
+      "description": "Eligibility contract; see the domain and workflow specifications for invariants."
+    },
+    "Counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "Total. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "done": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "Done. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "cancelled": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "Cancelled. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "waived": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "Waived. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        }
+      },
+      "required": [
+        "total",
+        "done",
+        "cancelled",
+        "waived"
+      ],
+      "description": "Counts contract; see the domain and workflow specifications for invariants."
+    },
+    "ProjectSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "proposal_gate": {
+          "type": "boolean",
+          "description": "Proposal gate. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "planning_required": {
+          "type": "boolean",
+          "description": "Planning required. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "plan_review": {
+          "$ref": "#/$defs/ReviewPolicy"
+        },
+        "work_review": {
+          "$ref": "#/$defs/ReviewPolicy"
+        }
+      },
+      "required": [
+        "proposal_gate",
+        "planning_required",
+        "plan_review",
+        "work_review"
+      ],
+      "description": "ProjectSettings contract; see the domain and workflow specifications for invariants."
+    },
+    "Project": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Updated at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Name. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Description. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "settings": {
+          "$ref": "#/$defs/ProjectSettings"
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Archived. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "epic_counts": {
+          "$ref": "#/$defs/Counts"
+        },
+        "archives": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LifecycleRecord"
+          },
+          "maxItems": 1,
+          "description": "Archives. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "created_at",
+        "updated_at",
+        "name",
+        "description",
+        "settings",
+        "archived",
+        "epic_counts",
+        "archives"
+      ],
+      "description": "Project contract; see the domain and workflow specifications for invariants."
+    },
+    "Goal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Updated at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "project_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Project id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Description. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Archived. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "epic_counts": {
+          "$ref": "#/$defs/Counts"
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Completed. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "archives": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LifecycleRecord"
+          },
+          "maxItems": 1,
+          "description": "Archives. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "created_at",
+        "updated_at",
+        "project_id",
+        "title",
+        "description",
+        "archived",
+        "epic_counts",
+        "completed",
+        "archives"
+      ],
+      "description": "Goal contract; see the domain and workflow specifications for invariants."
+    },
+    "Epic": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Updated at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "project_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Project id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "goal_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Goal id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Description. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "status": {
+          "$ref": "#/$defs/EntityStatus"
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Archived. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Block"
+          },
+          "maxItems": 1,
+          "description": "Blocks. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "eligibility": {
+          "$ref": "#/$defs/Eligibility"
+        },
+        "task_counts": {
+          "$ref": "#/$defs/Counts"
+        },
+        "cancellations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LifecycleRecord"
+          },
+          "maxItems": 1,
+          "description": "Cancellations. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "archives": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LifecycleRecord"
+          },
+          "maxItems": 1,
+          "description": "Archives. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "created_at",
+        "updated_at",
+        "project_id",
+        "goal_id",
+        "title",
+        "description",
+        "status",
+        "archived",
+        "blocks",
+        "eligibility",
+        "task_counts",
+        "cancellations",
+        "archives"
+      ],
+      "description": "Epic contract; see the domain and workflow specifications for invariants."
+    },
+    "Waiver": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Actor id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 2000,
+          "minLength": 1,
+          "description": "Reason. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        }
+      },
+      "required": [
+        "actor_id",
+        "reason",
+        "created_at"
+      ],
+      "description": "Waiver contract; see the domain and workflow specifications for invariants."
+    },
+    "Task": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Updated at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "project_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Project id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "epic_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Epic id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Description. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "type_key": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Type key. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "status": {
+          "$ref": "#/$defs/EntityStatus"
+        },
+        "phase": {
+          "$ref": "#/$defs/TaskPhase"
+        },
+        "planning_required": {
+          "type": "boolean",
+          "description": "Planning required. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "plan_review": {
+          "$ref": "#/$defs/ReviewPolicy"
+        },
+        "work_review": {
+          "$ref": "#/$defs/ReviewPolicy"
+        },
+        "selected_plan_revision_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "maxItems": 1,
+          "description": "Selected plan revision ids. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "accepted_plan_submission_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "maxItems": 1,
+          "description": "Accepted plan submission ids. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Archived. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Block"
+          },
+          "maxItems": 1,
+          "description": "Blocks. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "waivers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Waiver"
+          },
+          "maxItems": 1,
+          "description": "Waivers. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "attempt_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "Attempt count. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "eligibility": {
+          "$ref": "#/$defs/Eligibility"
+        },
+        "cancellations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LifecycleRecord"
+          },
+          "maxItems": 1,
+          "description": "Cancellations. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "archives": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LifecycleRecord"
+          },
+          "maxItems": 1,
+          "description": "Archives. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "created_at",
+        "updated_at",
+        "project_id",
+        "epic_id",
+        "title",
+        "description",
+        "type_key",
+        "status",
+        "phase",
+        "planning_required",
+        "plan_review",
+        "work_review",
+        "selected_plan_revision_ids",
+        "accepted_plan_submission_ids",
+        "archived",
+        "blocks",
+        "waivers",
+        "attempt_count",
+        "eligibility",
+        "cancellations",
+        "archives"
+      ],
+      "description": "Task contract; see the domain and workflow specifications for invariants."
+    },
+    "TaskType": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Updated at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "project_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Project id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "description": "Key. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Label. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Archived. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "builtin": {
+          "type": "boolean",
+          "description": "Builtin. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "created_at",
+        "updated_at",
+        "project_id",
+        "key",
+        "label",
+        "archived",
+        "builtin"
+      ],
+      "description": "TaskType contract; see the domain and workflow specifications for invariants."
+    },
+    "Dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Updated at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "project_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Project id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "epic",
+            "task"
+          ],
+          "description": "Level. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "dependent_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Dependent id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "prerequisite_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Prerequisite id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "created_at",
+        "updated_at",
+        "project_id",
+        "level",
+        "dependent_id",
+        "prerequisite_id"
+      ],
+      "description": "Dependency contract; see the domain and workflow specifications for invariants."
+    },
+    "Claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "task_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Task id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Actor id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "plan",
+            "execute",
+            "review"
+          ],
+          "description": "Phase. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "submission_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "maxItems": 1,
+          "description": "Submission ids. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "acquired_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Acquired at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Expires at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "released",
+            "expired",
+            "revoked",
+            "reported"
+          ],
+          "description": "Status. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "task_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Task revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "plan_revision_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "maxItems": 1,
+          "description": "Plan revision ids. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "id",
+        "task_id",
+        "actor_id",
+        "phase",
+        "submission_ids",
+        "acquired_at",
+        "expires_at",
+        "status",
+        "task_revision",
+        "plan_revision_ids"
+      ],
+      "description": "Claim contract; see the domain and workflow specifications for invariants."
+    },
+    "ClaimGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "claim": {
+          "$ref": "#/$defs/Claim"
+        },
+        "lease_token": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Lease token. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "context": {
+          "$ref": "#/$defs/ContextBundle"
+        }
+      },
+      "required": [
+        "claim",
+        "lease_token",
+        "context"
+      ],
+      "description": "ClaimGrant contract; see the domain and workflow specifications for invariants."
+    },
+    "Document": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Updated at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "project_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Project id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "owner_kind": {
+          "type": "string",
+          "enum": [
+            "project",
+            "epic",
+            "task"
+          ],
+          "description": "Owner kind. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "owner_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Owner id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "brief",
+            "plan",
+            "finding",
+            "handoff",
+            "note",
+            "decision"
+          ],
+          "description": "Kind. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "latest_revision_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Latest revision id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "created_at",
+        "updated_at",
+        "project_id",
+        "owner_kind",
+        "owner_id",
+        "kind",
+        "title",
+        "latest_revision_id"
+      ],
+      "description": "Document contract; see the domain and workflow specifications for invariants."
+    },
+    "DocumentRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "document_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Document id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Number. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 65536,
+          "description": "Body. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "maxItems": 50,
+          "description": "Links. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Actor id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        }
+      },
+      "required": [
+        "id",
+        "document_id",
+        "number",
+        "body",
+        "links",
+        "actor_id",
+        "created_at"
+      ],
+      "description": "DocumentRevision contract; see the domain and workflow specifications for invariants."
+    },
+    "Submission": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Updated at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "task_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Task id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "plan",
+            "work"
+          ],
+          "description": "Kind. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "producer_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Producer id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "document_revision_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "maxItems": 50,
+          "description": "Document revision ids. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "session_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Session id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "policy": {
+          "$ref": "#/$defs/ReviewPolicy"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "accepted",
+            "rejected",
+            "withdrawn"
+          ],
+          "description": "Status. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "created_context_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Created context revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "created_at",
+        "updated_at",
+        "task_id",
+        "kind",
+        "producer_id",
+        "document_revision_ids",
+        "session_id",
+        "policy",
+        "status",
+        "created_context_revision"
+      ],
+      "description": "Submission contract; see the domain and workflow specifications for invariants."
+    },
+    "Review": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "submission_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Submission id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Actor id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "reject"
+          ],
+          "description": "Decision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Reason. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        }
+      },
+      "required": [
+        "id",
+        "submission_id",
+        "actor_id",
+        "decision",
+        "reason",
+        "created_at"
+      ],
+      "description": "Review contract; see the domain and workflow specifications for invariants."
+    },
+    "Session": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "task_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Task id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "claim_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Claim id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Actor id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "plan",
+            "execute"
+          ],
+          "description": "Phase. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Started at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "ended_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Ended at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "succeeded",
+            "failed"
+          ],
+          "description": "Outcome. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Summary. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "failure_reason": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Failure reason. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "document_revision_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "maxItems": 50,
+          "description": "Document revision ids. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "maxItems": 50,
+          "description": "Links. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "id",
+        "task_id",
+        "claim_id",
+        "actor_id",
+        "phase",
+        "started_at",
+        "ended_at",
+        "outcome",
+        "summary",
+        "failure_reason",
+        "document_revision_ids",
+        "links"
+      ],
+      "description": "Session contract; see the domain and workflow specifications for invariants."
+    },
+    "ContextBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/Task"
+        },
+        "epic": {
+          "$ref": "#/$defs/Epic"
+        },
+        "goal": {
+          "$ref": "#/$defs/Goal"
+        },
+        "project": {
+          "$ref": "#/$defs/Project"
+        },
+        "selected_plan": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DocumentRevision"
+          },
+          "maxItems": 1,
+          "description": "Selected plan. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "documents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DocumentRevision"
+          },
+          "maxItems": 100,
+          "description": "Documents. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "submissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Submission"
+          },
+          "maxItems": 20,
+          "description": "Submissions. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "reviews": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Review"
+          },
+          "maxItems": 20,
+          "description": "Reviews. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Session"
+          },
+          "maxItems": 20,
+          "description": "Sessions. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Dependency"
+          },
+          "maxItems": 2000,
+          "description": "Dependencies. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "sibling_claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "maxItems": 100,
+          "description": "Sibling claims. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "Truncated. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "continuation_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "maxItems": 20,
+          "description": "Continuation paths. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "task",
+        "epic",
+        "goal",
+        "project",
+        "selected_plan",
+        "documents",
+        "submissions",
+        "reviews",
+        "sessions",
+        "dependencies",
+        "sibling_claims",
+        "truncated",
+        "continuation_paths"
+      ],
+      "description": "ContextBundle contract; see the domain and workflow specifications for invariants."
+    },
+    "Event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$",
+          "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "project_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Project id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Actor id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "command_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Command id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "project.changed",
+            "goal.changed",
+            "epic.changed",
+            "task.changed",
+            "dependency.changed",
+            "claim.changed",
+            "session.recorded",
+            "document.changed",
+            "submission.changed",
+            "review.recorded",
+            "task_type.changed"
+          ],
+          "description": "Type. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "resource_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Resource id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "resource_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Resource revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Occurred at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "affected_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "maxItems": 5000,
+          "description": "Affected ids. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "action": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Action. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Reason. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "actor_id",
+        "command_id",
+        "type",
+        "resource_id",
+        "resource_revision",
+        "occurred_at",
+        "affected_ids",
+        "action",
+        "reason"
+      ],
+      "description": "Event contract; see the domain and workflow specifications for invariants."
+    },
+    "Problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Type. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 400,
+          "maximum": 599,
+          "description": "Status. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        },
+        "code": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Code. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Detail. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "request_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Request id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "field": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "Field. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 500,
+                "description": "Message. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+              }
+            },
+            "required": [
+              "field",
+              "message"
+            ]
+          },
+          "maxItems": 16,
+          "description": "Errors. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "type",
+        "title",
+        "status",
+        "code",
+        "detail",
+        "request_id"
+      ],
+      "description": "Problem contract; see the domain and workflow specifications for invariants."
+    },
+    "Health": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail"
+          ],
+          "description": "Status. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Version. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "schema_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Schema version. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        }
+      },
+      "required": [
+        "status",
+        "version",
+        "schema_version"
+      ],
+      "description": "Health contract; see the domain and workflow specifications for invariants."
+    },
+    "Graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "epic",
+            "task"
+          ],
+          "description": "Level. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "scope_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Scope id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+              },
+              "status": {
+                "$ref": "#/$defs/EntityStatus"
+              },
+              "eligibility": {
+                "$ref": "#/$defs/Eligibility"
+              },
+              "counts": {
+                "$ref": "#/$defs/Counts"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "status",
+              "eligibility",
+              "counts"
+            ]
+          },
+          "maxItems": 2000,
+          "description": "Nodes. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Dependency"
+          },
+          "maxItems": 4000,
+          "description": "Dependencies. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "level",
+        "scope_id",
+        "nodes",
+        "dependencies"
+      ],
+      "description": "Graph contract; see the domain and workflow specifications for invariants."
+    },
+    "AgentToken": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "token": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Token. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "actor",
+        "token"
+      ],
+      "description": "AgentToken contract; see the domain and workflow specifications for invariants."
+    },
+    "BrowserSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "csrf_token": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Csrf token. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Expires at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        }
+      },
+      "required": [
+        "actor",
+        "csrf_token",
+        "expires_at"
+      ],
+      "description": "BrowserSession contract; see the domain and workflow specifications for invariants."
+    },
+    "Ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "Ok. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "description": "Ack contract; see the domain and workflow specifications for invariants."
+    },
+    "ReasonInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string",
+          "maxLength": 2000,
+          "minLength": 1,
+          "description": "Reason. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "description": "ReasonInput contract; see the domain and workflow specifications for invariants."
+    },
+    "EmptyInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "description": "EmptyInput contract; see the domain and workflow specifications for invariants."
+    },
+    "ProjectCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1,
+          "description": "Name. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Description. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "settings": {
+          "$ref": "#/$defs/ProjectSettings"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "description": "ProjectCreate contract; see the domain and workflow specifications for invariants."
+    },
+    "ProjectPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1,
+          "description": "Name. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Description. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "settings": {
+          "$ref": "#/$defs/ProjectSettings"
+        }
+      },
+      "required": [],
+      "description": "ProjectPatch contract; see the domain and workflow specifications for invariants."
+    },
+    "GoalCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1,
+          "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Description. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "description": "GoalCreate contract; see the domain and workflow specifications for invariants."
+    },
+    "TextPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1,
+          "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Description. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [],
+      "description": "TextPatch contract; see the domain and workflow specifications for invariants."
+    },
+    "EpicCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "goal_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Goal id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1,
+          "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Description. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "goal_id",
+        "title"
+      ],
+      "description": "EpicCreate contract; see the domain and workflow specifications for invariants."
+    },
+    "TaskCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "epic_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Epic id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1,
+          "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Description. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "type_key": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Type key. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "planning_required": {
+          "type": "boolean",
+          "description": "Planning required. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "plan_review": {
+          "$ref": "#/$defs/ReviewPolicy"
+        },
+        "work_review": {
+          "$ref": "#/$defs/ReviewPolicy"
+        }
+      },
+      "required": [
+        "epic_id",
+        "title",
+        "type_key"
+      ],
+      "description": "TaskCreate contract; see the domain and workflow specifications for invariants."
+    },
+    "TaskPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1,
+          "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Description. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "type_key": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Type key. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "planning_required": {
+          "type": "boolean",
+          "description": "Planning required. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "plan_review": {
+          "$ref": "#/$defs/ReviewPolicy"
+        },
+        "work_review": {
+          "$ref": "#/$defs/ReviewPolicy"
+        }
+      },
+      "required": [],
+      "description": "TaskPatch contract; see the domain and workflow specifications for invariants."
+    },
+    "TaskTypeCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "description": "Key. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 100,
+          "minLength": 1,
+          "description": "Label. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "key",
+        "label"
+      ],
+      "description": "TaskTypeCreate contract; see the domain and workflow specifications for invariants."
+    },
+    "TaskTypePatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string",
+          "maxLength": 100,
+          "minLength": 1,
+          "description": "Label. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Archived. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [],
+      "description": "TaskTypePatch contract; see the domain and workflow specifications for invariants."
+    },
+    "DependencyCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "epic",
+            "task"
+          ],
+          "description": "Level. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "dependent_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Dependent id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "prerequisite_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Prerequisite id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        }
+      },
+      "required": [
+        "level",
+        "dependent_id",
+        "prerequisite_id"
+      ],
+      "description": "DependencyCreate contract; see the domain and workflow specifications for invariants."
+    },
+    "ClaimInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "phase": {
+          "type": "string",
+          "enum": [
+            "plan",
+            "execute",
+            "review"
+          ],
+          "description": "Phase. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "submission_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Submission id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "ttl_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 900,
+          "default": 300,
+          "description": "Ttl seconds. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        }
+      },
+      "required": [
+        "phase"
+      ],
+      "description": "ClaimInput contract; see the domain and workflow specifications for invariants."
+    },
+    "RenewInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ttl_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 900,
+          "default": 300,
+          "description": "Ttl seconds. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "format": "int32"
+        }
+      },
+      "required": [],
+      "description": "RenewInput contract; see the domain and workflow specifications for invariants."
+    },
+    "ReportInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "succeeded",
+            "failed"
+          ],
+          "description": "Outcome. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 10000,
+          "minLength": 1,
+          "description": "Summary. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "failure_reason": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Failure reason. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "document_revision_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "maxItems": 50,
+          "description": "Document revision ids. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "maxItems": 50,
+          "description": "Links. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "outcome",
+        "summary",
+        "document_revision_ids",
+        "links"
+      ],
+      "description": "ReportInput contract; see the domain and workflow specifications for invariants."
+    },
+    "DocumentCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owner_kind": {
+          "type": "string",
+          "enum": [
+            "project",
+            "epic",
+            "task"
+          ],
+          "description": "Owner kind. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "owner_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Owner id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "brief",
+            "plan",
+            "finding",
+            "handoff",
+            "note",
+            "decision"
+          ],
+          "description": "Kind. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1,
+          "description": "Title. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 65536,
+          "description": "Body. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "maxItems": 50,
+          "description": "Links. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "owner_kind",
+        "owner_id",
+        "kind",
+        "title",
+        "body",
+        "links"
+      ],
+      "description": "DocumentCreate contract; see the domain and workflow specifications for invariants."
+    },
+    "RevisionCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string",
+          "maxLength": 65536,
+          "description": "Body. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "maxItems": 50,
+          "description": "Links. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "body",
+        "links"
+      ],
+      "description": "RevisionCreate contract; see the domain and workflow specifications for invariants."
+    },
+    "SelectPlanInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "document_revision_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Document revision id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        }
+      },
+      "required": [
+        "document_revision_id"
+      ],
+      "description": "SelectPlanInput contract; see the domain and workflow specifications for invariants."
+    },
+    "ReviewInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "reject"
+          ],
+          "description": "Decision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Reason. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "claim_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Claim id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        }
+      },
+      "required": [
+        "decision",
+        "reason"
+      ],
+      "description": "ReviewInput contract; see the domain and workflow specifications for invariants."
+    },
+    "AgentCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string",
+          "maxLength": 100,
+          "minLength": 1,
+          "description": "Label. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "description": "AgentCreate contract; see the domain and workflow specifications for invariants."
+    },
+    "SessionLogin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owner_token": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Owner token. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "owner_token"
+      ],
+      "description": "SessionLogin contract; see the domain and workflow specifications for invariants."
+    },
+    "ExportDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "enum": [
+            "2.0.0"
+          ],
+          "description": "Version. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "exported_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Exported at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        },
+        "project": {
+          "$ref": "#/$defs/Project"
+        },
+        "goals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Goal"
+          },
+          "description": "Goals. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "epics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Epic"
+          },
+          "description": "Epics. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Task"
+          },
+          "description": "Tasks. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "task_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskType"
+          },
+          "description": "Task types. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Dependency"
+          },
+          "description": "Dependencies. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "documents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Document"
+          },
+          "description": "Documents. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "document_revisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DocumentRevision"
+          },
+          "description": "Document revisions. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Session"
+          },
+          "description": "Sessions. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "submissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Submission"
+          },
+          "description": "Submissions. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "reviews": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Review"
+          },
+          "description": "Reviews. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "actors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Actor"
+          },
+          "description": "Actors. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "version",
+        "exported_at",
+        "project",
+        "goals",
+        "epics",
+        "tasks",
+        "task_types",
+        "dependencies",
+        "documents",
+        "document_revisions",
+        "sessions",
+        "submissions",
+        "reviews",
+        "actors"
+      ],
+      "description": "ExportDocument contract; see the domain and workflow specifications for invariants."
+    },
+    "ImportResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Project id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "id_map": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "old_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Old id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "new_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "New id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+                "minLength": 36,
+                "maxLength": 36
+              }
+            },
+            "required": [
+              "old_id",
+              "new_id"
+            ]
+          },
+          "description": "Id map. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        }
+      },
+      "required": [
+        "project_id",
+        "id_map"
+      ],
+      "description": "ImportResult contract; see the domain and workflow specifications for invariants."
+    },
+    "PageProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Project"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageProject contract; see the domain and workflow specifications for invariants."
+    },
+    "PageGoal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Goal"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageGoal contract; see the domain and workflow specifications for invariants."
+    },
+    "PageEpic": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Epic"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageEpic contract; see the domain and workflow specifications for invariants."
+    },
+    "PageTask": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Task"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageTask contract; see the domain and workflow specifications for invariants."
+    },
+    "PageTaskType": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskType"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageTaskType contract; see the domain and workflow specifications for invariants."
+    },
+    "PageDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Dependency"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageDependency contract; see the domain and workflow specifications for invariants."
+    },
+    "PageClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageClaim contract; see the domain and workflow specifications for invariants."
+    },
+    "PageDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Document"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageDocument contract; see the domain and workflow specifications for invariants."
+    },
+    "PageDocumentRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DocumentRevision"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageDocumentRevision contract; see the domain and workflow specifications for invariants."
+    },
+    "PageSubmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Submission"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageSubmission contract; see the domain and workflow specifications for invariants."
+    },
+    "PageReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Review"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageReview contract; see the domain and workflow specifications for invariants."
+    },
+    "PageSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Session"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageSession contract; see the domain and workflow specifications for invariants."
+    },
+    "PageActor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Actor"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageActor contract; see the domain and workflow specifications for invariants."
+    },
+    "PageEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Event"
+          },
+          "maxItems": 200,
+          "description": "Items. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minItems": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Next cursor. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "PageEvent contract; see the domain and workflow specifications for invariants."
+    },
+    "LifecycleRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Actor id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Reason. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Created at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+          "minLength": 20,
+          "maxLength": 35
+        }
+      },
+      "required": [
+        "actor_id",
+        "reason",
+        "created_at"
+      ],
+      "description": "LifecycleRecord contract; see the domain and workflow specifications for invariants."
+    }
+  }
+}

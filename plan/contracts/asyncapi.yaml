@@ -1,0 +1,208 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "Shepherd domain changes",
+    "version": "1.0.0",
+    "description": "Durable domain events delivered over project SSE streams.",
+    "tags": [
+      {
+        "name": "events",
+        "description": "Committed project changes"
+      }
+    ],
+    "contact": {
+      "name": "Shepherd",
+      "url": "https://github.com/apkg-ai/shepherd"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/license/mit"
+    }
+  },
+  "channels": {
+    "projectEvents": {
+      "address": "/api/v1/projects/{project_id}/events",
+      "parameters": {
+        "project_id": {
+          "description": "UUID project identifier"
+        }
+      },
+      "messages": {
+        "change": {
+          "$ref": "#/components/messages/Change"
+        },
+        "resync": {
+          "$ref": "#/components/messages/Resync"
+        }
+      },
+      "servers": [
+        {
+          "$ref": "#/servers/local"
+        }
+      ]
+    }
+  },
+  "operations": {
+    "receiveChanges": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/projectEvents"
+      },
+      "description": "Consume committed project change frames and explicit resync signals over authenticated SSE."
+    }
+  },
+  "components": {
+    "messages": {
+      "Change": {
+        "name": "change",
+        "title": "Committed domain change",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/Event"
+        }
+      },
+      "Resync": {
+        "name": "resync_required",
+        "title": "Cursor cannot be replayed",
+        "contentType": "application/json",
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "type": "string",
+              "maxLength": 30
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "cursor_expired",
+                "cursor_ahead",
+                "backlog_limit"
+              ]
+            }
+          },
+          "required": [
+            "cursor",
+            "reason"
+          ]
+        }
+      }
+    },
+    "schemas": {
+      "Event": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Project id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "actor_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Actor id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "command_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Command id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "project.changed",
+              "goal.changed",
+              "epic.changed",
+              "task.changed",
+              "dependency.changed",
+              "claim.changed",
+              "session.recorded",
+              "document.changed",
+              "submission.changed",
+              "review.recorded",
+              "task_type.changed"
+            ],
+            "description": "Type. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+          },
+          "resource_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Resource id. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "resource_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "description": "Resource revision. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+            "format": "int32"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Occurred at. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+            "minLength": 20,
+            "maxLength": 35
+          },
+          "affected_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "minLength": 36,
+              "maxLength": 36
+            },
+            "maxItems": 5000,
+            "description": "Affected ids. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md.",
+            "minItems": 0
+          },
+          "action": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Action. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Reason. Exact semantics are specified in plan/03-domain-model.md and plan/04-workflow-state-machines.md."
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "actor_id",
+          "command_id",
+          "type",
+          "resource_id",
+          "resource_revision",
+          "occurred_at",
+          "affected_ids",
+          "action",
+          "reason"
+        ],
+        "description": "Event contract; see the domain and workflow specifications for invariants."
+      }
+    }
+  },
+  "servers": {
+    "local": {
+      "host": "127.0.0.1:7437",
+      "protocol": "http",
+      "description": "Local authenticated daemon; REST contract defines bearer/cookie authentication."
+    }
+  }
+}
