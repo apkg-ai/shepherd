@@ -149,7 +149,7 @@ Test commands and results (from the reset tree, Node via nvm, Rust 1.98.1):
 - `node scripts/coverage-report.mjs --check` with all four lcov suites — thresholds met: core unit 100%, integration 100%, total 100%; ui unit 97.1%, e2e 69.7%, total 94.5%.
 - Negative sweep: `grep -riE 'epic|knowledge|lease|claim|proposed|in_review|depends_on|decomposition|sqlite|sqlx'` over compiled sources, tests, specs and scripts — zero MVP-domain hits.
 
-CI run: recorded on the pull request for branch `000-scaffold-reset` (Quality Gates, Dependency Scan, SAST must pass before completion).
+CI run: PR [#81](https://github.com/apkg-ai/shepherd/pull/81) — all checks green: [Quality Gates](https://github.com/apkg-ai/shepherd/actions/runs/34939434689) (16 jobs incl. coverage gate), [Dependency Scan](https://github.com/apkg-ai/shepherd/actions/runs/34939434603), [SAST](https://github.com/apkg-ai/shepherd/actions/runs/34939434666). One follow-up commit on the branch bumps transitive `rustls` 0.23.44→0.23.45 in `core/Cargo.lock` for RUSTSEC-2026-0285 (advisory published 2026-09-14, unrelated to the reset).
 
 User data and untracked paths untouched: `~/.shepherd/shepherd.db` (+wal/shm) last modified 2026-09-13, before this implementation; no test or script resolves that path anymore, and `tests/boot.rs` asserts the server never creates `~/.shepherd`. `docs/agent-quickstart.md` and `example/` do not exist in this working tree; nothing was created there.
 
