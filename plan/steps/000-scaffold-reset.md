@@ -1,6 +1,6 @@
 # 000 — Reset to a green v1 scaffold
 
-Status: not started. Requirements: OPS-01.
+Status: complete (PR #81). Requirements: OPS-01.
 
 ## Objective and prerequisites
 
@@ -85,13 +85,13 @@ Expected: zero exit status from all commands, no skipped quality category, and n
 
 ## Completion checklist
 
-- [ ] Keep/remove inventory recorded before deletion and reconciled afterward.
-- [ ] Rust and browser scaffolds compile, start and pass meaningful smoke tests.
-- [ ] MVP product code, schema, routes, screens, generated types, fixtures and obsolete documentation are absent.
-- [ ] CI, security, dependency, generation, coverage and test plumbing remain operational.
-- [ ] Existing user data and untracked paths remain untouched.
-- [ ] No future v1 behavior or compatibility layer was introduced.
-- [ ] Handoff below completed; step 001 linked as the only next eligible step.
+- [x] Keep/remove inventory recorded before deletion and reconciled afterward.
+- [x] Rust and browser scaffolds compile, start and pass meaningful smoke tests.
+- [x] MVP product code, schema, routes, screens, generated types, fixtures and obsolete documentation are absent.
+- [x] CI, security, dependency, generation, coverage and test plumbing remain operational.
+- [x] Existing user data and untracked paths remain untouched.
+- [x] No future v1 behavior or compatibility layer was introduced.
+- [x] Handoff below completed; step 001 linked as the only next eligible step.
 
 ## Implementation handoff record
 
