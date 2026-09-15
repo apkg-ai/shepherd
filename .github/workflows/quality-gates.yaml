@@ -60,9 +60,11 @@ jobs:
         run: |
           cargo clippy --all-targets -- -D warnings
 
-  # Test jobs are split per category (05-testing.md taxonomy). Property,
-  # migration, contract, and e2e suites have all landed alongside their
-  # sessions; fuzz is the one remaining placeholder (end of file).
+  # Test jobs are split per category (plan/14-test-strategy.md taxonomy).
+  # v1 step 000 reduced the suites to the health-only scaffold; property and
+  # migration jobs return with their owning steps (their entire subject —
+  # the domain store and SQL migrations — was removed with the MVP). Fuzz
+  # remains a placeholder (end of file).
   core-test-unit:
     name: Core / Test (Unit)
     runs-on: ubuntu-24.04-arm
@@ -345,10 +347,6 @@ jobs:
         run: |
           npm run lint:spec
 
-      - name: Spectral (AsyncAPI)
-        run: |
-          npm run lint:events
-
   coverage-report:
     name: Coverage Report
     runs-on: ubuntu-24.04-arm
@@ -462,80 +460,11 @@ jobs:
         run: |
           scripts/smoke.sh
 
-  # ── Declared test categories, placeholder runs until their session lands ──
-  # Each runs a plain echo so the full 05-testing.md taxonomy shows green on
-  # every PR from day one. Wire the real steps in the noted session (mirror an
-  # existing test job: toolchain, cache, coverage artifact, and a `needs:`
-  # entry on coverage-report).
-
-  core-test-property:
-    name: Core / Test (Property)
-    runs-on: ubuntu-24.04-arm
-
-    defaults:
-      run:
-        working-directory: core
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Parse pinned toolchain
-        id: toolchain
-        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
-        with:
-          toolchain: ${{ steps.toolchain.outputs.channel }}
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: core
-
-      - name: Property tests
-        run: |
-          cargo test --package shepherd-core --test proptest_invariants -- --test-threads=1
-        env:
-          PROPTEST_CASES: "500"
-
-  core-test-migration:
-    name: Core / Test (Migration)
-    runs-on: ubuntu-24.04-arm
-
-    defaults:
-      run:
-        working-directory: core
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Parse pinned toolchain
-        id: toolchain
-        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
-        with:
-          toolchain: ${{ steps.toolchain.outputs.channel }}
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: core
-
-      - name: Migration tests
-        run: |
-          cargo test --package shepherd-core --test migration_tests
-
   core-test-contract:
     name: Core / Test (Contract)
     runs-on: ubuntu-24.04-arm
     # The integration job also runs the contract module via --test '*'; this
-    # job is kept as the explicit, named gate for the S4 acceptance
-    # criterion ("integration + contract tests green") and isolates contract
+    # job is kept as the explicit, named contract gate and isolates contract
     # failures from coverage-tool failures.
 
     defaults:
@@ -573,7 +502,7 @@ jobs:
   core-test-hurl:
     name: Core / Test (Hurl E2E)
     runs-on: ubuntu-24.04-arm
-    # API-level E2E: the real binary over a real socket (docs/05-testing.md).
+    # API-level E2E: the real binary over a real socket (plan/14-test-strategy.md).
     # The hurl binary is pinned by sha256 like every other CI tool download.
 
     defaults:

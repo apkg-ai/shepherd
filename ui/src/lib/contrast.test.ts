@@ -46,8 +46,8 @@ describe("parseThemes", () => {
 /**
  * THE GATE — every fg/bg pairing the UI renders, both themes, WCAG AA.
  * 4.5:1 for text (everything in this UI is small text), 3:1 for non-text
- * (focus rings, status accent bars). Adding a pairing is one line; breaking
- * a token makes this fail with the exact pairing and computed ratio.
+ * (focus rings). Adding a pairing is one line; breaking a token makes this
+ * fail with the exact pairing and computed ratio.
  */
 const AA_TEXT = 4.5;
 const AA_NON_TEXT = 3;
@@ -62,16 +62,11 @@ interface Pair {
 const PAIRS: Pair[] = [
   // Body text on the three surfaces
   { fg: "text", bg: "bg", min: AA_TEXT, note: "body text / inputs" },
-  { fg: "text", bg: "surface", min: AA_TEXT, note: "metadata pre, approved badge, brand" },
+  { fg: "text", bg: "surface", min: AA_TEXT, note: "header bar, brand" },
   { fg: "text", bg: "surface-raised", min: AA_TEXT, note: "cards, dialogs, toasts" },
   // Muted text
-  { fg: "text-muted", bg: "bg", min: AA_TEXT, note: "descriptions, timeline meta, tabs" },
-  {
-    fg: "text-muted",
-    bg: "surface",
-    min: AA_TEXT,
-    note: "sidebar links, table headers, proposed badge",
-  },
+  { fg: "text-muted", bg: "bg", min: AA_TEXT, note: "descriptions, fact labels" },
+  { fg: "text-muted", bg: "surface", min: AA_TEXT, note: "header links, table headers" },
   {
     fg: "text-muted",
     bg: "surface-raised",
@@ -81,62 +76,33 @@ const PAIRS: Pair[] = [
   { fg: "text-muted", bg: "success-soft", min: AA_TEXT, note: "toast dismiss (success)" },
   { fg: "text-muted", bg: "danger-soft", min: AA_TEXT, note: "toast dismiss (error)" },
   // Faint text
-  { fg: "text-faint", bg: "bg", min: AA_TEXT, note: "cancelled badge, knowledge type labels" },
-  { fg: "text-faint", bg: "surface", min: AA_TEXT, note: "sidebar section label, done badge" },
-  { fg: "text-faint", bg: "surface-raised", min: AA_TEXT, note: "parent crumb, review row type" },
+  { fg: "text-faint", bg: "bg", min: AA_TEXT, note: "empty-state hints" },
+  { fg: "text-faint", bg: "surface", min: AA_TEXT, note: "header section label" },
+  { fg: "text-faint", bg: "surface-raised", min: AA_TEXT, note: "card footnotes" },
   // Accent
-  { fg: "accent", bg: "bg", min: AA_TEXT, note: "links, ghost buttons, active tab" },
-  { fg: "accent", bg: "surface", min: AA_TEXT, note: "sidebar hover states" },
+  { fg: "accent", bg: "bg", min: AA_TEXT, note: "links, ghost buttons" },
+  { fg: "accent", bg: "surface", min: AA_TEXT, note: "header hover states" },
   { fg: "accent", bg: "surface-raised", min: AA_TEXT, note: "ghost button in cards" },
-  { fg: "accent", bg: "accent-soft", min: AA_TEXT, note: "ready badge, active nav/switcher/theme" },
-  { fg: "on-accent", bg: "accent", min: AA_TEXT, note: "primary button, in_progress badge" },
+  { fg: "accent", bg: "accent-soft", min: AA_TEXT, note: "active theme toggle" },
+  { fg: "on-accent", bg: "accent", min: AA_TEXT, note: "primary button" },
   // Semantic colors
-  { fg: "danger", bg: "bg", min: AA_TEXT, note: "danger buttons, form errors, failed outcome" },
+  { fg: "danger", bg: "bg", min: AA_TEXT, note: "danger buttons, form errors" },
   { fg: "danger", bg: "surface-raised", min: AA_TEXT, note: "dialog form errors" },
-  { fg: "danger", bg: "danger-soft", min: AA_TEXT, note: "failure reason, failed attempts badge" },
-  { fg: "success", bg: "bg", min: AA_TEXT, note: "succeeded outcome" },
+  { fg: "danger", bg: "danger-soft", min: AA_TEXT, note: "danger accents on soft fill" },
+  { fg: "success", bg: "bg", min: AA_TEXT, note: "healthy status text" },
   { fg: "success", bg: "success-soft", min: AA_TEXT, note: "success accents on soft fill" },
-  { fg: "warning", bg: "warning-soft", min: AA_TEXT, note: "blocked badge, waits-on chip" },
-  { fg: "attention", bg: "attention-soft", min: AA_TEXT, note: "in_review badge, tab counts" },
-  { fg: "pink", bg: "pink-soft", min: AA_TEXT, note: "proposed badge" },
-  { fg: "teal", bg: "teal-soft", min: AA_TEXT, note: "approved badge" },
-  { fg: "bg", bg: "attention", min: AA_TEXT, note: "sidebar review badge (inverted)" },
   // Toast messages inherit --color-text over soft fills
   { fg: "text", bg: "success-soft", min: AA_TEXT, note: "toast success message" },
   { fg: "text", bg: "danger-soft", min: AA_TEXT, note: "toast error message" },
-  // Non-text UI (3:1): focus ring and status row accent bars
+  // Non-text UI (3:1): focus rings
   {
     fg: "accent",
     bg: "surface",
     min: AA_NON_TEXT,
-    note: "focus ring on sidebar/table-header surfaces",
+    note: "focus ring on header/table-header surfaces",
   },
-  { fg: "accent", bg: "accent-soft", min: AA_NON_TEXT, note: "focus ring on active nav items" },
-  {
-    fg: "accent",
-    bg: "surface-raised",
-    min: AA_NON_TEXT,
-    note: "ready/in_progress row accent bar",
-  },
-  { fg: "attention", bg: "surface-raised", min: AA_NON_TEXT, note: "in_review row accent bar" },
-  { fg: "warning", bg: "surface-raised", min: AA_NON_TEXT, note: "blocked row accent bar" },
-  // Graph canvas (S8): status node borders on the canvas surface, edge
-  // strokes, and node text on the raised node fill. Cancelled borders and
-  // edges use text-faint — --color-border misses this bar.
-  { fg: "pink", bg: "surface", min: AA_NON_TEXT, note: "graph proposed node border" },
-  { fg: "teal", bg: "surface", min: AA_NON_TEXT, note: "graph approved node border" },
-  { fg: "success", bg: "surface", min: AA_NON_TEXT, note: "graph done node border" },
-  { fg: "warning", bg: "surface", min: AA_NON_TEXT, note: "graph blocked node border" },
-  { fg: "attention", bg: "surface", min: AA_NON_TEXT, note: "graph in_review node border" },
-  { fg: "text-faint", bg: "surface", min: AA_NON_TEXT, note: "graph edges, cancelled border" },
-  { fg: "on-accent", bg: "accent", min: AA_TEXT, note: "graph in_progress node title" },
-  { fg: "text", bg: "surface-raised", min: AA_TEXT, note: "graph node titles" },
-
-  // Type badges (task list + graph): symbol+label on soft fill.
-  // attention/accent/pink/teal already covered above; warning and success too.
-  // Explicit entries document intent for the type badge surface.
-  { fg: "warning", bg: "warning-soft", min: AA_TEXT, note: "review type badge" },
-  { fg: "success", bg: "success-soft", min: AA_TEXT, note: "research type badge" },
+  { fg: "accent", bg: "accent-soft", min: AA_NON_TEXT, note: "focus ring on active toggles" },
+  { fg: "accent", bg: "surface-raised", min: AA_NON_TEXT, note: "focus ring on cards" },
 ];
 
 describe("WCAG AA token gate", () => {

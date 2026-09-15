@@ -7,8 +7,7 @@ import { useToast } from "../components/Toast";
  * QueryClient defaults for the app and tests:
  * - queries retry only unexpected failures (5xx/network), never problem+json
  *   client errors like 404/409/422;
- * - liveness comes from the SSE subscription (lib/events.ts); refetch-on-
- *   focus stays on as belt-and-braces for screens outside a project scope;
+ * - refetch-on-focus stays on so a returning tab picks up fresh data;
  * - every mutation error is toasted unless the mutation opts out with
  *   `meta: { silent: true }` (forms that render 422s as field errors).
  */

@@ -6,7 +6,6 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::Parser;
-use shepherd_core::Store;
 
 /// Local-first hub for agent-driven work.
 #[derive(Parser, Debug)]
@@ -19,59 +18,25 @@ struct Config {
     /// Directory of built UI assets served at `/`.
     #[arg(long, env = "SHEPHERD_UI_DIR", default_value = "ui/dist")]
     ui_dir: PathBuf,
-
-    /// Path to the SQLite database file.
-    #[arg(long, env = "SHEPHERD_DB")]
-    db: Option<PathBuf>,
-
-    /// Interval in seconds between expired-claim sweeps (0 disables the
-    /// background sweeper; expired leases are then only released lazily).
-    #[arg(long, env = "SHEPHERD_SWEEP_INTERVAL_SECONDS", default_value_t = 5)]
-    sweep_interval_seconds: u64,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = Config::parse();
 
-    // Resolve database path: explicit flag, env var, or default.
-    let db_path = match config.db {
-        Some(path) => path,
-        None => {
-            let home = dirs::home_dir().context("cannot determine home directory")?;
-            let dir = home.join(".shepherd");
-            std::fs::create_dir_all(&dir)
-                .with_context(|| format!("cannot create {}", dir.display()))?;
-            dir.join("shepherd.db")
-        }
-    };
-
-    let store = Store::open(&db_path)
-        .await
-        .with_context(|| format!("failed to open database at {}", db_path.display()))?;
-
-    store.check_integrity().await;
-
-    // Background sweeper: releases expired claims so crashed agents' tasks
-    // return to `ready` without waiting for the next API call (lazy sweep).
-    if config.sweep_interval_seconds > 0 {
-        shepherd_server::spawn_claim_sweeper(
-            store.clone(),
-            std::time::Duration::from_secs(config.sweep_interval_seconds),
-        );
-    }
-
-    let state = shepherd_server::AppState { store };
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, config.port));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {addr}"))?;
-    println!(
-        "shepherd-server listening on http://{addr} (db: {})",
-        db_path.display()
-    );
-    axum::serve(listener, shepherd_server::router(state, &config.ui_dir))
-        .await
-        .context("server error")?;
+    // Print the resolved address (not the requested one) so `--port 0`
+    // callers — the boot test, ad-hoc tooling — can discover the port.
+    let local_addr = listener.local_addr().context("failed to read bound addr")?;
+    println!("shepherd-server listening on http://{local_addr}");
+    axum::serve(
+        listener,
+        shepherd_server::router(shepherd_server::AppState, &config.ui_dir),
+    )
+    .await
+    .context("server error")?;
     Ok(())
 }

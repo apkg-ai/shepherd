@@ -2,7 +2,7 @@
  * `shepherdFetch` — the orval custom mutator (see orval.config.ts).
  *
  * Every generated operation funnels through here: JSON in/out, problem+json
- * error bodies normalized into `ShepherdError` (docs/agent-guide.md), 204
+ * error bodies normalized into `ShepherdError` (RFC 9457), 204
  * responses resolved as `undefined`.
  */
 import { ShepherdError, type ProblemDetail } from "./problem";

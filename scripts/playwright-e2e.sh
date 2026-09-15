@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-# Browser E2E tests using Playwright. Boots the server on a fresh temporary
-# file DB serving the built UI, runs the ui/e2e specs, then tears down.
+# Browser E2E tests using Playwright. Boots the server serving the built UI,
+# runs the ui/e2e specs, then tears down. The v1 scaffold has no database.
 # Extra arguments pass through to `playwright test` (e.g. a spec filter).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${PLAYWRIGHT_PORT:-7543}"
 BASE="http://127.0.0.1:${PORT}"
-DB_DIR="$(mktemp -d)"
-DB_PATH="${DB_DIR}/playwright-test.db"
 SERVER_PID=""
 
 for tool in curl cargo npx; do
@@ -28,7 +26,6 @@ cleanup() {
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
-  rm -rf "$DB_DIR"
 }
 trap cleanup EXIT
 
@@ -36,11 +33,10 @@ trap cleanup EXIT
 echo "playwright-e2e: building server..."
 (cd "$ROOT/core" && cargo build -q -p shepherd-server)
 
-# Boot with a fresh temporary DB.
+# Boot.
 "$ROOT/core/target/debug/shepherd-server" \
   --port "$PORT" \
-  --ui-dir "$ROOT/ui/dist" \
-  --db "$DB_PATH" &
+  --ui-dir "$ROOT/ui/dist" &
 SERVER_PID=$!
 
 # Poll until healthy.

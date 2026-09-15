@@ -16,19 +16,16 @@ fail() {
 
 (cd "$ROOT/core" && cargo build -q -p shepherd-server)
 
-# Fresh temporary DB — never the user's real ~/.shepherd database: a smoke
-# check must not run migrations against real data (hurl-e2e.sh does the same).
-DB_DIR="$(mktemp -d)"
-DB_PATH="${DB_DIR}/smoke-test.db"
+# The v1 scaffold has no database — the server must never touch ~/.shepherd
+# (guarded by shepherd-server/tests/boot.rs).
 cleanup() {
   if [ -n "${SERVER_PID:-}" ]; then
     kill "$SERVER_PID" 2>/dev/null || true
   fi
-  rm -rf "$DB_DIR"
 }
 trap cleanup EXIT
 
-"$ROOT/core/target/debug/shepherd-server" --port "$PORT" --ui-dir "$ROOT/ui/dist" --db "$DB_PATH" &
+"$ROOT/core/target/debug/shepherd-server" --port "$PORT" --ui-dir "$ROOT/ui/dist" &
 SERVER_PID=$!
 
 # Boot: poll /health until the server answers, up to 5 seconds.
