@@ -45,6 +45,9 @@ jobs:
               --config p/owasp-top-ten \
               --config p/r2c-best-practices \
               --config p/react-best-practices \
+              --config p/github-actions \
+              --config p/bash \
+              --config p/secrets \
               --exclude "*.test.tsx" \
               --exclude-rule typescript.react.best-practice.react-props-spreading.react-props-spreading
 
