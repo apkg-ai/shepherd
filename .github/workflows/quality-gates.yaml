@@ -88,15 +88,7 @@ jobs:
         uses: ./.github/actions/generate-wire-types
 
       - name: Install cargo-llvm-cov
-        env:
-          LLVM_COV_VERSION: 0.9.0
-          LLVM_COV_SHA256: 9af53b273e50d01d8bde8785de8541f6738cc4375248cd7683aec8b5768b9d21
-        run: |
-          set -euo pipefail
-          curl -sSLo cargo-llvm-cov.tar.gz "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz"
-          echo "${LLVM_COV_SHA256}  cargo-llvm-cov.tar.gz" | sha256sum -c -
-          tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
-          rm cargo-llvm-cov.tar.gz
+        uses: ./.github/actions/install-cargo-llvm-cov
 
       # Scoped to shepherd-core; the server is covered by the integration suite.
       - name: Unit Tests (Coverage)
@@ -148,15 +140,7 @@ jobs:
         uses: ./.github/actions/generate-wire-types
 
       - name: Install cargo-llvm-cov
-        env:
-          LLVM_COV_VERSION: 0.9.0
-          LLVM_COV_SHA256: 9af53b273e50d01d8bde8785de8541f6738cc4375248cd7683aec8b5768b9d21
-        run: |
-          set -euo pipefail
-          curl -sSLo cargo-llvm-cov.tar.gz "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz"
-          echo "${LLVM_COV_SHA256}  cargo-llvm-cov.tar.gz" | sha256sum -c -
-          tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
-          rm cargo-llvm-cov.tar.gz
+        uses: ./.github/actions/install-cargo-llvm-cov
 
       # Scoped to the server lib; main.rs is covered by smoke.
       - name: Integration Tests (Coverage)
