@@ -1,7 +1,7 @@
 # shepherd UI
 
-Vite + React + TypeScript app. `npm run dev` proxies `/api` to the shepherd
-daemon on `127.0.0.1:7437`; `npm run build` emits `dist/`, served by
+Vite + React + TypeScript app. `node --run dev` proxies `/api` to the shepherd
+daemon on `127.0.0.1:7437`; `node --run build` emits `dist/`, served by
 `shepherd-server`. Routing is hash-based so the built app works from the
 server's static fallback (and a future Tauri shell) without SPA rewrites.
 
@@ -30,7 +30,7 @@ by [orval](https://orval.dev) (`orval.config.ts`):
 Never edit generated files. After changing the spec, run:
 
 ```sh
-npm run generate:api
+node --run generate:api
 ```
 
 Generated code is lint-ignored (`.oxlintrc.json`) and excluded from the

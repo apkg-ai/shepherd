@@ -4,7 +4,7 @@
   "license": "MIT",
   "scripts": {
     "lint:spec": "spectral lint openapi/shepherd.yaml --fail-severity=error",
-    "lint:specs": "npm run lint:spec"
+    "lint:specs": "node --run lint:spec"
   },
   "overrides": {
     "lodash": "^4.18.0"

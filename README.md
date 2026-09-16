@@ -26,14 +26,14 @@ The `plan/` handbook is the authority for all v1 work:
 ## Quickstart
 
 Toolchain pins: Rust from [rust-toolchain.toml](rust-toolchain.toml), Node
-from [.nvmrc](.nvmrc), and `openapi-to-rust` 0.16.0 for code generation.
+from [.nvmrc](.nvmrc), and `openapi-to-rust` 0.17.0 for code generation.
 
 ```sh
-cargo install openapi-to-rust --version 0.16.0 --locked
+cargo install openapi-to-rust --version 0.17.0 --locked
 scripts/regen-generated.sh                  # Rust wire types (gitignored)
 npm ci && npm ci --prefix ui
-npm run generate:api --prefix ui            # TS client + MSW mocks (gitignored)
-npm run build --prefix ui
+(cd ui && node --run generate:api)          # TS client + MSW mocks (gitignored)
+(cd ui && node --run build)
 cargo run -p shepherd-server --manifest-path core/Cargo.toml
 # → http://127.0.0.1:7437 (override with --port / SHEPHERD_PORT)
 ```

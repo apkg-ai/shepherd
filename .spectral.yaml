@@ -1,4 +1,4 @@
-# Spectral config — usage: npm run lint:spec (CI: quality-gates.yaml)
+# Spectral config — usage: node --run lint:spec (CI: quality-gates.yaml)
 
 extends:
   - "spectral:oas"

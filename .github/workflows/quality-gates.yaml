@@ -182,15 +182,15 @@ jobs:
 
       - name: Generate API client
         run: |
-          npm run generate:api
+          node --run generate:api
 
       - name: Lint
         run: |
-          npm run lint
+          node --run lint
 
       - name: Format
         run: |
-          npm run fmt:check
+          node --run fmt:check
 
   ui-typecheck:
     name: UI / Typecheck
@@ -217,11 +217,11 @@ jobs:
 
       - name: Generate API client
         run: |
-          npm run generate:api
+          node --run generate:api
 
       - name: Typecheck
         run: |
-          npm run typecheck
+          node --run typecheck
 
   ui-test-unit:
     name: UI / Test (Unit)
@@ -248,11 +248,11 @@ jobs:
 
       - name: Generate API client
         run: |
-          npm run generate:api
+          node --run generate:api
 
       - name: Unit Tests (Coverage)
         run: |
-          npm run test:unit:cov
+          node --run test:unit:cov
 
       - name: Upload Coverage
         if: ${{ !cancelled() }}
@@ -286,11 +286,11 @@ jobs:
 
       - name: Generate API client
         run: |
-          npm run generate:api
+          node --run generate:api
 
       - name: Build
         run: |
-          npm run build
+          node --run build
 
   spec-lint:
     name: Spec / Lint
@@ -313,7 +313,7 @@ jobs:
 
       - name: Spectral (OpenAPI)
         run: |
-          npm run lint:spec
+          node --run lint:spec
 
   coverage-report:
     name: Coverage Report
@@ -410,10 +410,11 @@ jobs:
         uses: ./.github/actions/generate-wire-types
 
       - name: Build UI
+        working-directory: ui
         run: |
-          npm ci --prefer-offline --prefix ui
-          npm run generate:api --prefix ui
-          npm run build --prefix ui
+          npm ci --prefer-offline
+          node --run generate:api
+          node --run build
 
       - name: Smoke
         run: |
@@ -540,13 +541,16 @@ jobs:
         uses: ./.github/actions/generate-wire-types
 
       - name: Install Dependencies
-        run: npm ci --prefer-offline --prefix ui
+        working-directory: ui
+        run: npm ci --prefer-offline
 
       - name: Generate API client
-        run: npm run generate:api --prefix ui
+        working-directory: ui
+        run: node --run generate:api
 
       - name: Build UI
-        run: npm run build --prefix ui
+        working-directory: ui
+        run: node --run build
 
       - name: Resolve Playwright version
         id: playwright
