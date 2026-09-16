@@ -15,10 +15,7 @@ export function HomeScreen() {
 
   return (
     <>
-      <PageHeader
-        title={t("home.screen.title")}
-        description={t("home.screen.description")}
-      />
+      <PageHeader title={t("home.screen.title")} description={t("home.screen.description")} />
       <dl className={styles.facts}>
         <div className={styles.fact}>
           <dt className={styles.factLabel}>{t("home.fact.status")}</dt>

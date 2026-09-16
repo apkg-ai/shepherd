@@ -84,7 +84,12 @@ export function Dialog({ open, title, onClose, children }: DialogProps) {
       >
         <header className={styles.header}>
           <h2 className={styles.title}>{title}</h2>
-          <button type="button" className={styles.close} aria-label={t("common.action.close")} onClick={onClose}>
+          <button
+            type="button"
+            className={styles.close}
+            aria-label={t("common.action.close")}
+            onClick={onClose}
+          >
             ×
           </button>
         </header>

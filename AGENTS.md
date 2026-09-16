@@ -7,6 +7,7 @@ Working conventions for AI coding agents in this repository. These encode review
 - Prove every change by running the relevant gates (see the README's quality-gates table); never claim "tested" without an executed command in the transcript.
 - CI-only changes (workflow edits, pinned tool bumps): replicate the exact CI command locally when possible — semgrep, shellcheck, sha256 checks, contract-test filters.
 - Conversions and rewrites: prove equivalence by diffing old vs new output on the same input.
+- Never pipe a verification command through `tail`/`grep` — a pipeline's exit code is the last command's, so a failing check reads as success. Check `$?` directly.
 - Verify claims against the actual tree before acting: fetch rule/config sources, read the generated code, run the command. Do not assert from memory.
 
 ## Comments

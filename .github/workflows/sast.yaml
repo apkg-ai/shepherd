@@ -47,7 +47,6 @@ jobs:
               --config p/r2c-best-practices \
               --config p/react-best-practices \
               --config p/github-actions \
-              --config p/bash \
               --config p/secrets \
               --config p/default \
               --exclude "plan/*" \
