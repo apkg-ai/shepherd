@@ -5,7 +5,7 @@
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
     "types": ["vite/client", "node"],
-    "allowArbitraryExtensions": true,
+    "noUncheckedSideEffectImports": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
 
