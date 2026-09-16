@@ -6,11 +6,6 @@ use tower::{Layer, Service};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 /// CORS restricted to loopback origins (any port).
-///
-/// The UI is served same-origin by this daemon, so cross-origin access only
-/// matters for local dev tooling (e.g. a Vite dev server). Restricting the
-/// origin prevents arbitrary websites in the user's browser from calling
-/// this unauthenticated local API and reading the responses.
 pub fn cors_layer() -> CorsLayer {
     CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(|origin, _| {
