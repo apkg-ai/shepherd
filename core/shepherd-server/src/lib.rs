@@ -23,14 +23,11 @@ use crate::generated::server::router::system_api_router;
 use crate::generated::types as wire;
 use crate::middleware::{RateLimitHeaderLayer, cors_layer};
 
-/// Shared application state injected into handlers.
 #[derive(Clone)]
 pub struct AppState;
 
-/// The served contract. Embedded so the binary is self-contained.
 const OPENAPI_SPEC: &str = include_str!("../../../openapi/shepherd.yaml");
 
-/// Build the daemon's router.
 pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
     system_api_router(state)
         .route("/api/v1/openapi.yaml", get(openapi_spec))

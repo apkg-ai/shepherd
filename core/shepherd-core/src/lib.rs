@@ -1,6 +1,3 @@
-//! shepherd domain core.
-
-/// The shepherd-core version, embedded at compile time.
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }

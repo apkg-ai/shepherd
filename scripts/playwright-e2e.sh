@@ -27,7 +27,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Build the server.
 echo "playwright-e2e: building server..."
 (cd "$ROOT/core" && cargo build -q -p shepherd-server)
 
@@ -36,7 +35,6 @@ echo "playwright-e2e: building server..."
   --ui-dir "$ROOT/ui/dist" &
 SERVER_PID=$!
 
-# Poll until healthy.
 booted=false
 for _ in $(seq 1 50); do
   if curl -fsS "$BASE/health" >/dev/null 2>&1; then

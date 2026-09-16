@@ -26,7 +26,6 @@ trap cleanup EXIT
 "$ROOT/core/target/debug/shepherd-server" --port "$PORT" --ui-dir "$ROOT/ui/dist" &
 SERVER_PID=$!
 
-# Boot: poll /health until the server answers, up to 5 seconds.
 booted=false
 for _ in $(seq 1 50); do
   if curl -fsS "$BASE/health" >/dev/null 2>&1; then

@@ -54,9 +54,6 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      # npm audit reads the lockfiles — no install needed. Zero-tolerance
-      # --audit-level=low is deliberate (house posture; OSV and cargo-audit
-      # are equally strict).
       - name: Audit
         run: |
           npm audit --audit-level=low

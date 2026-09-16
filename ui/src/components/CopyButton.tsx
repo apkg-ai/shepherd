@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import styles from "./CopyButton.module.css";
 
-/** Copies `value` to the clipboard with brief visual + SR confirmation. */
 export function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(undefined);

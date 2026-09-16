@@ -7,7 +7,6 @@
  * can map 422 `errors[]` onto fields via `fieldErrors()`.
  */
 
-/** A single field-level validation error (422 responses). */
 export interface ValidationErrorDetail {
   /** JSON Pointer to the invalid field, e.g. `/title`. */
   field: string;
@@ -15,7 +14,6 @@ export interface ValidationErrorDetail {
   code?: string;
 }
 
-/** RFC 9457 problem detail as served by shepherd. */
 export interface ProblemDetail {
   /** Stable URN, e.g. `urn:shepherd:error:dependency-cycle`. */
   type: string;

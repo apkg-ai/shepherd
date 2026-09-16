@@ -26,7 +26,6 @@ pub fn cors_layer() -> CorsLayer {
 
 // ── Rate-limit header middleware ────────────────────────────────────────
 
-/// Layer that injects stub `RateLimit-*` headers on every response.
 #[derive(Clone)]
 pub struct RateLimitHeaderLayer;
 
@@ -38,7 +37,6 @@ impl<S> Layer<S> for RateLimitHeaderLayer {
     }
 }
 
-/// Service that injects stub rate-limit headers.
 #[derive(Clone)]
 pub struct RateLimitHeaderService<S> {
     inner: S,

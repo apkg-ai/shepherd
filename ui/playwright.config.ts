@@ -2,16 +2,16 @@ import { defineConfig, devices } from "@playwright/test";
 
 /**
  * E2E suite against a real shepherd-server serving ui/dist — booted by
- * scripts/playwright-e2e.sh (mirrors hurl-e2e.sh: temp DB, port 7543,
- * health poll, trap cleanup). No webServer block on purpose: the boot
- * script is shared between local runs and CI.
+ * scripts/playwright-e2e.sh (port 7543, health poll, trap cleanup).
+ * No webServer block on purpose: the boot script is shared between local
+ * runs and CI.
  */
 export default defineConfig({
   testDir: "./e2e",
   globalTeardown: "./e2e/helpers/global-teardown",
   outputDir: "./e2e-artifacts/test-results",
   fullyParallel: false,
-  // One worker: specs share a server and seed real data — determinism over speed.
+  // One worker: specs share a single server — determinism over speed.
   workers: 1,
   forbidOnly: !!process.env["CI"],
   retries: process.env["CI"] ? 1 : 0,

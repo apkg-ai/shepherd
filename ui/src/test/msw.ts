@@ -10,7 +10,6 @@ import type { ProblemDetail, ValidationErrorDetail } from "../api/problem";
  */
 export const server = setupServer(...getSystemMock());
 
-/** Builds a problem+json response for error-path tests. */
 export function problemResponse(
   status: number,
   slug: string,

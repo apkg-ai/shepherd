@@ -25,7 +25,6 @@ export function createQueryClient(onMutationError?: (message: string) => void): 
   });
 }
 
-/** Wires the QueryClient's global mutation-error handler to the toast stack. */
 export function AppQueryProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const [client] = useState(() => createQueryClient((message) => toast(message, "error")));

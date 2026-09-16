@@ -24,9 +24,9 @@ export const coverageOptions: CoverageReportOptions = {
   outputDir: "./coverage/e2e-raw",
   reports: [["lcovonly", { file: "../e2e.lcov" }]],
   entryFilter: (entry) => entry.url.includes("/assets/"),
-  // Vendored deps ship sourcemaps back to their own src/ trees (d3-* via
-  // @xyflow), which would collide with ours after normalization — keep only
-  // paths that resolve to real files in ui/src (cwd is ui/ under playwright).
+  // Vendored deps ship sourcemaps back to their own src/ trees, which
+  // would collide with ours after normalization — keep only paths that
+  // resolve to real files in ui/src (cwd is ui/ under playwright).
   sourceFilter: (sourcePath) => {
     const local = normalize(sourcePath);
     return local !== null && !local.includes("api/generated") && existsSync(local);

@@ -21,7 +21,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Build the server.
 echo "hurl-e2e: building server..."
 (cd "$ROOT/core" && cargo build -q -p shepherd-server)
 
@@ -30,7 +29,6 @@ echo "hurl-e2e: building server..."
   --ui-dir "$ROOT/ui/dist" &
 SERVER_PID=$!
 
-# Poll until healthy.
 booted=false
 for _ in $(seq 1 50); do
   if curl -fsS "$BASE/health" >/dev/null 2>&1; then
@@ -44,7 +42,6 @@ done
 
 echo "hurl-e2e: server running on $BASE (PID $SERVER_PID)"
 
-# Run all hurl files in order.
 PASS=0
 FAIL=0
 

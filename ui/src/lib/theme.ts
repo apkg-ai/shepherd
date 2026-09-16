@@ -35,7 +35,6 @@ export function resolveTheme(preference: ThemePreference, systemDark: boolean): 
   return preference;
 }
 
-/** Persists the preference and applies the resolved theme to <html>. */
 export function applyThemePreference(preference: ThemePreference): void {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, preference);

@@ -554,7 +554,7 @@ jobs:
     name: Test (E2E)
     runs-on: ubuntu-24.04-arm
     # Playwright driving the built UI against a real server booted by
-    # scripts/playwright-e2e.sh (temp DB, port 7543, health poll).
+    # scripts/playwright-e2e.sh (port 7543, health poll).
 
     steps:
       - name: Checkout
