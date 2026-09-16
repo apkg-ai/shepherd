@@ -40,5 +40,5 @@ Every PR runs the full pipeline (`.github/workflows/`):
 | UI | oxlint + oxfmt, `tsc -b`, Vitest with coverage, Vite build |
 | Spec lint | Spectral (OAS + OWASP + IBM + APIs-You-Won't-Hate) |
 | E2E / smoke | Hurl API checks, Playwright + axe WCAG-AA audit, boot smoke |
-| Coverage | Line-coverage thresholds per suite (`scripts/coverage-report.mjs`) |
+| Coverage | Line-coverage thresholds per suite (`scripts/coverage-report.ts`) |
 | Security | osv-scanner, npm/cargo audit, Semgrep |

@@ -33,7 +33,7 @@ code is lint-ignored (`.oxlintrc.json`) and excluded from the coverage gate.
 Screen-level integration tests render real routes against MSW: generated
 handlers serve spec-shaped background noise, and each test seeds the
 responses it asserts on (`server.use(...)` — handlers registered first win).
-Coverage gate: ≥95% lines on `ui/src` (`scripts/coverage-report.mjs`).
+Coverage gate: ≥95% lines on `ui/src` (`scripts/coverage-report.ts`).
 
 Playwright (`e2e/`) runs against the real Rust server serving `dist/`: shell
 + theme behavior, and an axe WCAG-AA audit of every route in both themes.
