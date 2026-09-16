@@ -46,9 +46,7 @@ jobs:
           workspaces: core
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.17.0 --locked
-          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+        uses: ./.github/actions/generate-wire-types
 
       - name: Format
         run: |
@@ -87,9 +85,7 @@ jobs:
           workspaces: core
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.17.0 --locked
-          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+        uses: ./.github/actions/generate-wire-types
 
       - name: Install cargo-llvm-cov
         env:
@@ -149,9 +145,7 @@ jobs:
           workspaces: core
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.17.0 --locked
-          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+        uses: ./.github/actions/generate-wire-types
 
       - name: Install cargo-llvm-cov
         env:
@@ -429,9 +423,7 @@ jobs:
           cache-dependency-path: ui/package-lock.json
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.17.0 --locked
-          scripts/regen-generated.sh
+        uses: ./.github/actions/generate-wire-types
 
       - name: Build UI
         run: |
@@ -471,9 +463,7 @@ jobs:
           workspaces: core
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.17.0 --locked
-          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+        uses: ./.github/actions/generate-wire-types
 
       - name: Contract conformance tests
         run: |
@@ -519,9 +509,7 @@ jobs:
           hurl --version
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.17.0 --locked
-          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+        uses: ./.github/actions/generate-wire-types
 
       - name: Hurl E2E suite
         run: |
@@ -565,9 +553,7 @@ jobs:
           cache-dependency-path: ui/package-lock.json
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.17.0 --locked
-          scripts/regen-generated.sh
+        uses: ./.github/actions/generate-wire-types
 
       - name: Install Dependencies
         run: npm ci --prefer-offline --prefix ui
