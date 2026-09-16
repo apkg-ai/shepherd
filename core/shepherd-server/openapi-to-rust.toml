@@ -13,8 +13,6 @@ uuid = "uuid"
 [server]
 framework = "axum"
 operations = [
-    # System — the health-only scaffold contract (v1 step 000). Later steps
-    # widen this allowlist as their operations land.
     "getHealth",
 ]
 prune_models = true

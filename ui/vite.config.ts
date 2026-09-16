@@ -26,8 +26,6 @@ export default defineConfig({
       // of silently missing from the report (and CSS stays out of the lcov).
       include: ["src/**/*.{ts,tsx}"],
       exclude: [
-        // Spec-derived code is regenerated, not hand-maintained —
-        // mirrors core ignoring src/generated/ in llvm-cov.
         "src/api/generated/**",
         // Entry point is exercised by scripts/smoke.sh, mirroring main.rs.
         "src/main.tsx",

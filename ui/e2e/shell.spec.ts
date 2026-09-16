@@ -1,10 +1,5 @@
 import { expect, test } from "./helpers/coverage";
 
-/**
- * Scaffold shell checks (v1 step 000) against the real Rust server serving
- * ui/dist — the browser → fetch → axum → shepherd-core path end to end.
- */
-
 test.describe("scaffold shell", () => {
   test("home renders live health from the daemon", async ({ page }) => {
     await page.goto("/#/");

@@ -1,6 +1,6 @@
 [package]
 name = "shepherd-core"
-description = "shepherd domain core (v1 scaffold shell — rebuilt from step 001 onward)"
+description = "shepherd domain core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

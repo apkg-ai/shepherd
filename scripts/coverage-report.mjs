@@ -15,7 +15,6 @@ const REPORTS = {
   core: {
     marker: "<!-- shepherd-coverage-core -->",
     title: "Coverage — Core (Rust)",
-    // Later v1 steps re-add property and migration suites here.
     suites: {
       "core-unit": { label: "Unit", threshold: 95 },
       "core-integration": { label: "Integration", threshold: 70 },

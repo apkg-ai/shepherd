@@ -1,11 +1,6 @@
 //! Router and handlers for the shepherd daemon, exposed as a lib target so
 //! integration tests (`tests/`) can drive them without booting the binary.
 //! Keep this thin: logic belongs in `shepherd-core`.
-//!
-//! Wire types and routing are generated from the OpenAPI spec by
-//! `openapi-to-rust`. The generated code lives in `src/generated/`; this
-//! module implements the generated traits. v1 step 000 reduced the surface
-//! to the health-only scaffold contract plus static UI serving.
 
 // The generated module triggers clippy style lints by design (collapsed
 // `if` chains from the emission template and `must_use` on types already

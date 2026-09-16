@@ -1,8 +1,5 @@
 # cargo-audit configuration.
 # https://github.com/rustsec/rustsec/tree/main/cargo-audit
-#
-# No ignored advisories. The RUSTSEC-2023-0071 ignore (rsa via sqlx-mysql)
-# was removed in v1 step 000 together with the sqlx dependency.
 
 [advisories]
 ignore = []

@@ -43,12 +43,6 @@ describe("parseThemes", () => {
   });
 });
 
-/**
- * THE GATE — every fg/bg pairing the UI renders, both themes, WCAG AA.
- * 4.5:1 for text (everything in this UI is small text), 3:1 for non-text
- * (focus rings). Adding a pairing is one line; breaking a token makes this
- * fail with the exact pairing and computed ratio.
- */
 const AA_TEXT = 4.5;
 const AA_NON_TEXT = 3;
 

@@ -46,7 +46,7 @@ describe("HomeScreen", () => {
               detail: "Health check failed.",
             });
           }
-          return undefined; // fall through to the generated background handler
+          return undefined;
         }),
         healthy,
       ],

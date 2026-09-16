@@ -16,8 +16,6 @@ fail() {
 
 (cd "$ROOT/core" && cargo build -q -p shepherd-server)
 
-# The v1 scaffold has no database — the server must never touch ~/.shepherd
-# (guarded by shepherd-server/tests/boot.rs).
 cleanup() {
   if [ -n "${SERVER_PID:-}" ]; then
     kill "$SERVER_PID" 2>/dev/null || true

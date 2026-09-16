@@ -1,6 +1,5 @@
 //! Integration tests: full request → router → response, with contract
-//! conformance against `openapi/shepherd.yaml` (the health-only scaffold
-//! contract from v1 step 000).
+//! conformance against `openapi/shepherd.yaml`.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -11,13 +10,9 @@ use tower::ServiceExt;
 // ── Test setup ──────────────────────────────────────────────────────────
 
 fn test_app() -> axum::Router {
-    // The ui_dir intentionally does not exist: API-level tests must not
-    // depend on built UI assets. Static serving has its own test with a
-    // temp directory.
     shepherd_server::router(shepherd_server::AppState, "does-not-exist")
 }
 
-/// Send a GET and return the full response.
 async fn get_response(app: &axum::Router, path: &str) -> axum::response::Response {
     app.clone()
         .oneshot(Request::get(path).body(Body::empty()).unwrap())
@@ -25,7 +20,6 @@ async fn get_response(app: &axum::Router, path: &str) -> axum::response::Respons
         .unwrap()
 }
 
-/// Send a GET and return `(StatusCode, body as Value)`.
 async fn get(app: &axum::Router, path: &str) -> (StatusCode, Value) {
     let response = get_response(app, path).await;
     let status = response.status();
@@ -137,16 +131,12 @@ async fn static_ui_is_served_from_ui_dir() {
             .contains("<div id=\"root\">")
     );
 
-    // Missing assets fall through to ServeDir's 404.
     let response = get_response(&app, "/missing-asset.js").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 // ── Scaffold boundary ───────────────────────────────────────────────────
 
-/// The scaffold must not answer for any future v1 operation: no success
-/// stubs, no compatibility routes. Unknown API paths fall through to the
-/// (empty) static fallback and 404.
 #[tokio::test]
 async fn unknown_api_route_is_not_a_success_stub() {
     let app = test_app();
@@ -162,13 +152,11 @@ mod contract {
     use super::*;
     use jsonschema_055::Validator;
 
-    /// Load the OpenAPI spec.
     fn load_spec() -> Value {
         let yaml_str = include_str!("../../../openapi/shepherd.yaml");
         serde_yaml::from_str(yaml_str).expect("failed to parse OpenAPI spec")
     }
 
-    /// Resolve a JSON `$ref` within the spec.
     fn resolve_ref<'a>(spec: &'a Value, ref_path: &str) -> &'a Value {
         let path = ref_path.strip_prefix("#/").unwrap_or(ref_path);
         let mut current = spec;
@@ -178,8 +166,6 @@ mod contract {
         current
     }
 
-    /// Recursively resolve all `$ref` in a schema, returning a self-contained
-    /// JSON schema. This is a simple resolver for our spec's structure.
     fn resolve_schema(spec: &Value, schema: &Value) -> Value {
         match schema {
             Value::Object(map) => {
@@ -202,7 +188,6 @@ mod contract {
         }
     }
 
-    /// Validate a value against a spec schema.
     fn validate(spec: &Value, schema_ref: &str, value: &Value) {
         let raw = resolve_ref(spec, schema_ref);
         let resolved = resolve_schema(spec, raw);
@@ -234,7 +219,6 @@ mod contract {
 
         assert_eq!(served, load_spec(), "served spec must be the embedded one");
 
-        // The scaffold contract exposes exactly one operation: getHealth.
         let paths = served["paths"].as_object().unwrap();
         assert_eq!(paths.keys().collect::<Vec<_>>(), ["/health"]);
         assert_eq!(

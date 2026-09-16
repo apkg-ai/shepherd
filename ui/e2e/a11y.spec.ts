@@ -2,13 +2,6 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./helpers/coverage";
 
-/**
- * WCAG AA audit of every scaffold route in both themes with axe-core — the
- * rendered-pixels layer on top of the token contrast gate (unit) and
- * jsx-a11y (lint). Any violation fails the suite; best-practice rules are
- * deliberately out of scope (AA is the bar).
- */
-
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 async function auditBothThemes(page: Page, name: string) {

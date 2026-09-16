@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# E2E API tests using hurl. Boots the server, runs all .hurl files, then
-# tears down. The v1 scaffold has no database.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,7 +25,6 @@ trap cleanup EXIT
 echo "hurl-e2e: building server..."
 (cd "$ROOT/core" && cargo build -q -p shepherd-server)
 
-# Boot.
 "$ROOT/core/target/debug/shepherd-server" \
   --port "$PORT" \
   --ui-dir "$ROOT/ui/dist" &

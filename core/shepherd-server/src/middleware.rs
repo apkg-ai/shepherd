@@ -1,7 +1,4 @@
 //! Tower middleware: CORS and stub rate-limit headers.
-//!
-//! The rate-limit headers satisfy the OpenAPI contract without enforcing
-//! actual limits — shepherd is a local daemon.
 
 use axum::http::{HeaderValue, Request, Response};
 use std::future::Future;

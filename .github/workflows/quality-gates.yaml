@@ -60,11 +60,6 @@ jobs:
         run: |
           cargo clippy --all-targets -- -D warnings
 
-  # Test jobs are split per category (plan/14-test-strategy.md taxonomy).
-  # v1 step 000 reduced the suites to the health-only scaffold; property and
-  # migration jobs return with their owning steps (their entire subject —
-  # the domain store and SQL migrations — was removed with the MVP). Fuzz
-  # remains a placeholder (end of file).
   core-test-unit:
     name: Core / Test (Unit)
     runs-on: ubuntu-24.04-arm
@@ -463,9 +458,6 @@ jobs:
   core-test-contract:
     name: Core / Test (Contract)
     runs-on: ubuntu-24.04-arm
-    # The integration job also runs the contract module via --test '*'; this
-    # job is kept as the explicit, named contract gate and isolates contract
-    # failures from coverage-tool failures.
 
     defaults:
       run:
@@ -502,7 +494,6 @@ jobs:
   core-test-hurl:
     name: Core / Test (Hurl E2E)
     runs-on: ubuntu-24.04-arm
-    # API-level E2E: the real binary over a real socket (plan/14-test-strategy.md).
     # The hurl binary is pinned by sha256 like every other CI tool download.
 
     defaults:

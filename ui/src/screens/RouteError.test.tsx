@@ -3,11 +3,6 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { RouteError } from "./RouteError";
 
-// Mock only useRouteError — the component is a pure presenter over the
-// router's caught error. Driving a real render-time throw makes React
-// Router log the error and surfaces it as an unhandled error in vitest,
-// which fails the CI run; the errorElement wiring itself is exercised by
-// the router in production and by the shell tests' real routes.
 const useRouteErrorMock = vi.hoisted(() => vi.fn());
 vi.mock("react-router", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router")>();

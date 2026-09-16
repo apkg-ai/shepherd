@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Browser E2E tests using Playwright. Boots the server serving the built UI,
-# runs the ui/e2e specs, then tears down. The v1 scaffold has no database.
 # Extra arguments pass through to `playwright test` (e.g. a spec filter).
 set -euo pipefail
 
@@ -33,7 +31,6 @@ trap cleanup EXIT
 echo "playwright-e2e: building server..."
 (cd "$ROOT/core" && cargo build -q -p shepherd-server)
 
-# Boot.
 "$ROOT/core/target/debug/shepherd-server" \
   --port "$PORT" \
   --ui-dir "$ROOT/ui/dist" &

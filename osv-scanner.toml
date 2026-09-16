@@ -1,5 +1,2 @@
 # OSV Scanner ignore list.
 # https://google.github.io/osv-scanner/configuration/
-#
-# No ignored vulnerabilities. The RUSTSEC-2023-0071 ignore (rsa via
-# sqlx-mysql) was removed in v1 step 000 together with the sqlx dependency.

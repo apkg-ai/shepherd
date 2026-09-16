@@ -74,8 +74,6 @@ describe("ConfirmDialog", () => {
 });
 
 describe("CopyButton", () => {
-  // fireEvent, not userEvent: userEvent.setup() installs its own clipboard
-  // stub, which would silently override the mocks these tests assert on.
   it("copies the value and confirms briefly", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {

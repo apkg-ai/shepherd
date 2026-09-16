@@ -3,14 +3,6 @@ import { useState, type ReactNode } from "react";
 import { isShepherdError } from "../api/problem";
 import { useToast } from "../components/Toast";
 
-/**
- * QueryClient defaults for the app and tests:
- * - queries retry only unexpected failures (5xx/network), never problem+json
- *   client errors like 404/409/422;
- * - refetch-on-focus stays on so a returning tab picks up fresh data;
- * - every mutation error is toasted unless the mutation opts out with
- *   `meta: { silent: true }` (forms that render 422s as field errors).
- */
 export function createQueryClient(onMutationError?: (message: string) => void): QueryClient {
   return new QueryClient({
     defaultOptions: {

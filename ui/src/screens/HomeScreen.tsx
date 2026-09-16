@@ -3,10 +3,6 @@ import { PageHeader } from "../components/PageHeader";
 import { ErrorState, LoadingState } from "../components/states";
 import styles from "./HomeScreen.module.css";
 
-/**
- * Scaffold home route (v1 step 000): shows the daemon's live health so the
- * whole browser → fetch → axum → shepherd-core path is exercised end to end.
- */
 export function HomeScreen() {
   const health = useGetHealth();
 

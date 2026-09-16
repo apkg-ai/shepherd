@@ -28,8 +28,6 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {addr}"))?;
-    // Print the resolved address (not the requested one) so `--port 0`
-    // callers — the boot test, ad-hoc tooling — can discover the port.
     let local_addr = listener.local_addr().context("failed to read bound addr")?;
     println!("shepherd-server listening on http://{local_addr}");
     axum::serve(
