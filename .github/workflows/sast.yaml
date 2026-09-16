@@ -31,8 +31,8 @@ jobs:
           # Digest-pinned like every action here — one digest covers the whole image stack.
           # Upgrading: resolve the new tag to an arm64 digest, replace the tag
           # comment and the digest below.
-          #   semgrep/semgrep:1.176.1 (linux/arm64)
-          SEMGREP_IMAGE: semgrep/semgrep@sha256:35887b09ae583b36a052e2f2bb66ee17d9212151ca0945c1c9776f89df0e838f
+          #   semgrep/semgrep:1.177.0 (linux/arm64)
+          SEMGREP_IMAGE: semgrep/semgrep@sha256:6b46f252080393083d6b32fca1a710edde5fd8624de9af05f49250169df1cc70
         run: |
           # SARIF is written before --error sets exit status, so it exists on
           # pass and fail; the always() upload keeps it as the audit trail
