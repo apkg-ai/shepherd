@@ -47,7 +47,7 @@ jobs:
 
       - name: Generate wire types
         run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
+          cargo install openapi-to-rust --version 0.17.0 --locked
           "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
 
       - name: Format
@@ -88,7 +88,7 @@ jobs:
 
       - name: Generate wire types
         run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
+          cargo install openapi-to-rust --version 0.17.0 --locked
           "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
 
       - name: Install cargo-llvm-cov
@@ -150,7 +150,7 @@ jobs:
 
       - name: Generate wire types
         run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
+          cargo install openapi-to-rust --version 0.17.0 --locked
           "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
 
       - name: Install cargo-llvm-cov
@@ -430,7 +430,7 @@ jobs:
 
       - name: Generate wire types
         run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
+          cargo install openapi-to-rust --version 0.17.0 --locked
           scripts/regen-generated.sh
 
       - name: Build UI
@@ -472,7 +472,7 @@ jobs:
 
       - name: Generate wire types
         run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
+          cargo install openapi-to-rust --version 0.17.0 --locked
           "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
 
       - name: Contract conformance tests
@@ -520,7 +520,7 @@ jobs:
 
       - name: Generate wire types
         run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
+          cargo install openapi-to-rust --version 0.17.0 --locked
           "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
 
       - name: Hurl E2E suite
@@ -566,7 +566,7 @@ jobs:
 
       - name: Generate wire types
         run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
+          cargo install openapi-to-rust --version 0.17.0 --locked
           scripts/regen-generated.sh
 
       - name: Install Dependencies

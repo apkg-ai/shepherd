@@ -145,7 +145,7 @@ async fn unknown_api_route_is_not_a_success_stub() {
 
 mod contract {
     use super::*;
-    use jsonschema_055::Validator;
+    use jsonschema_056::Validator;
 
     fn load_spec() -> Value {
         let yaml_str = include_str!("../../../openapi/shepherd.yaml");

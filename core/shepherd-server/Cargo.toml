@@ -24,7 +24,7 @@ tower-http = { version = "0.7.1", features = ["cors", "fs"] }
 
 [dev-dependencies]
 # Alias so tests use the newer jsonschema API alongside the pinned 0.49 runtime layer.
-jsonschema_055 = { package = "jsonschema", version = "0.55" }
+jsonschema_056 = { package = "jsonschema", version = "0.56" }
 serde_yaml = "0.9"
 tempfile = "3"
 tower = { version = "0.5.3", features = ["util"] }
