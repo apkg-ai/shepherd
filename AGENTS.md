@@ -15,6 +15,12 @@ Working conventions for AI coding agents in this repository. These encode review
 - If the code is understandable in ~10 seconds, no comment.
 - When a comment adds nothing, remove it entirely — no partial trims that leave narration behind. No history notes ("was removed in step 000"), no restating what a name says.
 
+## File size
+
+- Keep hand-written source files small — split by responsibility well before a few hundred lines.
+- Test files may run longer; split them when they start mixing concerns.
+- Generated code (`src/generated/`, `src/api/generated/`) is exempt — it is regenerated, never hand-edited.
+
 ## Documentation
 
 - READMEs carry useful information only: quickstart, gates, contribution paths. No narration.
