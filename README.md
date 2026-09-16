@@ -1,21 +1,12 @@
 # shepherd
 
-A local-first hub for long, multi-session agentic projects. It never spawns or
-orchestrates agents — it is a passive hub (storage + REST API + UI) that
-agentic tools query for their next task and report back to.
+A local-first hub for long, multi-session agentic projects. It never spawns or orchestrates agents — it is a passive hub (storage + REST API + UI) that agentic tools query for their next task and report back to.
 
-Current state: the v1 step-000 scaffold — a health-only Rust daemon (axum)
-serving the built React shell, with the full build, generation, test, and CI
-pipeline. The stable-v1 domain is rebuilt step by step from the
-[plan/](plan/steps/README.md) handbook (current step:
-[000 — scaffold reset](plan/steps/000-scaffold-reset.md)); contracts live in
-[plan/contracts/](plan/contracts/), and the contract actually served is
-[openapi/shepherd.yaml](openapi/shepherd.yaml).
+Current state: the v1 step-000 scaffold — a health-only Rust daemon (axum) serving the built React shell, with the full build, generation, test, and CI pipeline. The stable-v1 domain is rebuilt step by step from the [plan/](plan/steps/README.md) handbook (current step: [000 — scaffold reset](plan/steps/000-scaffold-reset.md)); contracts live in [plan/contracts/](plan/contracts/), and the contract actually served is [openapi/shepherd.yaml](openapi/shepherd.yaml).
 
 ## Quickstart
 
-Toolchain pins: Rust from [rust-toolchain.toml](rust-toolchain.toml), Node
-from [.nvmrc](.nvmrc), and `openapi-to-rust` 0.17.0 for code generation.
+Toolchain pins: Rust from [rust-toolchain.toml](rust-toolchain.toml), Node from [.nvmrc](.nvmrc), and `openapi-to-rust` 0.17.0 for code generation.
 
 ```sh
 cargo install openapi-to-rust --version 0.17.0 --locked
