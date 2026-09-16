@@ -1,5 +1,3 @@
-//! Tower middleware: CORS and stub rate-limit headers.
-
 use axum::http::{HeaderValue, Request, Response};
 use std::future::Future;
 use std::pin::Pin;

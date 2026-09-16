@@ -5,7 +5,6 @@ test.describe("scaffold shell", () => {
     await page.goto("/#/");
 
     await expect(page.getByRole("heading", { level: 1, name: "Shepherd" })).toBeVisible();
-    // Health facts come from GET /health — not fixtures.
     await expect(page.getByText("pass", { exact: true })).toBeVisible();
     await expect(page.getByText(/^\d+\.\d+\.\d+/)).toBeVisible();
     await expect(page.getByText("shepherd local daemon")).toBeVisible();
@@ -45,7 +44,6 @@ test.describe("dark theme", () => {
     );
 
     await page.reload();
-    // The pre-paint script restores the stored preference before React loads.
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
     await page.getByRole("button", { name: "Light" }).click();

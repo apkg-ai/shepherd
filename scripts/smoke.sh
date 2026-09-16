@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Smoke check: boot → /health → spec → UI index. Seconds-fast; gates every PR.
-# Assumes `ui/dist` is built and the workspace compiles (CI builds both first).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

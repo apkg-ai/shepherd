@@ -3,11 +3,6 @@ import { HttpResponse } from "msw";
 import { getSystemMock } from "../api/generated/system/system.msw";
 import type { ProblemDetail, ValidationErrorDetail } from "../api/problem";
 
-/**
- * Spec-derived MSW server. Generated handlers answer any request with
- * spec-shaped faker data as background noise; tests seed the responses they
- * assert on with `server.use(get<Op>MockHandler(fixture))`.
- */
 export const server = setupServer(...getSystemMock());
 
 export function problemResponse(

@@ -5,7 +5,6 @@ interface FormFieldProps {
   label: string;
   error?: string;
   hint?: string;
-  /** Render prop so the control can wire up the generated id + aria. */
   children: (props: {
     id: string;
     "aria-invalid": boolean | undefined;
@@ -25,7 +24,6 @@ export function FormField({ label, error, hint, children }: FormFieldProps) {
       {children({
         id,
         "aria-invalid": error ? true : undefined,
-        // The hint is real guidance — expose it to AT, not just sighted users.
         "aria-describedby": error ? errorId : hint ? hintId : undefined,
       })}
       {hint && !error ? (

@@ -15,7 +15,6 @@ export function ThemeToggle() {
   useEffect(() => {
     applyThemePreference(preference);
     if (preference !== "system") return;
-    // While following the OS, re-resolve when it flips.
     return watchSystemTheme(() => applyThemePreference("system"));
   }, [preference]);
 

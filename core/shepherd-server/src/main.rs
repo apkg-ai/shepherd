@@ -1,6 +1,3 @@
-//! shepherd daemon entry point — config parsing and serving. Routes live in
-//! the lib target ([`shepherd_server::router`]); logic in `shepherd-core`.
-
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 

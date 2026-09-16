@@ -401,8 +401,6 @@ jobs:
             fi
           done
 
-      # Runs after the comments so the numbers always land on the PR,
-      # then fails the job if any threshold is not met.
       - name: Enforce Thresholds
         run: |
           node scripts/coverage-report.mjs --dir coverage --check
@@ -450,7 +448,6 @@ jobs:
           npm run generate:api --prefix ui
           npm run build --prefix ui
 
-      # Boot → /health → spec → UI index (builds shepherd-server itself)
       - name: Smoke
         run: |
           scripts/smoke.sh
@@ -542,10 +539,6 @@ jobs:
   core-test-fuzz:
     name: Core / Test (Fuzz)
     runs-on: ubuntu-24.04-arm
-    # Placeholder: cargo-fuzz targets (metadata, mutation payloads, params,
-    # imports) are not implemented yet. Per 05-testing.md, property-based
-    # tests outrank raw fuzzing for this domain; fuzz remains a recorded
-    # follow-up, not a live gate.
     steps:
       - name: Placeholder
         run: echo "no fuzz targets yet — cargo-fuzz is a recorded follow-up"
@@ -553,8 +546,6 @@ jobs:
   test-e2e:
     name: Test (E2E)
     runs-on: ubuntu-24.04-arm
-    # Playwright driving the built UI against a real server booted by
-    # scripts/playwright-e2e.sh (port 7543, health poll).
 
     steps:
       - name: Checkout

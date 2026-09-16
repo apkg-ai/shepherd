@@ -43,10 +43,6 @@
   --text-xl: 20px;
 }
 
-/* Dark theme. `data-theme` on <html> always holds the RESOLVED theme —
-   "system" is a stored preference resolved in src/lib/theme.ts (and the
-   pre-paint script in index.html), so one block serves both explicit dark
-   and system-dark. */
 [data-theme="dark"] {
   color-scheme: dark;
 

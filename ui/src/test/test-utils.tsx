@@ -8,10 +8,6 @@ import { createQueryClient } from "../lib/queryClient";
 import { routes } from "../router";
 import { server } from "./msw";
 
-/**
- * Same provider stack as main.tsx (toast-wired mutation errors included),
- * with query retries disabled so error-path tests don't sit through backoff.
- */
 function TestQueryProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const [client] = useState(() => {
@@ -29,12 +25,6 @@ function TestQueryProvider({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
-/**
- * Renders the real app (route table, providers) at `path` through a memory
- * router, so tests exercise routing, params, and search params for real.
- * `handlers` are pushed onto the MSW server first and win over the generated
- * background handlers.
- */
 export function renderRoute(
   path: string,
   { handlers = [] }: { handlers?: RequestHandler[] } = {},

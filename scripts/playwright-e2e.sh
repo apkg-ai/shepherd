@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Extra arguments pass through to `playwright test` (e.g. a spec filter).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

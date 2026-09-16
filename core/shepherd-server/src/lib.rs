@@ -1,7 +1,3 @@
-//! Router and handlers for the shepherd daemon, exposed as a lib target so
-//! integration tests (`tests/`) can drive them without booting the binary.
-//! Keep this thin: logic belongs in `shepherd-core`.
-
 // The generated module triggers clippy style lints by design (collapsed
 // `if` chains from the emission template and `must_use` on types already
 // marked `must_use`). Everything else stays lint-clean.

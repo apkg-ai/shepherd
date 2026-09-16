@@ -1,5 +1,3 @@
-//! Process-level boot test for the shepherd-server binary.
-
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
