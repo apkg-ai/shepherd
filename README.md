@@ -1,27 +1,16 @@
 # shepherd
 
-Shepherd is a local-first hub for long, multi-session agentic projects, being
-rebuilt toward a stable v1. It never spawns or orchestrates agents — it is a
-passive central hub (storage + REST API + visualization) that agentic tools
-query for their next task and report back to.
+A local-first hub for long, multi-session agentic projects. It never spawns or
+orchestrates agents — it is a passive hub (storage + REST API + UI) that
+agentic tools query for their next task and report back to.
 
-**Current state: the v1 step-000 green scaffold.** The repository contains a
-health-only Rust daemon (axum) that serves the built React shell, plus the
-full build, generation, test, and CI pipeline. The MVP product implementation
-was removed; the stable-v1 domain is rebuilt step by step on this scaffold.
-
-## The plan
-
-The `plan/` handbook is the authority for all v1 work:
-
-- [Execution rules and step index](plan/steps/README.md) — current step:
-  [000 — scaffold reset](plan/steps/000-scaffold-reset.md); next eligible: 001.
-- [Product scope](plan/00-product-scope.md), [domain model](plan/03-domain-model.md),
-  [backend](plan/05-backend.md), [frontend](plan/06-frontend.md),
-  [test strategy](plan/14-test-strategy.md).
-- The full v1 contracts live in [plan/contracts/](plan/contracts/); the
-  application currently serves the health-only scaffold contract
-  ([openapi/shepherd.yaml](openapi/shepherd.yaml)).
+Current state: the v1 step-000 scaffold — a health-only Rust daemon (axum)
+serving the built React shell, with the full build, generation, test, and CI
+pipeline. The stable-v1 domain is rebuilt step by step from the
+[plan/](plan/steps/README.md) handbook (current step:
+[000 — scaffold reset](plan/steps/000-scaffold-reset.md)); contracts live in
+[plan/contracts/](plan/contracts/), and the contract actually served is
+[openapi/shepherd.yaml](openapi/shepherd.yaml).
 
 ## Quickstart
 
@@ -46,10 +35,10 @@ Every PR runs the full pipeline (`.github/workflows/`):
 
 | Gate | What it checks |
 |---|---|
-| Core lint / unit / integration | `cargo fmt`, Clippy `-D warnings`, workspace tests with llvm-cov |
+| Core | `cargo fmt`, Clippy `-D warnings`, tests with llvm-cov |
 | Contract | Live responses validated against the served OpenAPI spec |
-| UI lint / typecheck / unit / build | oxlint + oxfmt, `tsc -b`, Vitest with coverage, Vite build |
-| Spec lint | Spectral (OAS + OWASP + IBM + APIs-You-Won't-Hate) on the contract |
-| Hurl / Playwright / smoke | Real-server API checks, browser + axe WCAG-AA audit, boot smoke |
-| Coverage report | Line-coverage thresholds gated per suite (`scripts/coverage-report.mjs`) |
-| Dependency scan / SAST | osv-scanner, npm/cargo audit, Semgrep |
+| UI | oxlint + oxfmt, `tsc -b`, Vitest with coverage, Vite build |
+| Spec lint | Spectral (OAS + OWASP + IBM + APIs-You-Won't-Hate) |
+| E2E / smoke | Hurl API checks, Playwright + axe WCAG-AA audit, boot smoke |
+| Coverage | Line-coverage thresholds per suite (`scripts/coverage-report.mjs`) |
+| Security | osv-scanner, npm/cargo audit, Semgrep |
