@@ -1,2 +1,4 @@
 # OSV Scanner ignore list.
 # https://google.github.io/osv-scanner/configuration/
+
+[[IgnoredVulns]]

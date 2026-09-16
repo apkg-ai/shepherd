@@ -11,13 +11,17 @@ test.describe("scaffold shell", () => {
     await expect(page.getByText("shepherd local daemon")).toBeVisible();
   });
 
-  test("skip link jumps to the main region", async ({ page }) => {
+  test("skip link focuses the main region without changing the route", async ({ page }) => {
     await page.goto("/#/");
+
     await page.keyboard.press("Tab");
     const skipLink = page.getByRole("link", { name: "Skip to content" });
     await expect(skipLink).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(page).toHaveURL(/#main$/);
+
+    await expect(page.locator("main")).toBeFocused();
+    await expect(page.getByRole("heading", { level: 1, name: "Shepherd" })).toBeVisible();
+    await expect(page).toHaveURL(/#\/$/);
   });
 
   test("unknown routes show NotFound with a way back home", async ({ page }) => {

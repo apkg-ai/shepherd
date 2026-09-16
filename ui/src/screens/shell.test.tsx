@@ -23,6 +23,15 @@ describe("AppShell", () => {
     expect(screen.getByRole("button", { name: "Dark" })).toBeInTheDocument();
     await screen.findByText("0.1.0"); // settle the health query
   });
+
+  it("skip link focuses main without navigating", async () => {
+    const user = userEvent.setup();
+    renderRoute("/", { handlers: [healthy] });
+
+    await user.click(screen.getByRole("link", { name: "Skip to content" }));
+    expect(screen.getByRole("main")).toHaveFocus();
+    expect(screen.getByRole("heading", { level: 1, name: "Shepherd" })).toBeInTheDocument();
+  });
 });
 
 describe("HomeScreen", () => {
