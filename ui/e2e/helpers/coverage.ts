@@ -1,11 +1,8 @@
 /* oxlint-disable react-hooks/rules-of-hooks -- Playwright fixtures name their
    continuation `use`; nothing React-y happens in this file. */
 /**
- * Coverage-aware `test`: with E2E_COVERAGE set (CI does), every page collects
- * Chromium V8 coverage and feeds it to monocart, which unpacks sourcemaps and
- * emits coverage/e2e.lcov with SF paths relative to ui/ (src/...) so it
- * union-merges with the vitest lcov in scripts/coverage-report.mjs.
- * Specs import { test, expect } from here instead of @playwright/test.
+ * Coverage-aware `test` (gated on E2E_COVERAGE): pages feed monocart →
+ * coverage/e2e.lcov, union-merged with the vitest lcov by CI.
  */
 import { existsSync } from "node:fs";
 import { test as base, expect } from "@playwright/test";
@@ -24,9 +21,7 @@ export const coverageOptions: CoverageReportOptions = {
   outputDir: "./coverage/e2e-raw",
   reports: [["lcovonly", { file: "../e2e.lcov" }]],
   entryFilter: (entry) => entry.url.includes("/assets/"),
-  // Vendored deps ship sourcemaps back to their own src/ trees, which
-  // would collide with ours after normalization — keep only paths that
-  // resolve to real files in ui/src (cwd is ui/ under playwright).
+  // Vendored sourcemaps would collide with our src/ — keep only real ui/src files.
   sourceFilter: (sourcePath) => {
     const local = normalize(sourcePath);
     return local !== null && !local.includes("api/generated") && existsSync(local);

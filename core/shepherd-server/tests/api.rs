@@ -88,8 +88,6 @@ async fn cors_headers_are_present() {
         "http://localhost:5173"
     );
 
-    // Foreign origins must not be granted cross-origin read access to this
-    // unauthenticated local daemon.
     let response = app
         .oneshot(
             Request::get("/health")

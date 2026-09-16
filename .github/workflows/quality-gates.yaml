@@ -4,8 +4,7 @@ on:
   pull_request:
     branches:
       - main
-  # Also gate the squash-merge result: that exact commit never existed on
-  # the PR, and direct pushes would otherwise bypass every quality gate.
+  # Gate the squash-merge result and direct pushes — they never ran as PR jobs.
   push:
     branches:
       - main
@@ -30,8 +29,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # rust-toolchain.toml is the single source of truth for the toolchain;
-      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      # dtolnay/rust-toolchain needs an explicit channel; parse it from rust-toolchain.toml.
       - name: Parse pinned toolchain
         id: toolchain
         run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
@@ -72,8 +70,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # rust-toolchain.toml is the single source of truth for the toolchain;
-      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      # dtolnay/rust-toolchain needs an explicit channel; parse it from rust-toolchain.toml.
       - name: Parse pinned toolchain
         id: toolchain
         run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
@@ -105,8 +102,7 @@ jobs:
           tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
           rm cargo-llvm-cov.tar.gz
 
-      # Unit coverage is scoped to shepherd-core: the thin server is the
-      # integration suite's responsibility (main.rs is smoke-covered).
+      # Scoped to shepherd-core; the server is covered by the integration suite.
       - name: Unit Tests (Coverage)
         run: |
           mkdir -p coverage
@@ -168,8 +164,7 @@ jobs:
           tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
           rm cargo-llvm-cov.tar.gz
 
-      # Integration coverage is scoped to the server lib it exercises;
-      # main.rs is excluded (entry point, covered by smoke).
+      # Scoped to the server lib; main.rs is covered by smoke.
       - name: Integration Tests (Coverage)
         run: |
           mkdir -p coverage
@@ -366,8 +361,7 @@ jobs:
           merge-multiple: true
           path: coverage
 
-      # The report script is dependency-free (node:fs only) — the runner's
-      # system Node is enough, no setup-node/npm ci needed.
+      # The script is dependency-free (node:fs) — system Node suffices.
       - name: Generate Reports
         run: |
           node scripts/coverage-report.mjs --dir coverage --report core --out coverage/report-core.md
@@ -387,9 +381,7 @@ jobs:
                       "shepherd-coverage-ui:coverage/report-ui.md"; do
             MARKER="<!-- ${pair%%:*} -->"
             FILE="${pair#*:}"
-            # No error suppression on the lookup: a transient gh api failure
-            # must skip this update (continue-on-error) rather than fall
-            # through to POST and duplicate the sticky comment.
+            # A failed lookup must skip this update (continue-on-error), not POST and duplicate the comment.
             COMMENT_ID=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
               --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | head -n 1)
             if [ -n "${COMMENT_ID}" ]; then
@@ -413,8 +405,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # rust-toolchain.toml is the single source of truth for the toolchain;
-      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      # dtolnay/rust-toolchain needs an explicit channel; parse it from rust-toolchain.toml.
       - name: Parse pinned toolchain
         id: toolchain
         run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"

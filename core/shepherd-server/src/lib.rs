@@ -1,6 +1,4 @@
-// The generated module triggers clippy style lints by design (collapsed
-// `if` chains from the emission template and `must_use` on types already
-// marked `must_use`). Everything else stays lint-clean.
+// The generated module trips these style lints by design.
 #[allow(clippy::collapsible_if, clippy::double_must_use)]
 pub mod generated;
 mod middleware;
@@ -27,9 +25,7 @@ const OPENAPI_SPEC: &str = include_str!("../../../openapi/shepherd.yaml");
 pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
     system_api_router(state)
         .route("/api/v1/openapi.yaml", get(openapi_spec))
-        // The fallback must be registered BEFORE the layers: Router::layer
-        // wraps only what precedes it. Registered after, the static service
-        // would serve without CORS/rate-limit headers.
+        // The fallback must precede the layers — Router::layer wraps only what comes before it.
         .fallback_service(ServeDir::new(ui_dir.as_ref()))
         .layer(RateLimitHeaderLayer)
         .layer(cors_layer())

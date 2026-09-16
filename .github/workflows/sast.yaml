@@ -28,33 +28,17 @@ jobs:
 
       - name: Semgrep scan
         env:
-          # Pin semgrep by image digest rather than installing via pipx: one
-          # digest covers the entire stack (Python runtime + semgrep + all
-          # transitive deps) so nothing can be substituted without the digest
-          # changing. Mirrors the SHA-pinning we already apply to every
-          # GitHub Action in these workflows.
-          #
-          # Upgrading: resolve the new tag to an arm64 digest and replace both
-          # the tag comment and the digest below.
+          # Digest-pinned like every action here — one digest covers the whole image stack.
+          # Upgrading: resolve the new tag to an arm64 digest, replace the tag
+          # comment and the digest below.
           #   semgrep/semgrep:1.176.1 (linux/arm64)
           SEMGREP_IMAGE: semgrep/semgrep@sha256:35887b09ae583b36a052e2f2bb66ee17d9212151ca0945c1c9776f89df0e838f
         run: |
-          # `--sarif-output=...` is written BEFORE `--error` evaluates exit
-          # status, so the file always exists on both pass and fail runs —
-          # paired with `if: always()` on the upload step below, we retain
-          # the machine-readable record of every scan regardless of outcome.
-          # We do NOT ship this SARIF to GitHub code scanning because the
-          # upload-sarif action requires GitHub Advanced Security, which is
-          # a paid feature for private repos. The artifact is the audit
-          # trail; pull it from the run page when triaging.
-          # Security packs (rust/js/ts/owasp) plus code-quality packs
-          # (best-practices). Two rules are excluded, both from the
-          # code-quality packs:
-          # - jsx-not-internationalized: shepherd's v1 UI is a local,
-          #   English-only tool — no i18n planned.
-          # - react-props-spreading: the UI forwards rest props on wrapper
-          #   components (Button, FormField, tabProps) — the standard React
-          #   wrapper pattern, not an injection risk.
+          # SARIF is written before --error sets exit status, so it exists on
+          # pass and fail; the always() upload keeps it as the audit trail
+          # (not code scanning — that needs paid GHAS).
+          # Excluded: jsx-not-internationalized (local English-only tool) and
+          # react-props-spreading (standard rest-prop wrapper pattern).
           docker run --rm \
             -v "$PWD:/src" \
             -w /src \

@@ -1,9 +1,6 @@
 #!/usr/bin/env node
-// Coverage reports + threshold gate for the Coverage Report CI job.
-// Two reports, each its own sticky PR comment: core (Rust) and ui (TypeScript).
-// Suites are per-category lcov files (<suite>.lcov); totals are a proper
-// union-merge (per file, per line, max hit) — not a sum across suites.
-// Thresholds gate on LINE coverage; functions shown for information.
+// Coverage reports + threshold gate. Totals are a union-merge (per file,
+// per line, max hit), not a sum; thresholds gate on LINE coverage.
 //
 // Usage:
 //   node scripts/coverage-report.mjs --report core|ui [--dir coverage] [--out file.md]
@@ -98,8 +95,7 @@ const evaluate = (name) => {
   for (const [suite, { label, threshold, pending }] of Object.entries(config.suites)) {
     const parsed = parseSuite(suite);
     if (!parsed) {
-      // Only suites explicitly marked pending may be absent; anything else
-      // missing means a test job failed or its artifact was lost (#22).
+      // Only suites marked pending may be absent; a missing lcov means a failed or lost CI artifact.
       if (pending) {
         rows.push({ label, lines: "—", fns: "—", threshold, status: `⏳ lands in ${pending}` });
       } else {

@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Regenerate core/shepherd-server/src/generated from openapi/shepherd.yaml.
-#
-# The generator's raw output is not rustfmt-formatted, so this script runs
-# `cargo fmt` afterwards. Generated code is gitignored — this script must
-# run before `cargo build` or `cargo test` (CI does it automatically).
+# Regenerates src/generated (gitignored) from openapi/shepherd.yaml — run
+# before cargo build/test. cargo fmt fixes the unformatted generator output.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

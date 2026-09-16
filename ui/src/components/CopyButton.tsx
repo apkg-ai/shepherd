@@ -14,8 +14,7 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
       clearTimeout(resetTimer.current);
       resetTimer.current = setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Clipboard unavailable (insecure context/permissions) — leave the
-      // value selectable next to the button instead of pretending.
+      // Clipboard unavailable — stay quiet rather than fake success.
     }
   };
 

@@ -6,8 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>shepherd</title>
     <script>
-      // Pre-paint theme resolution (mirrors src/lib/theme.ts) — sets the
-      // resolved theme before first paint so dark mode never flashes light.
+      // Pre-paint theme resolution (mirrors src/lib/theme.ts) — avoids a dark-mode flash.
       (function () {
         var preference = null;
         try {

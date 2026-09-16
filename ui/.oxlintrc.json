@@ -6,8 +6,7 @@
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }],
 
-    // Accessibility lint layer (static a11y; axe in e2e covers rendered pages,
-    // src/lib/contrast.test.ts gates the palette).
+    // Static a11y layer; rendered pages are axe's (e2e), the palette contrast.test.ts's.
     "jsx-a11y/alt-text": "error",
     "jsx-a11y/anchor-has-content": "error",
     "jsx-a11y/anchor-is-valid": "error",
@@ -38,10 +37,8 @@
     "jsx-a11y/scope": "error",
     "jsx-a11y/tabindex-no-positive": "error",
     "jsx-a11y/no-noninteractive-tabindex": "warn",
-    // Off: fires on deliberate patterns — role="dialog" (jsdom lacks
-    // <dialog>.showModal, documented in Dialog.tsx), role="status" live
-    // regions in states.tsx/Toast.tsx, and ThemeToggle's role="group"
-    // (fieldset semantics would be wrong for a button group).
+    // Off: fires on deliberate patterns — role="dialog" (jsdom lacks showModal),
+    // role="status" live regions, and ThemeToggle's role="group".
     "jsx-a11y/prefer-tag-over-role": "off"
   }
 }

@@ -47,8 +47,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [dismiss],
   );
 
-  // WCAG 2.2.1: hovering or focusing a toast pauses auto-dismiss; leaving
-  // restarts the full window (restart, not resume — strictly more generous).
+  // WCAG 2.2.1: hover/focus pauses auto-dismiss; leaving restarts the full window.
   const pauseTimer = useCallback((id: number) => {
     const timer = timers.current.get(id);
     if (timer !== undefined) clearTimeout(timer);

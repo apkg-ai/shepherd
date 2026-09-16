@@ -6,8 +6,7 @@ import { RouteError } from "./screens/RouteError";
 
 /**
  * The route table, shared by the app (createHashRouter in main.tsx — hash
- * URLs survive the server's bare ServeDir and a future Tauri shell) and by
- * tests (createMemoryRouter in test/test-utils.tsx).
+ * URLs survive the server's bare ServeDir) and by tests.
  */
 export const routes: RouteObject[] = [
   {

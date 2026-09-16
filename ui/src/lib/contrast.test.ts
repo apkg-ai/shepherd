@@ -2,8 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { contrastRatio, parseThemes, relativeLuminance } from "./contrast";
 
-// vitest 5 stubs `.css?raw` imports to "" and its import.meta.url is not a
-// file: URL, so read via the vitest root (ui/) instead.
+// vitest stubs `.css?raw` — read the real file (paths relative to ui/).
 const tokensCss = readFileSync("src/styles/tokens.css", "utf8");
 
 describe("contrast math", () => {

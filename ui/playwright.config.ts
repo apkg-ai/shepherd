@@ -1,7 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// No webServer block on purpose: scripts/playwright-e2e.sh boots the server
-// and is shared between local runs and CI.
+// No webServer: scripts/playwright-e2e.sh boots the server (shared with CI).
 export default defineConfig({
   testDir: "./e2e",
   globalTeardown: "./e2e/helpers/global-teardown",

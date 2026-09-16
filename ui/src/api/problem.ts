@@ -1,10 +1,6 @@
 /**
- * RFC 9457 problem+json error domain (openapi/shepherd.yaml).
- *
- * Every server error carries a `ProblemDetail` body with a stable
- * `urn:shepherd:error:*` type slug. `shepherdFetch` (client.ts) normalizes
- * those into `ShepherdError` so screens can switch on `errorSlug()` and forms
- * can map 422 `errors[]` onto fields via `fieldErrors()`.
+ * RFC 9457 problem+json domain: server errors carry a ProblemDetail with a
+ * stable `urn:shepherd:error:*` type slug.
  */
 
 export interface ValidationErrorDetail {
@@ -15,7 +11,6 @@ export interface ValidationErrorDetail {
 }
 
 export interface ProblemDetail {
-  /** Stable URN, e.g. `urn:shepherd:error:dependency-cycle`. */
   type: string;
   title: string;
   status: number;
@@ -46,16 +41,11 @@ export function isShepherdError(err: unknown): err is ShepherdError {
   return err instanceof ShepherdError;
 }
 
-/** Strips the URN prefix: `urn:shepherd:error:edit-conflict` → `edit-conflict`. */
 export function errorSlug(err: ShepherdError): string {
   return err.type.replace(/^urn:shepherd:error:/, "");
 }
 
-/**
- * Maps 422 validation errors onto form fields.
- * JSON Pointer `/title` → `title`; nested pointers keep their tail
- * (`/settings/review_gate` → `settings.review_gate`).
- */
+// JSON Pointer `/settings/review_gate` → `settings.review_gate`.
 export function fieldErrors(err: ShepherdError): Record<string, string> {
   const map: Record<string, string> = {};
   for (const e of err.errors ?? []) {
