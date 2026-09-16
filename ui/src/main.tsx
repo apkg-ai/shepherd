@@ -4,6 +4,7 @@ import { createHashRouter, RouterProvider } from "react-router";
 import { ToastProvider } from "./components/Toast";
 import { AppQueryProvider } from "./lib/queryClient";
 import { routes } from "./router";
+import "./i18n";
 import "./index.css";
 
 const router = createHashRouter(routes);

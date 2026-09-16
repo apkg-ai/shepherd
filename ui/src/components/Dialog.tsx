@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import styles from "./Dialog.module.css";
 
 interface DialogProps {
@@ -13,6 +14,7 @@ const FOCUSABLE =
 
 // Overlay + role="dialog" instead of <dialog>: jsdom has no showModal().
 export function Dialog({ open, title, onClose, children }: DialogProps) {
+  const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Depend on [open] only: re-running per render would re-capture the panel as the opener.
@@ -82,7 +84,7 @@ export function Dialog({ open, title, onClose, children }: DialogProps) {
       >
         <header className={styles.header}>
           <h2 className={styles.title}>{title}</h2>
-          <button type="button" className={styles.close} aria-label="Close" onClick={onClose}>
+          <button type="button" className={styles.close} aria-label={t("common.action.close")} onClick={onClose}>
             ×
           </button>
         </header>

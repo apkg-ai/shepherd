@@ -10,8 +10,10 @@ runs:
   steps:
     - name: Generate wire types
       shell: bash
+      env:
+        GENERATOR_VERSION: ${{ inputs.version }}
       run: |
-        if ! openapi-to-rust --version 2>/dev/null | grep -q "openapi-to-rust ${{ inputs.version }}$"; then
-          cargo install openapi-to-rust --version "${{ inputs.version }}" --locked
+        if ! openapi-to-rust --version 2>/dev/null | grep -q "openapi-to-rust ${GENERATOR_VERSION}$"; then
+          cargo install openapi-to-rust --version "${GENERATOR_VERSION}" --locked
         fi
         "$GITHUB_WORKSPACE/scripts/regen-generated.sh"

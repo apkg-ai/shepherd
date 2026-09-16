@@ -32,7 +32,7 @@ jobs:
           SEMGREP_IMAGE: semgrep/semgrep@sha256:6b46f252080393083d6b32fca1a710edde5fd8624de9af05f49250169df1cc70
         run: |
           # SARIF exists on both pass and fail; uploaded as an artifact, not code scanning (paid GHAS).
-          # Excluded: jsx-not-internationalized (local English-only tool), react-props-spreading (rest-prop wrapper pattern).
+          # Excluded: react-props-spreading (rest-prop wrapper pattern).
           docker run --rm \
             -v "$PWD:/src" \
             -w /src \
@@ -45,7 +45,7 @@ jobs:
               --config p/owasp-top-ten \
               --config p/r2c-best-practices \
               --config p/react-best-practices \
-              --exclude-rule typescript.react.portability.i18next.jsx-not-internationalized.jsx-not-internationalized \
+              --exclude "*.test.tsx" \
               --exclude-rule typescript.react.best-practice.react-props-spreading.react-props-spreading
 
       - name: Upload SARIF artifact

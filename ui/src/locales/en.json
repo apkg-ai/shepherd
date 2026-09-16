@@ -1,0 +1,47 @@
+{
+  "app": {
+    "brand": { "name": "Shepherd" }
+  },
+  "common": {
+    "action": {
+      "backHome": "Back home",
+      "cancel": "Cancel",
+      "close": "Close",
+      "copy": "Copy",
+      "copied": "Copied ✓",
+      "dismiss": "Dismiss",
+      "loadMore": "Load more",
+      "retry": "Retry",
+      "skipToContent": "Skip to content"
+    },
+    "error": {
+      "title": "Something went wrong",
+      "unexpected": "Unexpected error"
+    },
+    "state": {
+      "loading": "Loading…"
+    }
+  },
+  "home": {
+    "screen": {
+      "title": "Shepherd",
+      "description": "v1 scaffold — the daemon serves this shell and a health endpoint."
+    },
+    "fact": {
+      "status": "Status",
+      "version": "Version",
+      "service": "Service"
+    }
+  },
+  "not-found": {
+    "screen": { "title": "Page not found" }
+  },
+  "theme": {
+    "toggle": {
+      "label": "Theme",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    }
+  }
+}

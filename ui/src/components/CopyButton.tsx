@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import styles from "./CopyButton.module.css";
 
 export function CopyButton({ value, label }: { value: string; label: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -20,7 +22,7 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
 
   return (
     <button type="button" className={styles.copy} aria-label={label} onClick={() => void copy()}>
-      {copied ? "Copied ✓" : "Copy"}
+      {copied ? t("common.action.copied") : t("common.action.copy")}
     </button>
   );
 }

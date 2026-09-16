@@ -9,6 +9,13 @@ Current state: the v1 step-000 scaffold — one accessible shell route that
 renders the daemon's live health. Application routes return with their owning
 steps in `../plan/`.
 
+## Localization
+
+UI strings run through i18next (`src/i18n.ts`, `react-i18next`), English only
+for now. To add a language: create `src/locales/<lang>.json` (copy
+`src/locales/en.json`), register it in `src/i18n.ts`, and set
+`fallbackLng` — translations are isolated JSON, no component changes needed.
+
 ## Spec-derived API client
 
 `src/api/generated/` is generated (gitignored) from `../openapi/shepherd.yaml`
