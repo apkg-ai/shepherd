@@ -19,7 +19,7 @@ export function HomeScreen() {
       <dl className={styles.facts}>
         <div className={styles.fact}>
           <dt className={styles.factLabel}>{t("home.fact.status")}</dt>
-          <dd className={styles.factValue}>{health.data.status}</dd>
+          <dd className={styles.factValue}>{t(`home.status.${health.data.status}`)}</dd>
         </div>
         <div className={styles.fact}>
           <dt className={styles.factLabel}>{t("home.fact.version")}</dt>

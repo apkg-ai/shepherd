@@ -31,6 +31,11 @@
       "status": "Status",
       "version": "Version",
       "service": "Service"
+    },
+    "status": {
+      "pass": "pass",
+      "warn": "warn",
+      "fail": "fail"
     }
   },
   "not-found": {

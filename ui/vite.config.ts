@@ -9,6 +9,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": "http://127.0.0.1:7437",
+      "/health": "http://127.0.0.1:7437",
     },
   },
   test: {
