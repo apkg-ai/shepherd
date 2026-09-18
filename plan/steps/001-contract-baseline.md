@@ -65,7 +65,7 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Implementation handoff record
 
-Branch: `001-contract-baseline` (off `main` at `fb0ec7e`). PR [#82](https://github.com/apkg-ai/shepherd/pull/82) — all checks green at `fe53478`: [Quality Gates](https://github.com/apkg-ai/shepherd/actions/runs/35379947966) (incl. the new Contracts / v1 Baseline job: 3m43s first cold run, 1m26s warm), [Dependency Scan](https://github.com/apkg-ai/shepherd/actions/runs/35379947969), [SAST](https://github.com/apkg-ai/shepherd/actions/runs/35379947934).
+Branch: `001-contract-baseline` (off `main` at `fb0ec7e`). PR [#82](https://github.com/apkg-ai/shepherd/pull/82) — all checks green at `80cc3ed`: [Quality Gates](https://github.com/apkg-ai/shepherd/actions/runs/35381243756) (incl. the new Contracts / v1 Baseline job: 3m43s first cold run, ~1m30s warm), [Dependency Scan](https://github.com/apkg-ai/shepherd/actions/runs/35381243724), [SAST](https://github.com/apkg-ai/shepherd/actions/runs/35381243745). Later commits on the branch are documentation-only.
 
 ### Files changed
 
