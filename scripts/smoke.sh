@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Smoke check: boot → /health → spec → UI index. Seconds-fast; gates every PR.
-# Assumes `ui/dist` is built and the workspace compiles (CI builds both first).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,22 +14,16 @@ fail() {
 
 (cd "$ROOT/core" && cargo build -q -p shepherd-server)
 
-# Fresh temporary DB — never the user's real ~/.shepherd database: a smoke
-# check must not run migrations against real data (hurl-e2e.sh does the same).
-DB_DIR="$(mktemp -d)"
-DB_PATH="${DB_DIR}/smoke-test.db"
 cleanup() {
   if [ -n "${SERVER_PID:-}" ]; then
     kill "$SERVER_PID" 2>/dev/null || true
   fi
-  rm -rf "$DB_DIR"
 }
 trap cleanup EXIT
 
-"$ROOT/core/target/debug/shepherd-server" --port "$PORT" --ui-dir "$ROOT/ui/dist" --db "$DB_PATH" &
+"$ROOT/core/target/debug/shepherd-server" --port "$PORT" --ui-dir "$ROOT/ui/dist" &
 SERVER_PID=$!
 
-# Boot: poll /health until the server answers, up to 5 seconds.
 booted=false
 for _ in $(seq 1 50); do
   if curl -fsS "$BASE/health" >/dev/null 2>&1; then

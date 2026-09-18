@@ -1,12 +1,6 @@
-/**
- * Spec-derived API client (S7). Pairs with scripts/regen-generated.sh on the
- * Rust side: committed generated code is exactly `npm run generate:api`
- * (orval + oxfmt), gated in CI by the ui-generated-drift job.
- */
 import { defineConfig } from "orval";
 
 export default defineConfig({
-  // TanStack Query hooks + fetch client + MSW mock handlers.
   shepherd: {
     input: { target: "../openapi/shepherd.yaml" },
     output: {
@@ -24,12 +18,10 @@ export default defineConfig({
       override: {
         mutator: { path: "src/api/client.ts", name: "shepherdFetch" },
         enumGenerationType: "const", // tsconfig erasableSyntaxOnly forbids TS enums
-        // Plain data return types — shepherdFetch resolves res.json(), not an
-        // HTTP envelope. Errors travel as thrown ShepherdError instead.
+        // shepherdFetch resolves res.json() and throws ShepherdError — no HTTP envelope.
         fetch: { includeHttpResponseReturnType: false },
         query: {
-          // GET → useQuery (default); paginated GETs also get infinite hooks
-          // keyed on the spec's `cursor` param. Non-GET verbs stay mutations.
+          // Paginated GETs get infinite hooks keyed on the spec's `cursor` param.
           useInfinite: true,
           useInfiniteQueryParam: "cursor",
         },

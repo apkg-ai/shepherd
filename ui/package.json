@@ -18,11 +18,11 @@
     "test:unit:cov": "vitest run --coverage"
   },
   "dependencies": {
-    "@dagrejs/dagre": "^3.1.1",
     "@tanstack/react-query": "^5.102.8",
-    "@xyflow/react": "^12.11.6",
+    "i18next": "^26.4.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-i18next": "^17.0.14",
     "react-router": "^8.3.1",
     "zod": "^4.6.2"
   },
@@ -42,7 +42,7 @@
     "monocart-coverage-reports": "^2.13.0",
     "msw": "^2.15.0",
     "orval": "^8.31.0",
-    "oxfmt": "^0.66.0",
+    "oxfmt": "^0.68.0",
     "oxlint": "^1.79.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",

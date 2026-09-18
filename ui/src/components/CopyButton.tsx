@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import styles from "./CopyButton.module.css";
 
-/** Copies `value` to the clipboard with brief visual + SR confirmation. */
 export function CopyButton({ value, label }: { value: string; label: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -15,14 +16,13 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
       clearTimeout(resetTimer.current);
       resetTimer.current = setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Clipboard unavailable (insecure context/permissions) — leave the
-      // value selectable next to the button instead of pretending.
+      // Clipboard unavailable — stay quiet rather than fake success.
     }
   };
 
   return (
     <button type="button" className={styles.copy} aria-label={label} onClick={() => void copy()}>
-      {copied ? "Copied ✓" : "Copy"}
+      {copied ? t("common.action.copied") : t("common.action.copy")}
     </button>
   );
 }

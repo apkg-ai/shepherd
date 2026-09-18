@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import styles from "./ConfirmDialog.module.css";
@@ -24,11 +25,12 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} title={title} onClose={onCancel}>
       <div className={styles.body}>{children}</div>
       <div className={styles.actions}>
-        <Button onClick={onCancel}>Cancel</Button>
+        <Button onClick={onCancel}>{t("common.action.cancel")}</Button>
         <Button variant={danger ? "danger" : "primary"} busy={busy} onClick={onConfirm}>
           {confirmLabel}
         </Button>

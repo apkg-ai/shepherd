@@ -1,0 +1,18 @@
+name: Install cargo-llvm-cov
+description: Download the pinned cargo-llvm-cov binary into ~/.cargo/bin.
+runs:
+  using: composite
+  steps:
+    - name: Install cargo-llvm-cov
+      shell: bash
+      env:
+        LLVM_COV_VERSION: 0.9.1
+        LLVM_COV_SHA256: abf5f13c1520f8756d2192bfaaeadb0208f5b7eaa8cadc15bf847befa42b7360
+      run: |
+        set -euo pipefail
+        if ! cargo-llvm-cov --version 2>/dev/null | grep -q "cargo-llvm-cov ${LLVM_COV_VERSION}$"; then
+          curl -sSLo cargo-llvm-cov.tar.gz "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz"
+          echo "${LLVM_COV_SHA256}  cargo-llvm-cov.tar.gz" | sha256sum -c -
+          tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
+          rm cargo-llvm-cov.tar.gz
+        fi

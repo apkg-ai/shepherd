@@ -1,156 +1,79 @@
-import { screen, within } from "@testing-library/react";
+import { http } from "msw";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import {
-  getGetProjectMockHandler,
-  getListProjectsMockHandler,
-} from "../api/generated/projects/projects.msw";
-import { getListProjectRelationsMockHandler } from "../api/generated/relations/relations.msw";
-import { getListTasksMockHandler } from "../api/generated/tasks/tasks.msw";
-import { page, project, task } from "../test/fixtures";
+import { getGetHealthMockHandler } from "../api/generated/system/system.msw";
+import { problemResponse } from "../test/msw";
 import { renderRoute } from "../test/test-utils";
 
-describe("App shell", () => {
-  it("navigates registry → graph → tasks → review → settings", async () => {
-    const proj = project({ name: "Alpha" });
-    renderRoute("/", {
-      handlers: [
-        getListProjectsMockHandler(page([proj])),
-        getGetProjectMockHandler(proj),
-        getListTasksMockHandler(page([task({ title: "A task" })])),
-        getListProjectRelationsMockHandler(page([])),
-      ],
-    });
+const healthy = getGetHealthMockHandler({
+  status: "pass",
+  version: "0.1.0",
+  description: "shepherd local daemon",
+});
 
-    // Registry → project (lands on the graph, the project's home screen)
-    const main = screen.getByRole("main");
-    await userEvent.click(await within(main).findByRole("link", { name: "Alpha" }));
-    expect(await screen.findByRole("tab", { name: "Decomposition" })).toBeInTheDocument();
+describe("AppShell", () => {
+  it("renders the accessible scaffold: skip link, landmarks, brand, theme toggle", async () => {
+    renderRoute("/", { handlers: [healthy] });
 
-    // Project nav is visible with the project name
-    const nav = screen.getByRole("navigation", { name: "Project" });
-    expect(within(nav).getByText("Alpha")).toBeInTheDocument();
-
-    // → Tasks table
-    await userEvent.click(within(nav).getByRole("link", { name: "Tasks" }));
-    expect(await screen.findByText("A task")).toBeInTheDocument();
-
-    // → Review
-    await userEvent.click(within(nav).getByRole("link", { name: /^Review/ }));
-    expect(await screen.findByRole("tab", { name: /^In review/ })).toBeInTheDocument();
-
-    // → Settings
-    await userEvent.click(within(nav).getByRole("link", { name: "Settings" }));
-    expect(await screen.findByRole("button", { name: "Save settings" })).toBeInTheDocument();
-
-    // Brand goes home; nav disappears without a project
-    await userEvent.click(screen.getByRole("link", { name: "Shepherd" }));
-    expect(
-      await within(screen.getByRole("main")).findByRole("link", { name: "Alpha" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Project" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Skip to content" })).toHaveAttribute("href", "#main");
+    expect(screen.getByRole("banner")).toBeInTheDocument();
+    expect(screen.getByRole("main")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Shepherd" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dark" })).toBeInTheDocument();
+    await screen.findByText("0.1.0"); // settle the health query
   });
 
-  it("keeps a single h1 across screens (#21 regression guard)", async () => {
-    renderRoute("/", {
-      handlers: [getListProjectsMockHandler(page([]))],
-    });
-    await screen.findByText("Register your first project");
-    expect(document.querySelectorAll("h1")).toHaveLength(1);
-  });
+  it("skip link focuses main without navigating", async () => {
+    const user = userEvent.setup();
+    renderRoute("/", { handlers: [healthy] });
 
-  it("renders NotFound for unknown routes", async () => {
-    renderRoute("/nowhere/at/all");
-    expect(await screen.findByText("Page not found")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to projects" })).toBeInTheDocument();
+    await user.click(screen.getByRole("link", { name: "Skip to content" }));
+    expect(screen.getByRole("main")).toHaveFocus();
+    expect(screen.getByRole("heading", { level: 1, name: "Shepherd" })).toBeInTheDocument();
   });
 });
 
-describe("Sidebar", () => {
-  const proj = project({ name: "Alpha" });
+describe("HomeScreen", () => {
+  it("shows the daemon's health status and version", async () => {
+    renderRoute("/", { handlers: [healthy] });
 
-  it("shows the project switcher, review badge, and theme toggle", async () => {
-    renderRoute(`/projects/${proj.id}`, {
-      handlers: [
-        getGetProjectMockHandler(proj),
-        getListProjectsMockHandler(page([proj])),
-        getListTasksMockHandler(({ request }) => {
-          const url = new URL(request.url);
-          return url.searchParams.get("status") === "in_review"
-            ? page([task({ status: "in_review" }), task({ status: "in_review" })])
-            : page([]);
-        }),
-        getListProjectRelationsMockHandler(page([])),
-      ],
-    });
-
-    const switcher = await screen.findByRole("navigation", { name: "Projects" });
-    expect(await within(switcher).findByRole("link", { name: "Alpha" })).toHaveAttribute(
-      "aria-current",
-      "true",
-    );
-    expect(within(switcher).getByRole("link", { name: "All projects" })).toBeInTheDocument();
-
-    // Review badge counts the in_review page
-    const reviewLink = await screen.findByRole("link", { name: /^Review/ });
-    expect(await within(reviewLink).findByText("2")).toBeInTheDocument();
-
-    // Theme toggle lives in the sidebar footer
-    expect(screen.getByRole("group", { name: "Theme" })).toBeInTheDocument();
+    expect(await screen.findByText("pass")).toBeInTheDocument();
+    expect(screen.getByText("0.1.0")).toBeInTheDocument();
+    expect(screen.getByText("shepherd local daemon")).toBeInTheDocument();
   });
 
-  it("hedges the review badge past one page", async () => {
-    renderRoute(`/projects/${proj.id}`, {
+  it("shows an error state with retry when health fails, and recovers", async () => {
+    const user = userEvent.setup();
+    let failing = true;
+    renderRoute("/", {
       handlers: [
-        getGetProjectMockHandler(proj),
-        getListProjectsMockHandler(page([proj])),
-        getListTasksMockHandler(({ request }) => {
-          const url = new URL(request.url);
-          return url.searchParams.get("status") === "in_review"
-            ? page([task({ status: "in_review" })], "next-cursor")
-            : page([]);
-        }),
-        getListProjectRelationsMockHandler(page([])),
-      ],
-    });
-    const reviewLink = await screen.findByRole("link", { name: /^Review/ });
-    expect(await within(reviewLink).findByText("1+")).toBeInTheDocument();
-  });
-
-  it("hides the review badge when nothing is in review", async () => {
-    renderRoute(`/projects/${proj.id}`, {
-      handlers: [
-        getGetProjectMockHandler(proj),
-        getListProjectsMockHandler(page([proj])),
-        getListTasksMockHandler(page([])),
-        getListProjectRelationsMockHandler(page([])),
-      ],
-    });
-    const reviewLink = await screen.findByRole("link", { name: /^Review/ });
-    expect(reviewLink).toHaveTextContent(/^Review$/);
-  });
-});
-
-describe("Combined review badge", () => {
-  const proj = project({ name: "Alpha" });
-
-  it("counts work in review and proposals together", async () => {
-    renderRoute(`/projects/${proj.id}`, {
-      handlers: [
-        getGetProjectMockHandler(proj),
-        getListProjectsMockHandler(page([proj])),
-        getListTasksMockHandler(({ request }) => {
-          const status = new URL(request.url).searchParams.get("status");
-          if (status === "in_review") {
-            return page([task({ status: "in_review" }), task({ status: "in_review" })]);
+        http.get("*/health", () => {
+          if (failing) {
+            return problemResponse(500, "internal-error", {
+              title: "Internal Server Error",
+              detail: "Health check failed.",
+            });
           }
-          if (status === "proposed") return page([task({ status: "proposed" })]);
-          return page([]);
+          return undefined;
         }),
-        getListProjectRelationsMockHandler(page([])),
+        healthy,
       ],
     });
-    const reviewLink = await screen.findByRole("link", { name: /^Review/ });
-    expect(await within(reviewLink).findByText("3")).toBeInTheDocument();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Internal Server Error");
+
+    failing = false;
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByText("pass")).toBeInTheDocument());
+  });
+});
+
+describe("NotFound", () => {
+  it("renders for unknown routes with a way back home", async () => {
+    renderRoute("/definitely-not-a-route", { handlers: [healthy] });
+
+    expect(screen.getByText("Page not found")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back home" })).toHaveAttribute("href", "/");
   });
 });

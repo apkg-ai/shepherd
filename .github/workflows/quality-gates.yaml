@@ -4,8 +4,7 @@ on:
   pull_request:
     branches:
       - main
-  # Also gate the squash-merge result: that exact commit never existed on
-  # the PR, and direct pushes would otherwise bypass every quality gate.
+  # Gate the squash-merge result and direct pushes — they never ran as PR jobs.
   push:
     branches:
       - main
@@ -30,14 +29,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # rust-toolchain.toml is the single source of truth for the toolchain;
-      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      # dtolnay/rust-toolchain needs an explicit channel; parse it from rust-toolchain.toml.
       - name: Parse pinned toolchain
         id: toolchain
         run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-12
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt, clippy
@@ -48,9 +46,7 @@ jobs:
           workspaces: core
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
-          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+        uses: ./.github/actions/generate-wire-types
 
       - name: Format
         run: |
@@ -60,9 +56,6 @@ jobs:
         run: |
           cargo clippy --all-targets -- -D warnings
 
-  # Test jobs are split per category (05-testing.md taxonomy). Property,
-  # migration, contract, and e2e suites have all landed alongside their
-  # sessions; fuzz is the one remaining placeholder (end of file).
   core-test-unit:
     name: Core / Test (Unit)
     runs-on: ubuntu-24.04-arm
@@ -75,14 +68,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # rust-toolchain.toml is the single source of truth for the toolchain;
-      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      # dtolnay/rust-toolchain needs an explicit channel; parse it from rust-toolchain.toml.
       - name: Parse pinned toolchain
         id: toolchain
         run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-12
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt, clippy, llvm-tools
@@ -93,23 +85,12 @@ jobs:
           workspaces: core
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
-          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+        uses: ./.github/actions/generate-wire-types
 
       - name: Install cargo-llvm-cov
-        env:
-          LLVM_COV_VERSION: 0.9.0
-          LLVM_COV_SHA256: 9af53b273e50d01d8bde8785de8541f6738cc4375248cd7683aec8b5768b9d21
-        run: |
-          set -euo pipefail
-          curl -sSLo cargo-llvm-cov.tar.gz "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz"
-          echo "${LLVM_COV_SHA256}  cargo-llvm-cov.tar.gz" | sha256sum -c -
-          tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
-          rm cargo-llvm-cov.tar.gz
+        uses: ./.github/actions/install-cargo-llvm-cov
 
-      # Unit coverage is scoped to shepherd-core: the thin server is the
-      # integration suite's responsibility (main.rs is smoke-covered).
+      # Scoped to shepherd-core; the server is covered by the integration suite.
       - name: Unit Tests (Coverage)
         run: |
           mkdir -p coverage
@@ -145,7 +126,7 @@ jobs:
         run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-12
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt, clippy, llvm-tools
@@ -156,23 +137,12 @@ jobs:
           workspaces: core
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
-          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+        uses: ./.github/actions/generate-wire-types
 
       - name: Install cargo-llvm-cov
-        env:
-          LLVM_COV_VERSION: 0.9.0
-          LLVM_COV_SHA256: 9af53b273e50d01d8bde8785de8541f6738cc4375248cd7683aec8b5768b9d21
-        run: |
-          set -euo pipefail
-          curl -sSLo cargo-llvm-cov.tar.gz "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz"
-          echo "${LLVM_COV_SHA256}  cargo-llvm-cov.tar.gz" | sha256sum -c -
-          tar -xzf cargo-llvm-cov.tar.gz -C "$HOME/.cargo/bin"
-          rm cargo-llvm-cov.tar.gz
+        uses: ./.github/actions/install-cargo-llvm-cov
 
-      # Integration coverage is scoped to the server lib it exercises;
-      # main.rs is excluded (entry point, covered by smoke).
+      # Scoped to the server lib; main.rs is covered by smoke.
       - name: Integration Tests (Coverage)
         run: |
           mkdir -p coverage
@@ -212,15 +182,15 @@ jobs:
 
       - name: Generate API client
         run: |
-          npm run generate:api
+          node --run generate:api
 
       - name: Lint
         run: |
-          npm run lint
+          node --run lint
 
       - name: Format
         run: |
-          npm run fmt:check
+          node --run fmt:check
 
   ui-typecheck:
     name: UI / Typecheck
@@ -247,11 +217,11 @@ jobs:
 
       - name: Generate API client
         run: |
-          npm run generate:api
+          node --run generate:api
 
       - name: Typecheck
         run: |
-          npm run typecheck
+          node --run typecheck
 
   ui-test-unit:
     name: UI / Test (Unit)
@@ -278,11 +248,11 @@ jobs:
 
       - name: Generate API client
         run: |
-          npm run generate:api
+          node --run generate:api
 
       - name: Unit Tests (Coverage)
         run: |
-          npm run test:unit:cov
+          node --run test:unit:cov
 
       - name: Upload Coverage
         if: ${{ !cancelled() }}
@@ -316,11 +286,11 @@ jobs:
 
       - name: Generate API client
         run: |
-          npm run generate:api
+          node --run generate:api
 
       - name: Build
         run: |
-          npm run build
+          node --run build
 
   spec-lint:
     name: Spec / Lint
@@ -341,13 +311,37 @@ jobs:
         run: |
           npm ci --prefer-offline
 
+      - name: Typecheck (root scripts)
+        run: |
+          node --run typecheck
+
       - name: Spectral (OpenAPI)
         run: |
-          npm run lint:spec
+          node --run lint:spec
 
-      - name: Spectral (AsyncAPI)
+  shell-lint:
+    name: Shell / Lint
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install shellcheck (pinned)
+        env:
+          SHELLCHECK_VERSION: 0.11.0
+          SHELLCHECK_SHA256: 12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588
         run: |
-          npm run lint:events
+          set -euo pipefail
+          curl -sSLo shellcheck.tar.xz "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.aarch64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf shellcheck.tar.xz
+          sudo cp "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/
+          shellcheck --version
+
+      - name: ShellCheck
+        run: |
+          shellcheck scripts/*.sh
 
   coverage-report:
     name: Coverage Report
@@ -373,12 +367,16 @@ jobs:
           merge-multiple: true
           path: coverage
 
-      # The report script is dependency-free (node:fs only) — the runner's
-      # system Node is enough, no setup-node/npm ci needed.
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # Node 26 runs the TypeScript script directly via type stripping; no npm ci needed.
       - name: Generate Reports
         run: |
-          node scripts/coverage-report.mjs --dir coverage --report core --out coverage/report-core.md
-          node scripts/coverage-report.mjs --dir coverage --report ui --out coverage/report-ui.md
+          node scripts/coverage-report.ts --dir coverage --report core --out coverage/report-core.md
+          node scripts/coverage-report.ts --dir coverage --report ui --out coverage/report-ui.md
           cat coverage/report-core.md coverage/report-ui.md
 
       - name: Post Sticky Comments
@@ -394,9 +392,7 @@ jobs:
                       "shepherd-coverage-ui:coverage/report-ui.md"; do
             MARKER="<!-- ${pair%%:*} -->"
             FILE="${pair#*:}"
-            # No error suppression on the lookup: a transient gh api failure
-            # must skip this update (continue-on-error) rather than fall
-            # through to POST and duplicate the sticky comment.
+            # A failed lookup must skip this update (continue-on-error), not POST and duplicate the comment.
             COMMENT_ID=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
               --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | head -n 1)
             if [ -n "${COMMENT_ID}" ]; then
@@ -408,11 +404,9 @@ jobs:
             fi
           done
 
-      # Runs after the comments so the numbers always land on the PR,
-      # then fails the job if any threshold is not met.
       - name: Enforce Thresholds
         run: |
-          node scripts/coverage-report.mjs --dir coverage --check
+          node scripts/coverage-report.ts --dir coverage --check
 
   test-smoke:
     name: Test (Smoke)
@@ -422,14 +416,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # rust-toolchain.toml is the single source of truth for the toolchain;
-      # dtolnay/rust-toolchain requires an explicit version, so parse it out.
+      # dtolnay/rust-toolchain needs an explicit channel; parse it from rust-toolchain.toml.
       - name: Parse pinned toolchain
         id: toolchain
         run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-12
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt, clippy
@@ -447,96 +440,22 @@ jobs:
           cache-dependency-path: ui/package-lock.json
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
-          scripts/regen-generated.sh
+        uses: ./.github/actions/generate-wire-types
 
       - name: Build UI
+        working-directory: ui
         run: |
-          npm ci --prefer-offline --prefix ui
-          npm run generate:api --prefix ui
-          npm run build --prefix ui
+          npm ci --prefer-offline
+          node --run generate:api
+          node --run build
 
-      # Boot → /health → spec → UI index (builds shepherd-server itself)
       - name: Smoke
         run: |
           scripts/smoke.sh
 
-  # ── Declared test categories, placeholder runs until their session lands ──
-  # Each runs a plain echo so the full 05-testing.md taxonomy shows green on
-  # every PR from day one. Wire the real steps in the noted session (mirror an
-  # existing test job: toolchain, cache, coverage artifact, and a `needs:`
-  # entry on coverage-report).
-
-  core-test-property:
-    name: Core / Test (Property)
-    runs-on: ubuntu-24.04-arm
-
-    defaults:
-      run:
-        working-directory: core
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Parse pinned toolchain
-        id: toolchain
-        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
-        with:
-          toolchain: ${{ steps.toolchain.outputs.channel }}
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: core
-
-      - name: Property tests
-        run: |
-          cargo test --package shepherd-core --test proptest_invariants -- --test-threads=1
-        env:
-          PROPTEST_CASES: "500"
-
-  core-test-migration:
-    name: Core / Test (Migration)
-    runs-on: ubuntu-24.04-arm
-
-    defaults:
-      run:
-        working-directory: core
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Parse pinned toolchain
-        id: toolchain
-        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
-        with:
-          toolchain: ${{ steps.toolchain.outputs.channel }}
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: core
-
-      - name: Migration tests
-        run: |
-          cargo test --package shepherd-core --test migration_tests
-
   core-test-contract:
     name: Core / Test (Contract)
     runs-on: ubuntu-24.04-arm
-    # The integration job also runs the contract module via --test '*'; this
-    # job is kept as the explicit, named gate for the S4 acceptance
-    # criterion ("integration + contract tests green") and isolates contract
-    # failures from coverage-tool failures.
 
     defaults:
       run:
@@ -551,7 +470,7 @@ jobs:
         run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-12
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt
@@ -562,9 +481,7 @@ jobs:
           workspaces: core
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
-          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+        uses: ./.github/actions/generate-wire-types
 
       - name: Contract conformance tests
         run: |
@@ -573,7 +490,6 @@ jobs:
   core-test-hurl:
     name: Core / Test (Hurl E2E)
     runs-on: ubuntu-24.04-arm
-    # API-level E2E: the real binary over a real socket (docs/05-testing.md).
     # The hurl binary is pinned by sha256 like every other CI tool download.
 
     defaults:
@@ -589,7 +505,7 @@ jobs:
         run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-12
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt
@@ -611,9 +527,7 @@ jobs:
           hurl --version
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
-          "$GITHUB_WORKSPACE/scripts/regen-generated.sh"
+        uses: ./.github/actions/generate-wire-types
 
       - name: Hurl E2E suite
         run: |
@@ -622,10 +536,6 @@ jobs:
   core-test-fuzz:
     name: Core / Test (Fuzz)
     runs-on: ubuntu-24.04-arm
-    # Placeholder: cargo-fuzz targets (metadata, mutation payloads, params,
-    # imports) are not implemented yet. Per 05-testing.md, property-based
-    # tests outrank raw fuzzing for this domain; fuzz remains a recorded
-    # follow-up, not a live gate.
     steps:
       - name: Placeholder
         run: echo "no fuzz targets yet — cargo-fuzz is a recorded follow-up"
@@ -633,8 +543,6 @@ jobs:
   test-e2e:
     name: Test (E2E)
     runs-on: ubuntu-24.04-arm
-    # Playwright driving the built UI against a real server booted by
-    # scripts/playwright-e2e.sh (temp DB, port 7543, health poll).
 
     steps:
       - name: Checkout
@@ -645,7 +553,7 @@ jobs:
         run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-12
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt
@@ -663,18 +571,19 @@ jobs:
           cache-dependency-path: ui/package-lock.json
 
       - name: Generate wire types
-        run: |
-          cargo install openapi-to-rust --version 0.16.0 --locked
-          scripts/regen-generated.sh
+        uses: ./.github/actions/generate-wire-types
 
       - name: Install Dependencies
-        run: npm ci --prefer-offline --prefix ui
+        working-directory: ui
+        run: npm ci --prefer-offline
 
       - name: Generate API client
-        run: npm run generate:api --prefix ui
+        working-directory: ui
+        run: node --run generate:api
 
       - name: Build UI
-        run: npm run build --prefix ui
+        working-directory: ui
+        run: node --run build
 
       - name: Resolve Playwright version
         id: playwright

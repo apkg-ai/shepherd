@@ -1,10 +1,4 @@
-# Shepherd — Spectral config
-#
-# Four-ruleset stack, matching the apkg-ai/oas org standard.
-# Each override is documented; unlisted rules run at their default severity.
-#
-# Usage:  npm run lint:spec
-# CI:     .github/workflows/quality-gates.yaml → Spec / Lint
+# Spectral config — usage: node --run lint:spec (CI: quality-gates.yaml)
 
 extends:
   - "spectral:oas"
@@ -99,8 +93,7 @@ rules:
   # fallback in the server, not declared in the spec.
   api-home: off
 
-  # The 200 health response conforms to the RFC draft (application/health+json),
-  # but this rule also fires on $ref'd error responses (401, 422, 429, 500)
-  # which correctly use application/problem+json. False positive.
+  # Also fires on $ref'd error responses (401/422/429/500) which correctly
+  # use problem+json — false positive.
   api-health-format: off
 

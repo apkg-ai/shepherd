@@ -1,9 +1,6 @@
 /**
- * `shepherdFetch` — the orval custom mutator (see orval.config.ts).
- *
- * Every generated operation funnels through here: JSON in/out, problem+json
- * error bodies normalized into `ShepherdError` (docs/agent-guide.md), 204
- * responses resolved as `undefined`.
+ * The orval custom mutator (orval.config.ts): every generated operation
+ * funnels here — problem+json errors throw ShepherdError, 204 → undefined.
  */
 import { ShepherdError, type ProblemDetail } from "./problem";
 
@@ -25,7 +22,6 @@ async function toShepherdError(response: Response): Promise<ShepherdError> {
     body = undefined;
   }
   if (isProblemDetail(body)) return new ShepherdError(body);
-  // Non-problem+json error body (proxy failure, HTML error page, …).
   return new ShepherdError({
     type: "urn:shepherd:error:internal-error",
     title: response.statusText || "Request failed",

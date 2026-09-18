@@ -1,0 +1,19 @@
+name: Generate wire types
+description: Install the pinned openapi-to-rust and regenerate core/shepherd-server/src/generated.
+inputs:
+  version:
+    description: openapi-to-rust version
+    default: "0.17.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Generate wire types
+      shell: bash
+      env:
+        GENERATOR_VERSION: ${{ inputs.version }}
+      run: |
+        if ! openapi-to-rust --version 2>/dev/null | grep -q "openapi-to-rust ${GENERATOR_VERSION}$"; then
+          cargo install openapi-to-rust --version "${GENERATOR_VERSION}" --locked
+        fi
+        "$GITHUB_WORKSPACE/scripts/regen-generated.sh"

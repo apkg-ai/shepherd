@@ -22,9 +22,9 @@ describe("shepherdFetch", () => {
   it("throws ShepherdError from problem+json bodies", async () => {
     server.use(
       http.get(URL, () =>
-        problemResponse(409, "claim-conflict", {
-          title: "Claim conflict",
-          detail: "Already claimed",
+        problemResponse(409, "edit-conflict", {
+          title: "Edit conflict",
+          detail: "The resource changed underneath the request",
         }),
       ),
     );
@@ -32,9 +32,9 @@ describe("shepherdFetch", () => {
       (e: unknown) => e,
     )) as ShepherdError;
     expect(err).toBeInstanceOf(ShepherdError);
-    expect(err.type).toBe("urn:shepherd:error:claim-conflict");
+    expect(err.type).toBe("urn:shepherd:error:edit-conflict");
     expect(err.status).toBe(409);
-    expect(err.message).toBe("Already claimed");
+    expect(err.message).toBe("The resource changed underneath the request");
   });
 
   it("synthesizes a ShepherdError from non-JSON error bodies", async () => {

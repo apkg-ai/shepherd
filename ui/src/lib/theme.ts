@@ -1,8 +1,7 @@
 /**
- * Theme handling. The stored *preference* is light | dark | system; the
- * <html data-theme> attribute always holds the *resolved* theme (light or
- * dark) so tokens.css needs a single dark block. A pre-paint inline script in
- * index.html applies the same logic before React loads to avoid a flash.
+ * The stored *preference* is light | dark | system; <html data-theme>
+ * always holds the *resolved* theme (light or dark). index.html mirrors
+ * this pre-paint to avoid a flash.
  */
 
 export type ThemePreference = "light" | "dark" | "system";
@@ -23,7 +22,6 @@ export function readThemePreference(): ThemePreference {
 }
 
 export function systemPrefersDark(): boolean {
-  // jsdom implements matchMedia minimally or not at all — guard it.
   return (
     typeof window.matchMedia === "function" &&
     window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -35,7 +33,6 @@ export function resolveTheme(preference: ThemePreference, systemDark: boolean): 
   return preference;
 }
 
-/** Persists the preference and applies the resolved theme to <html>. */
 export function applyThemePreference(preference: ThemePreference): void {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, preference);
@@ -45,10 +42,6 @@ export function applyThemePreference(preference: ThemePreference): void {
   document.documentElement.dataset["theme"] = resolveTheme(preference, systemPrefersDark());
 }
 
-/**
- * Watches OS theme changes; returns an unsubscribe. No-op environments
- * (jsdom without matchMedia listeners) get a noop cleanup.
- */
 export function watchSystemTheme(onChange: (dark: boolean) => void): () => void {
   if (typeof window.matchMedia !== "function") return () => {};
   const query = window.matchMedia("(prefers-color-scheme: dark)");

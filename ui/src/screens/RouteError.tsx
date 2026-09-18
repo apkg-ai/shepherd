@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Link, isRouteErrorResponse, useRouteError } from "react-router";
 import styles from "../components/states.module.css";
 
@@ -9,18 +10,19 @@ import styles from "../components/states.module.css";
  * would have explained the problem.
  */
 export function RouteError() {
+  const { t } = useTranslation();
   const error = useRouteError();
   const detail = isRouteErrorResponse(error)
     ? `${error.status} ${error.statusText}`
     : error instanceof Error
       ? error.message
-      : "Unexpected error";
+      : t("common.error.unexpected");
   return (
     <div className={styles.state} role="alert">
-      <p className={styles.errorTitle}>Something went wrong</p>
+      <p className={styles.errorTitle}>{t("common.error.title")}</p>
       <p className={styles.errorDetail}>{detail}</p>
       <p>
-        <Link to="/">Back to projects</Link>
+        <Link to="/">{t("common.action.backHome")}</Link>
       </p>
     </div>
   );

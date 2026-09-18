@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useTranslation } from "react-i18next";
 import styles from "./Toast.module.css";
 
 export type ToastKind = "success" | "error" | "info";
@@ -26,6 +27,7 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 const AUTO_DISMISS_MS = 5000;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   const [items, setItems] = useState<ToastItem[]>([]);
   const nextId = useRef(0);
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
@@ -47,8 +49,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [dismiss],
   );
 
-  // WCAG 2.2.1: hovering or focusing a toast pauses auto-dismiss; leaving
-  // restarts the full window (restart, not resume — strictly more generous).
+  // WCAG 2.2.1: hover/focus pauses auto-dismiss; leaving restarts the full window.
   const pauseTimer = useCallback((id: number) => {
     const timer = timers.current.get(id);
     if (timer !== undefined) clearTimeout(timer);
@@ -70,22 +71,22 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={value}>
       {children}
       <div className={styles.stack}>
-        {items.map((t) => (
+        {items.map((item) => (
           <div
-            key={t.id}
-            role={t.kind === "error" ? "alert" : "status"}
-            className={`${styles.toast} ${styles[t.kind]}`}
-            onMouseEnter={() => pauseTimer(t.id)}
-            onMouseLeave={() => startTimer(t.id)}
-            onFocusCapture={() => pauseTimer(t.id)}
-            onBlurCapture={() => startTimer(t.id)}
+            key={item.id}
+            role={item.kind === "error" ? "alert" : "status"}
+            className={`${styles.toast} ${styles[item.kind]}`}
+            onMouseEnter={() => pauseTimer(item.id)}
+            onMouseLeave={() => startTimer(item.id)}
+            onFocusCapture={() => pauseTimer(item.id)}
+            onBlurCapture={() => startTimer(item.id)}
           >
-            <span>{t.message}</span>
+            <span>{item.message}</span>
             <button
               type="button"
               className={styles.dismiss}
-              aria-label="Dismiss"
-              onClick={() => dismiss(t.id)}
+              aria-label={t("common.action.dismiss")}
+              onClick={() => dismiss(item.id)}
             >
               ×
             </button>

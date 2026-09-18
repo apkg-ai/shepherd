@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import styles from "./Dialog.module.css";
 
 interface DialogProps {
@@ -11,19 +12,12 @@ interface DialogProps {
 const FOCUSABLE =
   'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
-/**
- * Controlled modal. Overlay div with role="dialog" rather than the native
- * <dialog> element — jsdom (our test environment) does not implement
- * showModal(). Accessibility contract: focus moves into the panel on open,
- * Tab/Shift+Tab are trapped inside it, Escape or a click outside closes,
- * and focus returns to the element that opened it.
- */
+// Overlay + role="dialog" instead of <dialog>: jsdom has no showModal().
 export function Dialog({ open, title, onClose, children }: DialogProps) {
+  const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Opener capture/restore isolated on `open`: callers pass inline onClose
-  // arrows, and re-running this on every parent render would re-capture the
-  // panel itself as the "opener" and lose the restore target.
+  // Depend on [open] only: re-running per render would re-capture the panel as the opener.
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement as HTMLElement | null;
@@ -59,7 +53,6 @@ export function Dialog({ open, title, onClose, children }: DialogProps) {
         event.preventDefault();
         first.focus();
       } else if (active && !panel.contains(active)) {
-        // Focus escaped (e.g. programmatically) — pull it back in.
         event.preventDefault();
         first.focus();
       }
@@ -91,7 +84,12 @@ export function Dialog({ open, title, onClose, children }: DialogProps) {
       >
         <header className={styles.header}>
           <h2 className={styles.title}>{title}</h2>
-          <button type="button" className={styles.close} aria-label="Close" onClick={onClose}>
+          <button
+            type="button"
+            className={styles.close}
+            aria-label={t("common.action.close")}
+            onClick={onClose}
+          >
             ×
           </button>
         </header>

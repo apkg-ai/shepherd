@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Button } from "./Button";
 import styles from "./LoadMore.module.css";
 
@@ -14,11 +15,12 @@ export function LoadMore({
   isFetchingNextPage: boolean;
   onLoadMore: () => void;
 }) {
+  const { t } = useTranslation();
   if (!hasNextPage) return null;
   return (
     <div className={styles.wrap}>
       <Button busy={isFetchingNextPage} onClick={onLoadMore}>
-        Load more
+        {t("common.action.loadMore")}
       </Button>
     </div>
   );

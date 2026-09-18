@@ -13,48 +13,7 @@ uuid = "uuid"
 [server]
 framework = "axum"
 operations = [
-    # System
     "getHealth",
-    # Projects
-    "listProjects",
-    "createProject",
-    "getProject",
-    "updateProject",
-    "deleteProject",
-    # Tasks
-    "listTasks",
-    "createTask",
-    "getTask",
-    "updateTask",
-    "deleteTask",
-    "approveTask",
-    "rejectTask",
-    "blockTask",
-    "unblockTask",
-    "cancelTask",
-    "getNextTask",
-    "getTaskContext",
-    # Relations
-    "listProjectRelations",
-    "listTaskRelations",
-    "createTaskRelation",
-    "deleteTaskRelation",
-    # Claims
-    "claimTask",
-    "renewClaim",
-    "releaseClaim",
-    # Sessions
-    "listTaskSessions",
-    "createTaskSession",
-    "getTaskSession",
-    # Knowledge
-    "listKnowledge",
-    "createKnowledge",
-    "getKnowledge",
-    "deleteKnowledge",
-    # Export / import
-    "exportProject",
-    "importProject",
 ]
 prune_models = true
 
