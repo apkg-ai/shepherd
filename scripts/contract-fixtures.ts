@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-// Fixture manipulation for scripts/check-v1-contracts.sh: known mutations for
-// the negative checks, and the generation-warmup server config.
-//
+// Fixtures for scripts/check-v1-contracts.sh.
 // Usage:
 //   node scripts/contract-fixtures.ts mutate <broken-ref|corrupt-example|renamed-operation> <plan-copy-dir>
 //   node scripts/contract-fixtures.ts server-config <repo-root> <out-toml> <output-dir>

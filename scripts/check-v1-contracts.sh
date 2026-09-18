@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Step-001 gate: v1 contract baseline, operation-ID freeze, generation
-# scaffolding, and proof that each check detects breakage (mutated temp
-# copies of plan/). Pass --node-dir <dir> if Node from .nvmrc is not on PATH.
+# v1 contract baseline gate (plan/steps/001-contract-baseline.md).
+# Pass --node-dir <dir> if Node from .nvmrc is not on PATH.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -47,7 +46,6 @@ step() {
   echo "── $1 ──"
 }
 
-# Runs a command expected to fail, asserting a stable needle in its output.
 # No pipelines: a failing assertion must never read as success.
 expect_failure() {
   local name="$1" needle="$2" out status=0

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Diffs the v1 planning contract's operation IDs against the committed freeze
-// list. Regenerate the list only in a step that owns a contract change:
+// Regenerate the freeze list only in a step that owns a contract change:
 //   node scripts/check-operation-freeze.ts --print > scripts/v1-operation-ids.txt
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";

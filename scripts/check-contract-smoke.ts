@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// Contract smoke check: every component schema compiles standalone and every
-// inline operation example validates against its declared schema.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 // ajv is hoisted at the repo root via spectral, same as plan/validate-contracts.cjs.
