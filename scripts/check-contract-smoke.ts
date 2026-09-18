@@ -44,7 +44,9 @@ ajv.addFormat("uri", (v: string) => {
 
 const MODELS = "https://shepherd.local/plan/smoke";
 const relocate = (schema: unknown): object =>
-  JSON.parse(JSON.stringify(schema).replace(/#\/components\/schemas\//g, `${MODELS}#/$defs/`)) as object;
+  JSON.parse(
+    JSON.stringify(schema).replace(/#\/components\/schemas\//g, () => `${MODELS}#/$defs/`),
+  ) as object;
 ajv.addSchema({ $id: MODELS, $defs: relocate(spec.components.schemas) });
 
 const names = Object.keys(spec.components.schemas);
@@ -56,11 +58,15 @@ for (const name of names) {
 const SSE_ONLY = new Set(["getEvents"]);
 let validated = 0;
 const check = (id: string, where: string, media: MediaObject | undefined): number => {
-  if (!media?.schema) return 0;
+  if (!media) return 0;
   const samples =
     media.example !== undefined
       ? [media.example]
       : Object.values(media.examples ?? {}).map((e) => e.value);
+  if (!media.schema) {
+    if (samples.length > 0) throw new Error(`${id} ${where}: example without a schema`);
+    return 0;
+  }
   if (samples.length === 0) return 0;
   const fn = ajv.compile(relocate(media.schema));
   for (const sample of samples) {

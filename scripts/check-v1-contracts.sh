@@ -33,6 +33,12 @@ done
 [ -d "$ROOT/node_modules" ] || fail "root node_modules missing — run: npm ci"
 [ -d "$ROOT/ui/node_modules" ] || fail "ui/node_modules missing — run: npm ci --prefix ui"
 
+# The generator pin's single source is the CI composite action.
+GENERATOR_VERSION="$(grep -m1 'default:' "$ROOT/.github/actions/generate-wire-types/action.yml" | cut -d'"' -f2)"
+[ -n "$GENERATOR_VERSION" ] || fail "could not parse the openapi-to-rust pin from .github/actions/generate-wire-types/action.yml"
+openapi-to-rust --version | grep -q "openapi-to-rust ${GENERATOR_VERSION}$" ||
+  fail "openapi-to-rust $(openapi-to-rust --version | cut -d' ' -f2) does not match the pin — run: cargo install openapi-to-rust --version ${GENERATOR_VERSION} --locked"
+
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/shepherd-v1-contracts.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -121,12 +127,17 @@ cargo_fetch_offline_first "$CLIENT/Cargo.toml"
 cargo check --offline --quiet --manifest-path "$CLIENT/Cargo.toml"
 echo "ok [client-module]: generated client + wire models compile"
 
-step "warm-generation-deps: fetch server REQUIRED_DEPS for check-generation --offline"
+step "warm-generation-deps: fetch models/server REQUIRED_DEPS for check-generation --offline"
 WARM="$TMP/warm-server"
 node "$ROOT/scripts/contract-fixtures.ts" server-config "$ROOT" "$TMP/warm-server.toml" "$WARM/src/generated"
 openapi-to-rust generate --config "$TMP/warm-server.toml" --json
 temp_crate_manifest "$WARM" shepherd-v1-warm-server
 cargo_fetch_offline_first "$WARM/Cargo.toml"
+WARM_MODELS="$TMP/warm-models"
+openapi-to-rust generate "$ROOT/plan/contracts/openapi.yaml" --types-only \
+  --output-dir "$WARM_MODELS/src/generated" --json
+temp_crate_manifest "$WARM_MODELS" shepherd-v1-warm-models
+cargo_fetch_offline_first "$WARM_MODELS/Cargo.toml"
 
 step "generation: temporary Rust models/server and Orval React Query/Zod output"
 if [ -n "$NODE_DIR" ]; then
