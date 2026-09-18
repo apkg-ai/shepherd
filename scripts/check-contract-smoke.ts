@@ -44,7 +44,7 @@ ajv.addFormat("uri", (v: string) => {
 
 const MODELS = "https://shepherd.local/plan/smoke";
 const relocate = (schema: unknown): object =>
-  JSON.parse(JSON.stringify(schema).replaceAll("#/components/schemas/", `${MODELS}#/$defs/`)) as object;
+  JSON.parse(JSON.stringify(schema).replace(/#\/components\/schemas\//g, `${MODELS}#/$defs/`)) as object;
 ajv.addSchema({ $id: MODELS, $defs: relocate(spec.components.schemas) });
 
 const names = Object.keys(spec.components.schemas);
