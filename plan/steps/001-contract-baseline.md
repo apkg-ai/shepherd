@@ -1,6 +1,6 @@
 # 001 — Contract baseline and generation scaffolding
 
-Status: not started. Requirements: API-01.
+Status: complete (PR #82). Requirements: API-01.
 
 ## Objective and prerequisites
 
@@ -65,7 +65,7 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Implementation handoff record
 
-Branch: `001-contract-baseline` (off `main` at `fb0ec7e`). Commit/PR/CI run: recorded at completion below.
+Branch: `001-contract-baseline` (off `main` at `fb0ec7e`). PR [#82](https://github.com/apkg-ai/shepherd/pull/82); CI run links recorded below once green.
 
 ### Files changed
 
