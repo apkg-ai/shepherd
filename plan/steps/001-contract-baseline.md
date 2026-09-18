@@ -65,7 +65,7 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Implementation handoff record
 
-Branch: `001-contract-baseline` (off `main` at `fb0ec7e`). PR [#82](https://github.com/apkg-ai/shepherd/pull/82); CI run links recorded below once green.
+Branch: `001-contract-baseline` (off `main` at `fb0ec7e`). PR [#82](https://github.com/apkg-ai/shepherd/pull/82) — all checks green at `fe53478`: [Quality Gates](https://github.com/apkg-ai/shepherd/actions/runs/35379947966) (incl. the new Contracts / v1 Baseline job: 3m43s first cold run, 1m26s warm), [Dependency Scan](https://github.com/apkg-ai/shepherd/actions/runs/35379947969), [SAST](https://github.com/apkg-ai/shepherd/actions/runs/35379947934).
 
 ### Files changed
 
@@ -76,6 +76,8 @@ Branch: `001-contract-baseline` (off `main` at `fb0ec7e`). PR [#82](https://gith
 - `scripts/contract-fixtures.ts` (new) — the three known mutations for the negative checks plus the warmup server-config TOML writer (mirror of the config inside `plan/check-generation.py`; update both together on a generator bump).
 - `core/shepherd-server/tests/api.rs` — new `contract::catalog_operations_are_not_exposed_by_the_scaffold`: reads `plan/contracts/operations.json` via `include_str!`, asserts the catalog is 70 operations, substitutes path params with a dummy UUID and proves `getHealth` → 200 while every other operation is unrouted and never succeeds (GET → 404 from the static fallback; other methods → 405 because the fallback serves only GET/HEAD).
 - `.github/workflows/quality-gates.yaml` — new job `contracts-v1` ("Contracts / v1 Baseline") running `scripts/check-v1-contracts.sh` with the existing pinned actions, `cache-all-crates: true` (temp crates live outside the workspace) and root+ui `npm ci`; nothing in CI previously exercised `plan/`.
+- `tests/hurl/02-scaffold-boundary.hurl` (new, review follow-up) — the same non-exposure negatives over live HTTP (404 for catalog GETs, 405 for non-GET).
+- Review follow-ups in the gate and smoke check: the gate verifies the installed `openapi-to-rust` matches the pin parsed from the composite action and pre-fetches the types-only models `REQUIRED_DEPS` for cold caches; the smoke check rejects a media object carrying an example without a schema. One Semgrep regression (`no-replaceall`) was found in CI and fixed with the repo's `replace(/…/g, …)` idiom.
 - This handoff section.
 
 `openapi/shepherd.yaml`, `core/shepherd-server/openapi-to-rust.toml` and `ui/orval.config.ts` are untouched; no dependency manifest changed (ajv is used from the existing hoisted install exactly as `plan/validate-contracts.cjs` does).
@@ -98,7 +100,7 @@ Not applicable at this step (no storage until 002): file-backed SQLite/independe
 - `node --run typecheck` (root, covers the three new `.ts` scripts), `node --run lint:spec`, `shellcheck scripts/*.sh` (0.11.0) — PASS.
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace` (11 tests incl. the new sweep), `cargo test --package shepherd-server --test api -- contract` (3 tests, exact CI filter) — PASS.
 - `npm run generate:api/lint/fmt:check/typecheck/build --prefix ui`, `test:unit:cov` (128/128) — PASS.
-- `scripts/hurl-e2e.sh` (1/1), `scripts/smoke.sh` (OK), `scripts/playwright-e2e.sh` (7/7) — PASS.
+- `scripts/hurl-e2e.sh` (2/2 incl. the live boundary negatives), `scripts/smoke.sh` (OK), `scripts/playwright-e2e.sh` (7/7) — PASS.
 
 ### Limitations and temporary interfaces
 
