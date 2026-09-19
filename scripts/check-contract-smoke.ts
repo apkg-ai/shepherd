@@ -3,11 +3,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 // ajv is hoisted at the repo root via spectral, same as plan/validate-contracts.cjs.
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { fullFormats } from "ajv-formats/dist/formats.js";
 
 interface MediaObject {
   schema?: unknown;
   example?: unknown;
-  examples?: Record<string, { value: unknown }>;
+  examples?: Record<string, { value?: unknown }>;
 }
 
 interface OperationObject {
@@ -31,7 +32,7 @@ ajv.addFormat("int32", {
   validate: (v: number) => Number.isInteger(v) && v >= -2147483648 && v <= 2147483647,
 });
 ajv.addFormat("uuid", /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
-ajv.addFormat("date-time", (v: string) => /^\d{4}-\d\d-\d\dT/.test(v) && !Number.isNaN(Date.parse(v)));
+ajv.addFormat("date-time", fullFormats["date-time"]);
 ajv.addFormat("uri", (v: string) => {
   try {
     return Boolean(new URL(v).protocol);
@@ -60,7 +61,10 @@ const check = (id: string, where: string, media: MediaObject | undefined): numbe
   const samples =
     media.example !== undefined
       ? [media.example]
-      : Object.values(media.examples ?? {}).map((e) => e.value);
+      : Object.entries(media.examples ?? {}).map(([name, e]) => {
+          if (e.value === undefined) throw new Error(`${id} ${where}: example '${name}' has no value`);
+          return e.value;
+        });
   if (!media.schema) {
     if (samples.length > 0) throw new Error(`${id} ${where}: example without a schema`);
     return 0;
@@ -74,11 +78,18 @@ const check = (id: string, where: string, media: MediaObject | undefined): numbe
   return samples.length;
 };
 
+const operationMethods = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
 for (const item of Object.values(spec.paths)) {
-  for (const op of Object.values(item)) {
-    let count = check(op.operationId, "request", op.requestBody?.content?.["application/json"]);
+  for (const [method, op] of Object.entries(item)) {
+    if (!operationMethods.has(method)) continue;
+    let count = 0;
+    for (const [type, media] of Object.entries(op.requestBody?.content ?? {})) {
+      count += check(op.operationId, `request ${type}`, media);
+    }
     for (const [status, response] of Object.entries(op.responses ?? {})) {
-      count += check(op.operationId, `response ${status}`, response.content?.["application/json"]);
+      for (const [type, media] of Object.entries(response.content ?? {})) {
+        count += check(op.operationId, `response ${status} ${type}`, media);
+      }
     }
     if (count === 0 && !SSE_ONLY.has(op.operationId)) {
       throw new Error(`no inline example validated for ${op.operationId}`);

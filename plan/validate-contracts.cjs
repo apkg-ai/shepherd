@@ -2,12 +2,13 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const Ajv = require('ajv/dist/2020');
+const {fullFormats} = require('ajv-formats/dist/formats');
 const root = __dirname;
 const read = p => JSON.parse(fs.readFileSync(path.join(root, p), 'utf8'));
 const ajv = new Ajv({strict: false, allErrors: true});
 ajv.addFormat('int32', {type: 'number', validate: v => Number.isInteger(v) && v >= -2147483648 && v <= 2147483647});
 ajv.addFormat('uuid', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
-ajv.addFormat('date-time', v => /^\d{4}-\d\d-\d\dT/.test(v) && !Number.isNaN(Date.parse(v)));
+ajv.addFormat('date-time', fullFormats['date-time']);
 ajv.addFormat('uri', v => {try {return Boolean(new URL(v).protocol)} catch {return false}});
 const api = read('contracts/openapi.yaml');
 const defs = JSON.parse(JSON.stringify(api.components.schemas).replace(/#\/components\/schemas\//g, '#/$defs/'));

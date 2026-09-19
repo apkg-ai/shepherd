@@ -326,6 +326,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # npm ci runs lifecycle code from the PR; do not leave the token in git config.
+          persist-credentials: false
 
       # dtolnay/rust-toolchain needs an explicit channel; parse it from rust-toolchain.toml.
       - name: Parse pinned toolchain

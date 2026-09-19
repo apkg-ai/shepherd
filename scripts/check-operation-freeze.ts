@@ -5,10 +5,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-interface Operation {
-  operationId: string;
-}
-
 const root = resolve(import.meta.dirname, "..");
 const { values } = parseArgs({
   options: { spec: { type: "string" }, print: { type: "boolean" } },
@@ -16,10 +12,19 @@ const { values } = parseArgs({
 const specPath = values.spec ?? resolve(root, "plan/contracts/openapi.yaml");
 // Contracts are JSON-syntax YAML by design (plan/contracts/README.md).
 const spec = JSON.parse(readFileSync(specPath, "utf8")) as {
-  paths: Record<string, Record<string, Operation>>;
+  paths: Record<string, Record<string, unknown>>;
 };
-const actual = Object.values(spec.paths)
-  .flatMap((item) => Object.values(item).map((op) => op.operationId))
+const operationMethods = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
+const actual = Object.entries(spec.paths)
+  .flatMap(([path, item]) =>
+    Object.entries(item)
+      .filter(([method]) => operationMethods.has(method))
+      .map(([method, op]) => {
+        const id = (op as { operationId?: unknown })?.operationId;
+        if (typeof id !== "string") throw new Error(`${method} ${path}: missing operationId`);
+        return id;
+      }),
+  )
   .sort();
 
 if (values.print) {

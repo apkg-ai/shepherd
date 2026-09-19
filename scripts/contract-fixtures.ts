@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Fixtures for scripts/check-v1-contracts.sh.
 // Usage:
-//   node scripts/contract-fixtures.ts mutate <broken-ref|corrupt-example|renamed-operation> <plan-copy-dir>
+//   node scripts/contract-fixtures.ts mutate <broken-ref|corrupt-example|invalid-timestamp|renamed-operation> <plan-copy-dir>
 //   node scripts/contract-fixtures.ts server-config <repo-root> <out-toml> <output-dir>
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -30,6 +30,16 @@ if (command === "mutate") {
     const health = examples.find((e) => e.operation_id === "getHealth");
     if (!health) throw new Error("getHealth example not found");
     health.response = 42;
+    writeJson(examplesPath, examples);
+  } else if (mutation === "invalid-timestamp") {
+    const examplesPath = resolve(planCopy, "examples/operations.json");
+    const examples = readJson(examplesPath) as {
+      operation_id: string;
+      response: Record<string, unknown>;
+    }[];
+    const session = examples.find((e) => e.operation_id === "getBrowserSession");
+    if (!session) throw new Error("getBrowserSession example not found");
+    session.response.expires_at = "2026-02-30T09:00:00Z";
     writeJson(examplesPath, examples);
   } else if (mutation === "renamed-operation") {
     const spec = readJson(specPath) as {

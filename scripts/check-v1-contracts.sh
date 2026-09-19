@@ -33,7 +33,7 @@ done
 [ -d "$ROOT/ui/node_modules" ] || fail "ui/node_modules missing — run: npm ci --prefix ui"
 
 # The generator pin's single source is the CI composite action.
-GENERATOR_VERSION="$(grep -m1 'default:' "$ROOT/.github/actions/generate-wire-types/action.yml" | cut -d'"' -f2)"
+GENERATOR_VERSION="$(sed -n '/^  version:/,/default:/p' "$ROOT/.github/actions/generate-wire-types/action.yml" | grep -m1 'default:' | cut -d'"' -f2)"
 [ -n "$GENERATOR_VERSION" ] || fail "could not parse the openapi-to-rust pin from .github/actions/generate-wire-types/action.yml"
 openapi-to-rust --version | grep -q "openapi-to-rust ${GENERATOR_VERSION}$" ||
   fail "openapi-to-rust $(openapi-to-rust --version | cut -d' ' -f2) does not match the pin — run: cargo install openapi-to-rust --version ${GENERATOR_VERSION} --locked"
@@ -107,6 +107,13 @@ node "$ROOT/scripts/contract-fixtures.ts" mutate corrupt-example "$TMP/corrupt-e
 # The temp copy has no node_modules ancestor; resolve ajv from the repo root.
 expect_failure negative-corrupt-example 'Health' \
   env NODE_PATH="$ROOT/node_modules" node "$TMP/corrupt-example/validate-contracts.cjs"
+
+step "negative-invalid-timestamp: RFC 3339-invalid timestamp is detected"
+cp -R "$ROOT/plan" "$TMP/invalid-timestamp"
+node "$ROOT/scripts/contract-fixtures.ts" mutate invalid-timestamp "$TMP/invalid-timestamp"
+# The temp copy has no node_modules ancestor; resolve ajv from the repo root.
+expect_failure negative-invalid-timestamp 'BrowserSession' \
+  env NODE_PATH="$ROOT/node_modules" node "$TMP/invalid-timestamp/validate-contracts.cjs"
 
 step "negative-renamed-operation: operation-ID drift is detected"
 cp -R "$ROOT/plan" "$TMP/renamed-op"
