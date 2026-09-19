@@ -3,6 +3,7 @@ pub mod rows;
 mod transaction;
 
 pub use connect::{APPLICATION_ID, EXPORT_VERSION, SCHEMA_VERSION, StoreOptions, open};
+pub use transaction::TxFuture;
 
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -1,13 +1,20 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use sqlx::{Sqlite, Transaction};
 
 use super::{StorageError, Store};
+
+// Boxed rather than AsyncFnOnce: spawned callers trip rustc's "implementation of
+// AsyncFnOnce is not general enough" higher-ranked inference limit.
+pub type TxFuture<'t, T> = Pin<Box<dyn Future<Output = Result<T, StorageError>> + Send + 't>>;
 
 impl Store {
     // Write reservation before any reads (plan/05): the no-op UPDATE upgrades the
     // deferred BEGIN to SQLite's write lock so concurrent commands serialize.
     pub async fn command_transaction<T, F>(&self, command: F) -> Result<T, StorageError>
     where
-        F: AsyncFnOnce(&mut Transaction<'static, Sqlite>) -> Result<T, StorageError>,
+        F: for<'t> FnOnce(&'t mut Transaction<'static, Sqlite>) -> TxFuture<'t, T>,
     {
         let mut tx = self.pool().begin().await?;
         sqlx::query("UPDATE command_lock SET value=value WHERE id=1")
@@ -63,9 +70,11 @@ mod tests {
         let actor = actor(&store, "worker");
         let inserted = actor.clone();
         store
-            .command_transaction(async |tx| {
-                insert_actor(&mut **tx, &inserted).await?;
-                Ok(())
+            .command_transaction(|tx| {
+                Box::pin(async move {
+                    insert_actor(&mut **tx, &inserted).await?;
+                    Ok(())
+                })
             })
             .await
             .unwrap();
@@ -82,9 +91,11 @@ mod tests {
         let actor = actor(&store, "worker");
         let inserted = actor.clone();
         let err = store
-            .command_transaction(async |tx| {
-                insert_actor(&mut **tx, &inserted).await?;
-                Err::<(), _>(StorageError::Corrupt("injected failure".into()))
+            .command_transaction(|tx| {
+                Box::pin(async move {
+                    insert_actor(&mut **tx, &inserted).await?;
+                    Err::<(), _>(StorageError::Corrupt("injected failure".into()))
+                })
             })
             .await
             .unwrap_err();
