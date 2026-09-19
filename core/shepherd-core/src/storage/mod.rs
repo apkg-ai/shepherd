@@ -1,5 +1,6 @@
 mod connect;
 pub mod rows;
+mod transaction;
 
 pub use connect::{APPLICATION_ID, EXPORT_VERSION, SCHEMA_VERSION, StoreOptions, open};
 
