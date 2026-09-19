@@ -17,9 +17,15 @@ impl Store {
         F: for<'t> FnOnce(&'t mut Transaction<'static, Sqlite>) -> TxFuture<'t, T>,
     {
         let mut tx = self.pool().begin().await?;
-        sqlx::query("UPDATE command_lock SET value=value WHERE id=1")
+        let reserved = sqlx::query("UPDATE command_lock SET value=value WHERE id=1")
             .execute(&mut *tx)
             .await?;
+        if reserved.rows_affected() != 1 {
+            tx.rollback().await.ok();
+            return Err(StorageError::Corrupt(
+                "command_lock row missing; write serialization unavailable".into(),
+            ));
+        }
         match command(&mut tx).await {
             Ok(value) => {
                 tx.commit().await?;
@@ -35,21 +41,15 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use crate::model::{Actor, ActorId, ActorKind, TestClock};
+    use crate::model::{Actor, ActorId, ActorKind};
     use crate::storage::rows::{get_actor, insert_actor};
-    use crate::storage::{StorageError, Store, StoreOptions, TestCodec, TestKeyProvider, open};
+    use crate::storage::testing::{store_options, test_clock};
+    use crate::storage::{StorageError, Store, open};
 
     async fn test_store(dir: &tempfile::TempDir) -> Store {
-        open(StoreOptions {
-            db_path: dir.path().join("shepherd.db"),
-            mvp_db_path: Some(dir.path().join("mvp").join("shepherd.db")),
-            clock: Arc::new(TestClock::new("2026-09-14T00:00:00Z".parse().unwrap())),
-            codec: Arc::new(TestCodec::new(Arc::new(TestKeyProvider([0; 32])))),
-        })
-        .await
-        .unwrap()
+        open(store_options(dir.path(), "shepherd.db", test_clock()))
+            .await
+            .unwrap()
     }
 
     fn actor(store: &Store, label: &str) -> Actor {
@@ -72,7 +72,7 @@ mod tests {
         store
             .command_transaction(|tx| {
                 Box::pin(async move {
-                    insert_actor(&mut **tx, &inserted).await?;
+                    insert_actor(tx, &inserted).await?;
                     Ok(())
                 })
             })
@@ -93,7 +93,7 @@ mod tests {
         let err = store
             .command_transaction(|tx| {
                 Box::pin(async move {
-                    insert_actor(&mut **tx, &inserted).await?;
+                    insert_actor(tx, &inserted).await?;
                     Err::<(), _>(StorageError::Corrupt("injected failure".into()))
                 })
             })
@@ -101,5 +101,20 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, StorageError::Corrupt(_)));
         assert_eq!(get_actor(store.pool(), &actor.id).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn missing_command_lock_row_fails_loudly() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = test_store(&dir).await;
+        sqlx::query("DELETE FROM command_lock")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let err = store
+            .command_transaction(|_tx| Box::pin(async move { Ok(()) }))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StorageError::Corrupt(_)));
     }
 }

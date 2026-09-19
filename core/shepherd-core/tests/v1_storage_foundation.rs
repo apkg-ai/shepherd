@@ -10,7 +10,7 @@ use shepherd_core::storage::rows::{
 };
 use shepherd_core::storage::{
     APPLICATION_ID, EXPORT_VERSION, IdempotencyAad, SCHEMA_VERSION, SealedResponse, StorageError,
-    Store, StoreOptions, TestCodec, TestKeyProvider, open,
+    Store, StoreOptions, open, testing,
 };
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection, SqliteConnection};
@@ -21,12 +21,7 @@ fn start_time() -> DateTime<Utc> {
 }
 
 fn options(dir: &tempfile::TempDir, db_name: &str, clock: Arc<TestClock>) -> StoreOptions {
-    StoreOptions {
-        db_path: dir.path().join(db_name),
-        mvp_db_path: Some(dir.path().join("mvp").join("shepherd.db")),
-        clock,
-        codec: Arc::new(TestCodec::new(Arc::new(TestKeyProvider([3; 32])))),
-    }
+    testing::store_options(dir.path(), db_name, clock)
 }
 
 async fn open_store(dir: &tempfile::TempDir, clock: Arc<TestClock>) -> Store {
@@ -98,9 +93,7 @@ async fn reopening_v1_database_preserves_data_without_new_migrations() {
         let store = open_store(&dir, clock.clone()).await;
         let inserted = registered.clone();
         store
-            .command_transaction(|tx| {
-                Box::pin(async move { insert_actor(&mut **tx, &inserted).await })
-            })
+            .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &inserted).await }))
             .await
             .unwrap();
         store.pool().close().await;
@@ -169,12 +162,9 @@ async fn mvp_database_path_is_rejected_without_open() {
         .join(".shepherd")
         .join("shepherd.db");
     let clock = Arc::new(TestClock::new(start_time()));
-    let opts = StoreOptions {
-        db_path: mvp.clone(),
-        mvp_db_path: Some(mvp.clone()),
-        clock,
-        codec: Arc::new(TestCodec::new(Arc::new(TestKeyProvider([3; 32])))),
-    };
+    let mut opts = options(&dir, "ignored.db", clock);
+    opts.db_path = mvp.clone();
+    opts.mvp_db_path = Some(mvp.clone());
     let Err(err) = open(opts).await else {
         panic!("expected MVP rejection");
     };
@@ -193,9 +183,7 @@ async fn failure_injected_after_insert_rolls_back() {
     let prior = actor(clock.now(), "prior");
     let prior_insert = prior.clone();
     store
-        .command_transaction(|tx| {
-            Box::pin(async move { insert_actor(&mut **tx, &prior_insert).await })
-        })
+        .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &prior_insert).await }))
         .await
         .unwrap();
 
@@ -205,9 +193,9 @@ async fn failure_injected_after_insert_rolls_back() {
     let Err(err) = store
         .command_transaction(|tx| {
             Box::pin(async move {
-                insert_actor(&mut **tx, &failing_insert).await?;
+                insert_actor(tx, &failing_insert).await?;
                 put_idempotency(
-                    &mut **tx,
+                    tx,
                     &IdempotencyRecord {
                         actor_id: failing_insert.id,
                         key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
@@ -305,7 +293,8 @@ async fn idempotency_codec_round_trips_and_rejects_tampered_aad() {
     let store = open_store(&dir, clock.clone()).await;
 
     let agent = actor(clock.now(), "sealer");
-    insert_actor(store.pool(), &agent).await.unwrap();
+    let mut conn = store.pool().acquire().await.unwrap();
+    insert_actor(&mut conn, &agent).await.unwrap();
     let key = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
     let aad = IdempotencyAad {
         actor_id: &agent.id,
@@ -317,7 +306,7 @@ async fn idempotency_codec_round_trips_and_rejects_tampered_aad() {
 
     let now = clock.now();
     put_idempotency(
-        store.pool(),
+        &mut conn,
         &IdempotencyRecord {
             actor_id: agent.id,
             key,
@@ -359,11 +348,12 @@ async fn idempotency_lookup_honors_ttl_with_test_clock() {
     let store = open_store(&dir, clock.clone()).await;
 
     let agent = actor(clock.now(), "replayer");
-    insert_actor(store.pool(), &agent).await.unwrap();
+    let mut conn = store.pool().acquire().await.unwrap();
+    insert_actor(&mut conn, &agent).await.unwrap();
     let key = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
     let now = clock.now();
     put_idempotency(
-        store.pool(),
+        &mut conn,
         &IdempotencyRecord {
             actor_id: agent.id,
             key,

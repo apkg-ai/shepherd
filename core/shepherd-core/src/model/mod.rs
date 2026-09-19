@@ -1,8 +1,10 @@
 use std::fmt;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use chrono::{DateTime, SubsecRound, Utc};
-use uuid::{NoContext, Timestamp, Uuid};
+use uuid::timestamp::context::ContextV7;
+use uuid::{Timestamp, Uuid};
 
 macro_rules! typed_uuid {
     ($name:ident) => {
@@ -42,10 +44,16 @@ macro_rules! typed_uuid {
 typed_uuid!(ActorId);
 typed_uuid!(CommandId);
 
+// Shared ContextV7 keeps IDs generated within one millisecond monotonically
+// ordered; it is not Sync, hence the mutex.
+static V7_CONTEXT: LazyLock<std::sync::Mutex<ContextV7>> =
+    LazyLock::new(|| std::sync::Mutex::new(ContextV7::new()));
+
 fn new_v7(now: DateTime<Utc>) -> Uuid {
     let seconds = u64::try_from(now.timestamp()).unwrap_or(0);
+    let context = V7_CONTEXT.lock().unwrap();
     Uuid::new_v7(Timestamp::from_unix(
-        NoContext,
+        &*context,
         seconds,
         now.timestamp_subsec_nanos(),
     ))
@@ -129,7 +137,8 @@ impl TestClock {
     }
 
     pub fn advance(&self, delta: chrono::TimeDelta) {
-        *self.0.lock().unwrap() += delta;
+        let mut guard = self.0.lock().unwrap();
+        *guard = (*guard + delta).trunc_subsecs(3);
     }
 }
 
@@ -171,6 +180,16 @@ mod tests {
     }
 
     #[test]
+    fn same_millisecond_ids_are_monotonic() {
+        let now = ts("2026-09-14T00:00:00Z");
+        let first = ActorId::generate(now);
+        let second = ActorId::generate(now);
+        let third = ActorId::generate(now);
+        assert!(first < second);
+        assert!(second < third);
+    }
+
+    #[test]
     fn revision_starts_at_one_and_increments() {
         assert_eq!(Revision::INITIAL.value(), 1);
         assert_eq!(Revision::INITIAL.next().value(), 2);
@@ -204,5 +223,13 @@ mod tests {
         assert_eq!(clock.now(), ts("2026-09-14T00:01:30Z"));
         clock.set(ts("2026-09-14T12:00:00.5Z"));
         assert_eq!(clock.now(), ts("2026-09-14T12:00:00.500Z"));
+    }
+
+    #[test]
+    fn test_clock_advance_keeps_millisecond_precision() {
+        let clock = TestClock::new(ts("2026-09-14T00:00:00Z"));
+        clock.advance(chrono::TimeDelta::microseconds(1500));
+        assert_eq!(clock.now(), ts("2026-09-14T00:00:00.001Z"));
+        assert_eq!(clock.now().timestamp_subsec_nanos() % 1_000_000, 0);
     }
 }

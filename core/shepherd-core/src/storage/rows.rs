@@ -1,6 +1,6 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use sqlx::sqlite::SqliteRow;
-use sqlx::{Executor, Row, Sqlite};
+use sqlx::{Executor, Row, Sqlite, SqliteConnection};
 use uuid::Uuid;
 
 use super::{SealedResponse, StorageError};
@@ -47,10 +47,9 @@ where
     })
 }
 
-pub async fn insert_actor<'e, E>(executor: E, actor: &Actor) -> Result<(), StorageError>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
+// Write helpers take the caller's connection/transaction (plan/05); reads stay
+// generic over any executor.
+pub async fn insert_actor(conn: &mut SqliteConnection, actor: &Actor) -> Result<(), StorageError> {
     sqlx::query(
         "INSERT INTO actors (id, kind, label, revoked, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
     )
@@ -59,7 +58,7 @@ where
     .bind(&actor.label)
     .bind(i64::from(actor.revoked))
     .bind(format_ts(&actor.created_at))
-    .execute(executor)
+    .execute(conn)
     .await?;
     Ok(())
 }
@@ -101,13 +100,18 @@ pub struct IdempotencyRecord {
     pub expires_at: DateTime<Utc>,
 }
 
-pub async fn put_idempotency<'e, E>(
-    executor: E,
+pub async fn put_idempotency(
+    conn: &mut SqliteConnection,
     record: &IdempotencyRecord,
-) -> Result<(), StorageError>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
+) -> Result<(), StorageError> {
+    // An expired row must not poison its key forever; a live row still conflicts
+    // loudly (replay/conflict semantics arrive in step 010).
+    sqlx::query("DELETE FROM idempotency WHERE actor_id = ?1 AND key = ?2 AND expires_at <= ?3")
+        .bind(record.actor_id.to_string())
+        .bind(record.key.to_string())
+        .bind(format_ts(&record.created_at))
+        .execute(&mut *conn)
+        .await?;
     sqlx::query(
         "INSERT INTO idempotency (actor_id, key, command_id, request_hash, response_status, \
          response_ciphertext, nonce, created_at, expires_at) \
@@ -122,7 +126,7 @@ where
     .bind(&record.sealed.nonce)
     .bind(format_ts(&record.created_at))
     .bind(format_ts(&record.expires_at))
-    .execute(executor)
+    .execute(conn)
     .await?;
     Ok(())
 }
@@ -227,17 +231,13 @@ mod tests {
     use std::sync::Arc;
 
     use crate::model::{Clock, TestClock};
-    use crate::storage::{Store, StoreOptions, TestCodec, TestKeyProvider, open};
+    use crate::storage::testing::{store_options, test_clock};
+    use crate::storage::{Store, open};
 
     async fn test_store(dir: &tempfile::TempDir, clock: Arc<TestClock>) -> Store {
-        open(StoreOptions {
-            db_path: dir.path().join("shepherd.db"),
-            mvp_db_path: Some(dir.path().join("mvp").join("shepherd.db")),
-            clock,
-            codec: Arc::new(TestCodec::new(Arc::new(TestKeyProvider([0; 32])))),
-        })
-        .await
-        .unwrap()
+        open(store_options(dir.path(), "shepherd.db", clock))
+            .await
+            .unwrap()
     }
 
     fn test_actor(now: DateTime<Utc>) -> Actor {
@@ -253,10 +253,11 @@ mod tests {
     #[tokio::test]
     async fn actors_round_trip_through_their_table() {
         let dir = tempfile::tempdir().unwrap();
-        let clock = Arc::new(TestClock::new("2026-09-14T00:00:00Z".parse().unwrap()));
+        let clock = test_clock();
         let store = test_store(&dir, clock.clone()).await;
         let actor = test_actor(clock.now());
-        insert_actor(store.pool(), &actor).await.unwrap();
+        let mut conn = store.pool().acquire().await.unwrap();
+        insert_actor(&mut conn, &actor).await.unwrap();
         assert_eq!(
             get_actor(store.pool(), &actor.id).await.unwrap(),
             Some(actor.clone())
@@ -268,10 +269,11 @@ mod tests {
     #[tokio::test]
     async fn idempotency_rows_round_trip_and_expire_with_the_clock() {
         let dir = tempfile::tempdir().unwrap();
-        let clock = Arc::new(TestClock::new("2026-09-14T00:00:00Z".parse().unwrap()));
+        let clock = test_clock();
         let store = test_store(&dir, clock.clone()).await;
         let actor = test_actor(clock.now());
-        insert_actor(store.pool(), &actor).await.unwrap();
+        let mut conn = store.pool().acquire().await.unwrap();
+        insert_actor(&mut conn, &actor).await.unwrap();
 
         let key = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
         let record = IdempotencyRecord {
@@ -287,7 +289,7 @@ mod tests {
             created_at: clock.now(),
             expires_at: clock.now() + chrono::TimeDelta::days(7),
         };
-        put_idempotency(store.pool(), &record).await.unwrap();
+        put_idempotency(&mut conn, &record).await.unwrap();
 
         let found = get_idempotency(store.pool(), &actor.id, &key, clock.now())
             .await
@@ -310,9 +312,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn expired_idempotency_key_is_reusable_and_live_key_conflicts() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = test_clock();
+        let store = test_store(&dir, clock.clone()).await;
+        let actor = test_actor(clock.now());
+        let mut conn = store.pool().acquire().await.unwrap();
+        insert_actor(&mut conn, &actor).await.unwrap();
+
+        let key = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+        let record = |clock: &TestClock, hash: &str| IdempotencyRecord {
+            actor_id: actor.id,
+            key,
+            command_id: CommandId::generate(clock.now()),
+            request_hash: hash.to_string(),
+            response_status: 201,
+            sealed: SealedResponse {
+                ciphertext: vec![1],
+                nonce: vec![0; 12],
+            },
+            created_at: clock.now(),
+            expires_at: clock.now() + chrono::TimeDelta::days(7),
+        };
+        put_idempotency(&mut conn, &record(&clock, "hash-first"))
+            .await
+            .unwrap();
+
+        // Live row: same key conflicts loudly.
+        let err = put_idempotency(&mut conn, &record(&clock, "hash-second"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StorageError::Sqlx(_)));
+
+        // Expired row: the key is reusable and the new record replaces it.
+        clock.advance(chrono::TimeDelta::days(7));
+        put_idempotency(&mut conn, &record(&clock, "hash-after-expiry"))
+            .await
+            .unwrap();
+        let found = get_idempotency(store.pool(), &actor.id, &key, clock.now())
+            .await
+            .unwrap()
+            .expect("replacement record");
+        assert_eq!(found.request_hash, "hash-after-expiry");
+    }
+
+    #[tokio::test]
     async fn idempotency_rows_require_a_registered_actor() {
         let dir = tempfile::tempdir().unwrap();
-        let clock = Arc::new(TestClock::new("2026-09-14T00:00:00Z".parse().unwrap()));
+        let clock = test_clock();
         let store = test_store(&dir, clock.clone()).await;
         let record = IdempotencyRecord {
             actor_id: ActorId::generate(clock.now()),
@@ -327,7 +374,8 @@ mod tests {
             created_at: clock.now(),
             expires_at: clock.now() + chrono::TimeDelta::days(7),
         };
-        let err = put_idempotency(store.pool(), &record).await.unwrap_err();
+        let mut conn = store.pool().acquire().await.unwrap();
+        let err = put_idempotency(&mut conn, &record).await.unwrap_err();
         assert!(matches!(err, StorageError::Sqlx(_)));
     }
 }
