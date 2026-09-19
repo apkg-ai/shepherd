@@ -206,6 +206,66 @@ mod contract {
     }
 
     #[tokio::test]
+    async fn catalog_operations_are_not_exposed_by_the_scaffold() {
+        let catalog: Value =
+            serde_json::from_str(include_str!("../../../plan/contracts/operations.json"))
+                .expect("operations catalog parses");
+        let operations = catalog.as_array().expect("catalog is an array");
+        assert_eq!(
+            operations.len(),
+            70,
+            "v1 operation catalog is frozen at step 001"
+        );
+
+        let app = test_app();
+        for op in operations {
+            let id = op["operation_id"].as_str().unwrap();
+            let method = op["method"].as_str().unwrap().to_uppercase();
+            let path = op["path"]
+                .as_str()
+                .unwrap()
+                .split('/')
+                .map(|seg| {
+                    if seg.starts_with('{') {
+                        "00000000-0000-7000-8000-000000000000"
+                    } else {
+                        seg
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("/");
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method.as_str())
+                        .uri(&path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            if id == "getHealth" {
+                assert_eq!(status, StatusCode::OK, "health must stay green");
+            } else {
+                assert!(
+                    !status.is_success(),
+                    "{method} {path} ({id}) must not succeed on the scaffold"
+                );
+                // Unrouted: GET falls through to the static dir (404); the
+                // static fallback serves no other method (405).
+                let expected = if method == "GET" {
+                    StatusCode::NOT_FOUND
+                } else {
+                    StatusCode::METHOD_NOT_ALLOWED
+                };
+                assert_eq!(status, expected, "{method} {path} ({id}) must be unrouted");
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn served_spec_is_the_embedded_health_contract() {
         let app = test_app();
         let response = get_response(&app, "/api/v1/openapi.yaml").await;

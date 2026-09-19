@@ -319,6 +319,58 @@ jobs:
         run: |
           node --run lint:spec
 
+  contracts-v1:
+    name: Contracts / v1 Baseline
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # npm ci runs lifecycle code from the PR; do not leave the token in git config.
+          persist-credentials: false
+
+      # dtolnay/rust-toolchain needs an explicit channel; parse it from rust-toolchain.toml.
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-12
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
+          # The gate compiles temp crates outside the workspace; keep their registry downloads.
+          cache-all-crates: true
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci --prefer-offline
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci --prefer-offline
+
+      # Installs the pinned openapi-to-rust; the app regen side effect is unused here.
+      - name: Generate wire types
+        uses: ./.github/actions/generate-wire-types
+
+      - name: v1 contract gate
+        run: scripts/check-v1-contracts.sh
+
   shell-lint:
     name: Shell / Lint
     runs-on: ubuntu-24.04-arm
