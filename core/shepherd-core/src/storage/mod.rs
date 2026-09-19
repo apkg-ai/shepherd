@@ -115,12 +115,16 @@ impl TestCodec {
         Self { provider }
     }
 
-    fn keystream(&self, nonce: &[u8], data: &[u8]) -> Vec<u8> {
+    fn keystream(&self, nonce: &[u8], data: &[u8]) -> Result<Vec<u8>, StorageError> {
+        if nonce.len() != 12 {
+            return Err(StorageError::Codec("nonce must be 12 bytes".into()));
+        }
         let key = self.provider.key();
-        data.iter()
+        Ok(data
+            .iter()
             .enumerate()
             .map(|(i, byte)| byte ^ key[i % key.len()] ^ nonce[i % nonce.len()])
-            .collect()
+            .collect())
     }
 
     fn tag(&self, nonce: &[u8], aad: &IdempotencyAad<'_>, plaintext: &[u8]) -> [u8; 8] {
@@ -150,7 +154,7 @@ impl IdempotencyCodec for TestCodec {
     ) -> Result<SealedResponse, StorageError> {
         let nonce =
             uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).as_bytes()[..12].to_vec();
-        let mut ciphertext = self.keystream(&nonce, plaintext);
+        let mut ciphertext = self.keystream(&nonce, plaintext)?;
         ciphertext.extend_from_slice(&self.tag(&nonce, aad, plaintext));
         Ok(SealedResponse { ciphertext, nonce })
     }
@@ -166,11 +170,34 @@ impl IdempotencyCodec for TestCodec {
             .checked_sub(8)
             .ok_or_else(|| StorageError::Codec("sealed response too short".into()))?;
         let (body, found_tag) = sealed.ciphertext.split_at(split);
-        let plaintext = self.keystream(&sealed.nonce, body);
+        let plaintext = self.keystream(&sealed.nonce, body)?;
         if self.tag(&sealed.nonce, aad, &plaintext) != found_tag {
             return Err(StorageError::Codec("authentication failed".into()));
         }
         Ok(plaintext)
+    }
+}
+
+// Shared fixtures for module and integration tests; not compiled into production builds.
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing {
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use super::{StoreOptions, TestCodec, TestKeyProvider};
+    use crate::model::TestClock;
+
+    pub fn test_clock() -> Arc<TestClock> {
+        Arc::new(TestClock::new("2026-09-14T00:00:00Z".parse().unwrap()))
+    }
+
+    pub fn store_options(dir: &Path, db_name: &str, clock: Arc<TestClock>) -> StoreOptions {
+        StoreOptions {
+            db_path: dir.join(db_name),
+            mvp_db_path: Some(dir.join("mvp").join("shepherd.db")),
+            clock,
+            codec: Arc::new(TestCodec::new(Arc::new(TestKeyProvider([3; 32])))),
+        }
     }
 }
 
@@ -240,6 +267,15 @@ mod tests {
         };
         assert!(matches!(
             codec.open(&aad, &short),
+            Err(StorageError::Codec(_))
+        ));
+
+        let empty_nonce = SealedResponse {
+            ciphertext: vec![0; 16],
+            nonce: Vec::new(),
+        };
+        assert!(matches!(
+            codec.open(&aad, &empty_nonce),
             Err(StorageError::Codec(_))
         ));
     }

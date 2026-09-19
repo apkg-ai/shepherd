@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,7 +17,10 @@ pub const EXPORT_VERSION: &str = "2.0.0";
 
 pub(crate) const BASELINE_SQL: &str = include_str!("../../migrations/20260914000001_baseline.sql");
 const BASELINE_VERSION: i64 = 20_260_914_000_001;
-const SQLITE_HEADER: &[u8] = b"SQLite format 3\0";
+const SQLITE_MAGIC: &[u8] = b"SQLite format 3\0";
+// SQLite file format: 100-byte header, application_id big-endian at offset 68.
+const HEADER_LEN: usize = 100;
+const APPLICATION_ID_OFFSET: usize = 68;
 
 pub struct StoreOptions {
     pub db_path: PathBuf,
@@ -28,30 +32,76 @@ pub struct StoreOptions {
 
 pub async fn open(options: StoreOptions) -> Result<Store, StorageError> {
     let path = &options.db_path;
-    if Some(path.as_path()) == mvp_db_path(options.mvp_db_path.as_deref()).as_deref() {
+    if is_mvp_path(path, options.mvp_db_path.as_deref()) {
         return Err(StorageError::MvpDatabase { path: path.clone() });
     }
-    match probe_header(path)? {
-        HeaderProbe::Missing | HeaderProbe::Empty => {}
-        HeaderProbe::NotSqlite => {
-            return Err(StorageError::ForeignDatabase { path: path.clone() });
-        }
-        HeaderProbe::Sqlite => {
-            if probe_application_id(path).await? != APPLICATION_ID {
-                return Err(StorageError::ForeignDatabase { path: path.clone() });
+    let foreign = || StorageError::ForeignDatabase { path: path.clone() };
+
+    // Header-only identity: any SQLite open of an unidentified file can create
+    // -shm/-wal siblings, so foreign files must be rejected from raw bytes alone.
+    // The post-init checkpoint below guarantees a v1 header from first open on.
+    let fresh = match probe_header(path)? {
+        HeaderProbe::Missing | HeaderProbe::Empty => true,
+        HeaderProbe::NotSqlite => return Err(foreign()),
+        HeaderProbe::Sqlite { application_id } if application_id == APPLICATION_ID => false,
+        HeaderProbe::Sqlite { .. } => return Err(foreign()),
+    };
+
+    if !fresh {
+        // Reject before any write: never modify a database we will not open.
+        match probe_schema_meta(path).await {
+            SchemaProbe::V1 => {}
+            SchemaProbe::Mismatch {
+                version,
+                export_version,
+            } => {
+                return Err(StorageError::SchemaMismatch {
+                    version,
+                    export_version,
+                });
             }
+            SchemaProbe::MissingMeta => return Err(foreign()),
+            // Read-only open failed: our own database mid-WAL-recovery after a
+            // crash. The read-write open below performs the legitimate recovery.
+            SchemaProbe::Unreadable => {}
         }
     }
+
     let pool = build_pool(path).await?;
-    migrator().run(&pool).await?;
-    verify_identity(&pool).await?;
+    if let Err(err) = initialize(&pool, fresh).await {
+        pool.close().await;
+        return Err(err);
+    }
     Ok(Store::new(pool, options.clock, options.codec))
 }
 
-fn mvp_db_path(configured: Option<&Path>) -> Option<PathBuf> {
-    match configured {
-        Some(path) => Some(path.to_path_buf()),
-        None => std::env::home_dir().map(|home| home.join(".shepherd").join("shepherd.db")),
+async fn initialize(pool: &SqlitePool, fresh: bool) -> Result<(), StorageError> {
+    migrator().run(pool).await?;
+    if fresh {
+        // Push the new header (application_id) out of the WAL immediately so the
+        // raw header probe identifies this database even after a later crash.
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .fetch_optional(pool)
+            .await?;
+    }
+    verify_identity(pool).await
+}
+
+fn is_mvp_path(db_path: &Path, configured: Option<&Path>) -> bool {
+    let mvp = match configured {
+        Some(path) => path.to_path_buf(),
+        None => match std::env::home_dir() {
+            Some(home) => home.join(".shepherd").join("shepherd.db"),
+            None => return false,
+        },
+    };
+    if db_path == mvp {
+        return true;
+    }
+    // Catch `..` segments and symlinks; both sides must exist to canonicalize.
+    match (std::fs::canonicalize(db_path), std::fs::canonicalize(&mvp)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
     }
 }
 
@@ -59,37 +109,94 @@ enum HeaderProbe {
     Missing,
     Empty,
     NotSqlite,
-    Sqlite,
+    Sqlite { application_id: i64 },
 }
 
 fn probe_header(path: &Path) -> Result<HeaderProbe, StorageError> {
-    match std::fs::read(path) {
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(HeaderProbe::Missing),
-        Err(err) => Err(err.into()),
-        Ok(bytes) if bytes.is_empty() => Ok(HeaderProbe::Empty),
-        Ok(bytes) if bytes.starts_with(SQLITE_HEADER) => Ok(HeaderProbe::Sqlite),
-        Ok(_) => Ok(HeaderProbe::NotSqlite),
+    let mut file = match std::fs::File::open(path) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(HeaderProbe::Missing);
+        }
+        Err(err) => return Err(err.into()),
+        Ok(file) => file,
+    };
+    let mut header = [0u8; HEADER_LEN];
+    let mut filled = 0;
+    while filled < HEADER_LEN {
+        let read = file.read(&mut header[filled..])?;
+        if read == 0 {
+            break;
+        }
+        filled += read;
     }
+    if filled == 0 {
+        return Ok(HeaderProbe::Empty);
+    }
+    if filled < HEADER_LEN || !header.starts_with(SQLITE_MAGIC) {
+        return Ok(HeaderProbe::NotSqlite);
+    }
+    let offset = APPLICATION_ID_OFFSET;
+    let application_id = i32::from_be_bytes([
+        header[offset],
+        header[offset + 1],
+        header[offset + 2],
+        header[offset + 3],
+    ]);
+    Ok(HeaderProbe::Sqlite {
+        application_id: i64::from(application_id),
+    })
 }
 
-// Read-only probe: reads through a live WAL and never writes; any failure means
-// the file is not a healthy v1 database, so callers reject without touching it.
-async fn probe_application_id(path: &Path) -> Result<i64, StorageError> {
-    let foreign = || StorageError::ForeignDatabase {
-        path: path.to_path_buf(),
-    };
-    let mut conn = SqliteConnectOptions::new()
+enum SchemaProbe {
+    V1,
+    Mismatch {
+        version: i64,
+        export_version: String,
+    },
+    MissingMeta,
+    Unreadable,
+}
+
+async fn probe_schema_meta(path: &Path) -> SchemaProbe {
+    let Ok(mut conn) = SqliteConnectOptions::new()
         .filename(path)
         .read_only(true)
         .connect()
         .await
-        .map_err(|_| foreign())?;
-    let id = sqlx::query_scalar::<_, i64>("PRAGMA application_id")
-        .fetch_one(&mut conn)
-        .await
-        .map_err(|_| foreign());
+    else {
+        return SchemaProbe::Unreadable;
+    };
+    let has_table = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='schema_meta'",
+    )
+    .fetch_one(&mut conn)
+    .await;
+    let probe = match has_table {
+        Err(_) => SchemaProbe::Unreadable,
+        Ok(0) => SchemaProbe::MissingMeta,
+        Ok(_) => {
+            match sqlx::query_as::<_, (i64, String)>(
+                "SELECT version, export_version FROM schema_meta",
+            )
+            .fetch_optional(&mut conn)
+            .await
+            {
+                Ok(Some((version, export_version)))
+                    if version == SCHEMA_VERSION && export_version == EXPORT_VERSION =>
+                {
+                    SchemaProbe::V1
+                }
+                Ok(Some((version, export_version))) => SchemaProbe::Mismatch {
+                    version,
+                    export_version,
+                },
+                Ok(None) => SchemaProbe::MissingMeta,
+                Err(_) => SchemaProbe::Unreadable,
+            }
+        }
+    };
     conn.close().await.ok();
-    id
+    probe
 }
 
 async fn build_pool(path: &Path) -> Result<SqlitePool, StorageError> {
@@ -137,26 +244,48 @@ async fn verify_identity(pool: &SqlitePool) -> Result<(), StorageError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::TestClock;
-    use crate::storage::{TestCodec, TestKeyProvider};
-
-    fn test_options(dir: &tempfile::TempDir, db_name: &str) -> StoreOptions {
-        StoreOptions {
-            db_path: dir.path().join(db_name),
-            mvp_db_path: Some(dir.path().join("mvp").join("shepherd.db")),
-            clock: Arc::new(TestClock::new("2026-09-14T00:00:00Z".parse().unwrap())),
-            codec: Arc::new(TestCodec::new(Arc::new(TestKeyProvider([0; 32])))),
-        }
-    }
+    use crate::storage::testing::{store_options, test_clock};
 
     async fn pragma_i64(pool: &SqlitePool, pragma: &'static str) -> i64 {
         sqlx::query_scalar(pragma).fetch_one(pool).await.unwrap()
     }
 
+    fn dir_snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut entries: Vec<(String, Vec<u8>)> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                (
+                    entry.file_name().to_string_lossy().into_owned(),
+                    std::fs::read(entry.path()).unwrap(),
+                )
+            })
+            .collect();
+        entries.sort();
+        entries
+    }
+
+    async fn create_foreign_db(path: &Path, wal: bool) {
+        let mut options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true);
+        if wal {
+            options = options.journal_mode(SqliteJournalMode::Wal);
+        }
+        let mut conn = options.connect().await.unwrap();
+        sqlx::raw_sql("CREATE TABLE legacy(x TEXT); INSERT INTO legacy VALUES('data');")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        conn.close().await.unwrap();
+    }
+
     #[tokio::test]
     async fn fresh_database_initializes_identity_and_sqlite_settings() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open(test_options(&dir, "shepherd.db")).await.unwrap();
+        let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+            .await
+            .unwrap();
         let pool = store.pool();
 
         assert_eq!(
@@ -220,9 +349,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fresh_database_header_carries_identity_before_close() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+            .await
+            .unwrap();
+        // The init checkpoint must have pushed the header out of the WAL while
+        // the pool is still open; the raw header is the crash-recovery anchor.
+        let probe = probe_header(&dir.path().join("shepherd.db")).unwrap();
+        assert!(matches!(
+            probe,
+            HeaderProbe::Sqlite { application_id } if application_id == APPLICATION_ID
+        ));
+        store.pool().close().await;
+    }
+
+    #[tokio::test]
     async fn empty_file_initializes_fresh_database() {
         let dir = tempfile::tempdir().unwrap();
-        let options = test_options(&dir, "shepherd.db");
+        let options = store_options(dir.path(), "shepherd.db", test_clock());
         std::fs::write(&options.db_path, b"").unwrap();
         let store = open(options).await.unwrap();
         assert_eq!(
@@ -235,14 +380,18 @@ mod tests {
     async fn reopening_existing_database_preserves_state() {
         let dir = tempfile::tempdir().unwrap();
         {
-            let store = open(test_options(&dir, "shepherd.db")).await.unwrap();
+            let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+                .await
+                .unwrap();
             sqlx::query("UPDATE command_lock SET value=42 WHERE id=1")
                 .execute(store.pool())
                 .await
                 .unwrap();
             store.pool().close().await;
         }
-        let store = open(test_options(&dir, "shepherd.db")).await.unwrap();
+        let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+            .await
+            .unwrap();
         let lock: i64 = sqlx::query_scalar("SELECT value FROM command_lock WHERE id=1")
             .fetch_one(store.pool())
             .await
@@ -251,15 +400,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn crashed_v1_database_recovers_on_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+            .await
+            .unwrap();
+        sqlx::query("UPDATE command_lock SET value=7 WHERE id=1")
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        // Simulate a crash: main file + hot WAL survive, the shared-memory index
+        // does not, so the next opener must run recovery.
+        let crash_dir = tempfile::tempdir().unwrap();
+        std::fs::copy(
+            dir.path().join("shepherd.db"),
+            crash_dir.path().join("shepherd.db"),
+        )
+        .unwrap();
+        std::fs::copy(
+            dir.path().join("shepherd.db-wal"),
+            crash_dir.path().join("shepherd.db-wal"),
+        )
+        .unwrap();
+        store.pool().close().await;
+
+        let recovered = open(store_options(crash_dir.path(), "shepherd.db", test_clock()))
+            .await
+            .unwrap();
+        let lock: i64 = sqlx::query_scalar("SELECT value FROM command_lock WHERE id=1")
+            .fetch_one(recovered.pool())
+            .await
+            .unwrap();
+        assert_eq!(lock, 7);
+    }
+
+    #[tokio::test]
     async fn mvp_database_path_is_rejected_without_io() {
         let dir = tempfile::tempdir().unwrap();
         let mvp = dir.path().join("mvp").join("shepherd.db");
-        let options = StoreOptions {
-            db_path: mvp.clone(),
-            mvp_db_path: Some(mvp.clone()),
-            clock: Arc::new(TestClock::new("2026-09-14T00:00:00Z".parse().unwrap())),
-            codec: Arc::new(TestCodec::new(Arc::new(TestKeyProvider([0; 32])))),
-        };
+        let mut options = store_options(dir.path(), "ignored.db", test_clock());
+        options.db_path = mvp.clone();
+        options.mvp_db_path = Some(mvp.clone());
         let Err(err) = open(options).await else {
             panic!("expected MVP path rejection")
         };
@@ -267,44 +449,158 @@ mod tests {
         assert!(!mvp.exists());
     }
 
-    async fn assert_rejected_without_byte_changes(dir: &tempfile::TempDir, db_name: &str) {
-        let options = test_options(dir, db_name);
+    #[tokio::test]
+    async fn mvp_database_indirect_path_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let mvp_dir = dir.path().join("mvp");
+        std::fs::create_dir_all(&mvp_dir).unwrap();
+        let mvp = mvp_dir.join("shepherd.db");
+        std::fs::write(&mvp, b"legacy bytes").unwrap();
+        let indirect = dir
+            .path()
+            .join("mvp")
+            .join("..")
+            .join("mvp")
+            .join("shepherd.db");
+        let mut options = store_options(dir.path(), "ignored.db", test_clock());
+        options.db_path = indirect;
+        options.mvp_db_path = Some(mvp);
+        let Err(err) = open(options).await else {
+            panic!("expected MVP path rejection")
+        };
+        assert!(matches!(err, StorageError::MvpDatabase { .. }));
+        assert_eq!(
+            std::fs::read(dir.path().join("mvp").join("shepherd.db")).unwrap(),
+            b"legacy bytes"
+        );
+    }
+
+    async fn assert_rejected_without_byte_changes(dir: &Path, db_name: &str) {
+        let options = store_options(dir, db_name, test_clock());
         let path = options.db_path.clone();
-        let before = std::fs::read(&path).unwrap();
+        let before = dir_snapshot(dir);
         let Err(err) = open(options).await else {
             panic!("expected foreign database rejection")
         };
         assert!(matches!(err, StorageError::ForeignDatabase { path: p } if p == path));
-        assert_eq!(std::fs::read(&path).unwrap(), before);
-        let entries: Vec<String> = std::fs::read_dir(dir.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(entries, vec![db_name.to_string()]);
+        assert_eq!(dir_snapshot(dir), before);
     }
 
     #[tokio::test]
     async fn foreign_sqlite_database_is_rejected_without_byte_changes() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("legacy.db");
-        let mut conn = SqliteConnectOptions::new()
-            .filename(&path)
-            .create_if_missing(true)
-            .connect()
-            .await
-            .unwrap();
-        sqlx::raw_sql("CREATE TABLE legacy(x TEXT); INSERT INTO legacy VALUES('data');")
-            .execute(&mut conn)
-            .await
-            .unwrap();
-        conn.close().await.unwrap();
-        assert_rejected_without_byte_changes(&dir, "legacy.db").await;
+        create_foreign_db(&dir.path().join("legacy.db"), false).await;
+        assert_rejected_without_byte_changes(dir.path(), "legacy.db").await;
+    }
+
+    #[tokio::test]
+    async fn foreign_wal_database_is_rejected_without_byte_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        create_foreign_db(&dir.path().join("legacy.db"), true).await;
+        assert_rejected_without_byte_changes(dir.path(), "legacy.db").await;
+    }
+
+    #[tokio::test]
+    async fn foreign_database_with_stray_wal_is_rejected_without_byte_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        create_foreign_db(&dir.path().join("legacy.db"), false).await;
+        std::fs::write(dir.path().join("legacy.db-wal"), b"stray wal bytes").unwrap();
+        assert_rejected_without_byte_changes(dir.path(), "legacy.db").await;
     }
 
     #[tokio::test]
     async fn non_sqlite_file_is_rejected_without_byte_changes() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("notes.db"), b"not a database at all").unwrap();
-        assert_rejected_without_byte_changes(&dir, "notes.db").await;
+        assert_rejected_without_byte_changes(dir.path(), "notes.db").await;
+    }
+
+    #[tokio::test]
+    async fn truncated_sqlite_header_is_rejected_without_byte_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("stub.db"), SQLITE_MAGIC).unwrap();
+        assert_rejected_without_byte_changes(dir.path(), "stub.db").await;
+    }
+
+    #[tokio::test]
+    async fn matching_id_without_schema_meta_is_rejected_without_byte_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("claimed.db");
+        create_foreign_db(&path, false).await;
+        let mut conn = SqliteConnectOptions::new()
+            .filename(&path)
+            .connect()
+            .await
+            .unwrap();
+        sqlx::raw_sql("PRAGMA application_id=1397248068;")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        conn.close().await.unwrap();
+        assert_rejected_without_byte_changes(dir.path(), "claimed.db").await;
+    }
+
+    #[tokio::test]
+    async fn newer_schema_meta_is_rejected_without_byte_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+                .await
+                .unwrap();
+            store.pool().close().await;
+        }
+        let mut conn = SqliteConnectOptions::new()
+            .filename(dir.path().join("shepherd.db"))
+            .connect()
+            .await
+            .unwrap();
+        sqlx::raw_sql("UPDATE schema_meta SET version=2, export_version='3.0.0';")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        conn.close().await.unwrap();
+
+        let db_path = dir.path().join("shepherd.db");
+        let before = std::fs::read(&db_path).unwrap();
+        let Err(err) = open(store_options(dir.path(), "shepherd.db", test_clock())).await else {
+            panic!("expected schema mismatch rejection")
+        };
+        assert!(matches!(
+            err,
+            StorageError::SchemaMismatch { version: 2, export_version } if export_version == "3.0.0"
+        ));
+        // Own database: the read-only schema probe may create -shm/-wal siblings
+        // like any SQLite reader, but the data file itself stays unmodified.
+        assert_eq!(std::fs::read(&db_path).unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn unknown_future_migration_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+                .await
+                .unwrap();
+            store.pool().close().await;
+        }
+        let mut conn = SqliteConnectOptions::new()
+            .filename(dir.path().join("shepherd.db"))
+            .connect()
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "INSERT INTO _sqlx_migrations \
+             (version, description, installed_on, success, checksum, execution_time) \
+             VALUES (99990101000001, 'future', CURRENT_TIMESTAMP, TRUE, x'00', 0);",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        conn.close().await.unwrap();
+
+        let Err(err) = open(store_options(dir.path(), "shepherd.db", test_clock())).await else {
+            panic!("expected future migration rejection")
+        };
+        assert!(matches!(err, StorageError::Migrate(_)));
     }
 }
