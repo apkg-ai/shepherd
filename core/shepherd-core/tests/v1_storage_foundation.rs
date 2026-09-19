@@ -154,6 +154,89 @@ async fn non_sqlite_file_is_rejected_without_modified_bytes() {
 }
 
 #[tokio::test]
+async fn foreign_wal_database_is_rejected_without_modified_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy.db");
+    let mut conn = SqliteConnectOptions::new()
+        .filename(&path)
+        .create_if_missing(true)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::raw_sql("CREATE TABLE mvp_tasks(id TEXT); INSERT INTO mvp_tasks VALUES('t-1');")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    conn.close().await.unwrap();
+    assert_rejection_leaves_bytes_untouched(&dir, "legacy.db").await;
+}
+
+#[tokio::test]
+async fn crashed_v1_database_recovers_on_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(start_time()));
+    let store = open_store(&dir, clock.clone()).await;
+    sqlx::query("UPDATE command_lock SET value=7 WHERE id=1")
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    // Simulate a crash: main file + hot WAL survive, the shared-memory index
+    // does not, so the next opener must run WAL recovery.
+    let crash_dir = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        dir.path().join("shepherd.db"),
+        crash_dir.path().join("shepherd.db"),
+    )
+    .unwrap();
+    std::fs::copy(
+        dir.path().join("shepherd.db-wal"),
+        crash_dir.path().join("shepherd.db-wal"),
+    )
+    .unwrap();
+    store.pool().close().await;
+
+    let recovered = open_store(&crash_dir, clock).await;
+    let lock: i64 = sqlx::query_scalar("SELECT value FROM command_lock WHERE id=1")
+        .fetch_one(recovered.pool())
+        .await
+        .unwrap();
+    assert_eq!(lock, 7);
+}
+
+#[tokio::test]
+async fn newer_schema_database_is_rejected_without_data_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(start_time()));
+    {
+        let store = open_store(&dir, clock.clone()).await;
+        store.pool().close().await;
+    }
+    let db_path = dir.path().join("shepherd.db");
+    let mut conn = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::raw_sql("UPDATE schema_meta SET version=2, export_version='3.0.0';")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    conn.close().await.unwrap();
+
+    let before = std::fs::read(&db_path).unwrap();
+    let Err(err) = open(options(&dir, "shepherd.db", clock)).await else {
+        panic!("expected schema mismatch rejection");
+    };
+    assert!(matches!(
+        err,
+        StorageError::SchemaMismatch { version: 2, export_version } if export_version == "3.0.0"
+    ));
+    assert_eq!(std::fs::read(&db_path).unwrap(), before);
+}
+
+#[tokio::test]
 async fn mvp_database_path_is_rejected_without_open() {
     let dir = tempfile::tempdir().unwrap();
     let mvp: PathBuf = dir
