@@ -3,6 +3,7 @@ pub(crate) mod hierarchy;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
+use sqlx::{QueryBuilder, Sqlite};
 use uuid::Uuid;
 
 use crate::error::DomainError;
@@ -40,6 +41,72 @@ pub(crate) fn projects_filter(include_archived: bool) -> String {
 
 pub(crate) fn scoped_filter(project: &ProjectId, include_archived: bool) -> String {
     format!("project={project}&include_archived={include_archived}")
+}
+
+fn decode_after(
+    params: &ListParams,
+    endpoint: &str,
+    filter: &str,
+) -> Result<Option<(String, String)>, DomainError> {
+    params
+        .cursor
+        .as_deref()
+        .map(|cursor| decode_cursor(cursor, endpoint, filter))
+        .transpose()
+}
+
+// Shared keyset-pagination clauses: created_at ASC, id ASC across every list endpoint.
+fn push_page_clauses(
+    builder: &mut QueryBuilder<Sqlite>,
+    scope: Option<&ProjectId>,
+    include_archived: bool,
+    after: &Option<(String, String)>,
+    limit: i64,
+) {
+    let mut prefix = " WHERE ";
+    if let Some(project) = scope {
+        builder
+            .push(prefix)
+            .push("project_id = ")
+            .push_bind(project.to_string());
+        prefix = " AND ";
+    }
+    if !include_archived {
+        builder.push(prefix).push("archived = 0");
+        prefix = " AND ";
+    }
+    if let Some((created_at, id)) = after {
+        builder
+            .push(prefix)
+            .push("(created_at > ")
+            .push_bind(created_at.clone())
+            .push(" OR (created_at = ")
+            .push_bind(created_at.clone())
+            .push(" AND id > ")
+            .push_bind(id.clone())
+            .push("))");
+    }
+    // Fetch one extra row to learn whether a next page exists.
+    builder
+        .push(" ORDER BY created_at ASC, id ASC LIMIT ")
+        .push_bind(limit + 1);
+}
+
+fn split_page<T>(mut items: Vec<T>, limit: i64, encode: impl Fn(&T) -> String) -> Page<T> {
+    let limit = limit as usize;
+    if items.len() > limit {
+        items.truncate(limit);
+        let cursor = encode(items.last().expect("page limit is at least one"));
+        Page {
+            items,
+            next_cursor: Some(cursor),
+        }
+    } else {
+        Page {
+            items,
+            next_cursor: None,
+        }
+    }
 }
 
 // base64url JSON of sort tuple, endpoint and filter fingerprint (plan/07).
@@ -142,6 +209,20 @@ mod tests {
                 Err(DomainError::InvalidCursor(_))
             ));
         }
+    }
+
+    #[test]
+    fn split_page_truncates_and_encodes_the_last_returned_item() {
+        let page = split_page(vec![1, 2, 3, 4], 3, |n| format!("cursor-{n}"));
+        assert_eq!(page.items, vec![1, 2, 3]);
+        assert_eq!(page.next_cursor.as_deref(), Some("cursor-3"));
+    }
+
+    #[test]
+    fn split_page_omits_next_cursor_when_exhausted() {
+        let page = split_page(vec![1, 2, 3], 3, |n| format!("cursor-{n}"));
+        assert_eq!(page.items, vec![1, 2, 3]);
+        assert_eq!(page.next_cursor, None);
     }
 
     #[test]
