@@ -31,8 +31,8 @@ impl Store {
         Self { pool, clock, codec }
     }
 
-    // Writable pool access stays crate-internal in production builds so downstream
-    // crates cannot bypass command_transaction's reservation invariant.
+    // crate-internal in production: downstream crates must not bypass
+    // command_transaction's reservation.
     #[cfg(any(test, feature = "test-support"))]
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
@@ -191,7 +191,6 @@ impl IdempotencyCodec for TestCodec {
     }
 }
 
-// Shared fixtures for module and integration tests; not compiled into production builds.
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing {
     use std::path::Path;

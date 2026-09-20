@@ -47,8 +47,7 @@ where
     })
 }
 
-// Write helpers take the caller's connection/transaction (plan/05); reads stay
-// generic over any executor.
+// Write helpers take the caller's transaction (plan/05); reads stay generic.
 pub async fn insert_actor(conn: &mut SqliteConnection, actor: &Actor) -> Result<(), StorageError> {
     sqlx::query(
         "INSERT INTO actors (id, kind, label, revoked, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -104,8 +103,7 @@ pub async fn put_idempotency(
     conn: &mut SqliteConnection,
     record: &IdempotencyRecord,
 ) -> Result<(), StorageError> {
-    // An expired row must not poison its key forever; a live row still conflicts
-    // loudly (replay/conflict semantics arrive in step 010).
+    // An expired key must stay reusable; live-key conflict semantics arrive in step 010.
     sqlx::query("DELETE FROM idempotency WHERE actor_id = ?1 AND key = ?2 AND expires_at <= ?3")
         .bind(record.actor_id.to_string())
         .bind(record.key.to_string())
@@ -131,7 +129,7 @@ pub async fn put_idempotency(
     Ok(())
 }
 
-// Fixed-width RFC 3339 keeps the TEXT comparison correct; expired rows are simply not returned.
+// Fixed-width RFC 3339 keeps the TEXT expires_at comparison correct.
 pub async fn get_idempotency<'e, E>(
     executor: E,
     actor_id: &ActorId,
@@ -338,13 +336,11 @@ mod tests {
             .await
             .unwrap();
 
-        // Live row: same key conflicts loudly.
         let err = put_idempotency(&mut conn, &record(&clock, "hash-second"))
             .await
             .unwrap_err();
         assert!(matches!(err, StorageError::Sqlx(_)));
 
-        // Expired row: the key is reusable and the new record replaces it.
         clock.advance(chrono::TimeDelta::days(7));
         put_idempotency(&mut conn, &record(&clock, "hash-after-expiry"))
             .await

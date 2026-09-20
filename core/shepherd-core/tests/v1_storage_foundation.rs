@@ -28,8 +28,7 @@ async fn open_store(dir: &tempfile::TempDir, clock: Arc<TestClock>) -> Store {
     open(options(dir, "shepherd.db", clock)).await.unwrap()
 }
 
-// Persisted-state assertions go through an independent read-only connection,
-// not the Store under test.
+// Persisted-state assertions go through an independent read-only connection.
 async fn independent_connection(path: &Path) -> SqliteConnection {
     SqliteConnectOptions::new()
         .filename(path)
@@ -182,8 +181,7 @@ async fn crashed_v1_database_recovers_on_reopen() {
         .await
         .unwrap();
 
-    // Simulate a crash: main file + hot WAL survive, the shared-memory index
-    // does not, so the next opener must run WAL recovery.
+    // Crash simulation: db + hot WAL survive without the -shm index.
     let crash_dir = tempfile::tempdir().unwrap();
     std::fs::copy(
         dir.path().join("shepherd.db"),
@@ -262,7 +260,6 @@ async fn failure_injected_after_insert_rolls_back() {
     let store = open_store(&dir, clock.clone()).await;
     let db_path = dir.path().join("shepherd.db");
 
-    // Independently committed prior command must survive the later rollback.
     let prior = actor(clock.now(), "prior");
     let prior_insert = prior.clone();
     store

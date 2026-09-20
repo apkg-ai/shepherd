@@ -37,9 +37,8 @@ pub async fn open(options: StoreOptions) -> Result<Store, StorageError> {
     }
     let foreign = || StorageError::ForeignDatabase { path: path.clone() };
 
-    // Header-only identity: any SQLite open of an unidentified file can create
-    // -shm/-wal siblings, so foreign files must be rejected from raw bytes alone.
-    // The post-init checkpoint below guarantees a v1 header from first open on.
+    // Foreign files must be rejected from raw bytes alone: any SQLite open can
+    // create -shm/-wal siblings.
     let fresh = match probe_header(path)? {
         HeaderProbe::Missing | HeaderProbe::Empty => true,
         HeaderProbe::NotSqlite => return Err(foreign()),
@@ -61,8 +60,6 @@ pub async fn open(options: StoreOptions) -> Result<Store, StorageError> {
                 });
             }
             SchemaProbe::MissingMeta | SchemaProbe::Malformed => return Err(foreign()),
-            // Read-only open failed: our own database mid-WAL-recovery after a
-            // crash. The read-write open below performs the legitimate recovery.
             SchemaProbe::Unreadable => {}
         }
     }
@@ -86,8 +83,8 @@ async fn initialize(pool: &SqlitePool, path: &Path, fresh: bool) -> Result<(), S
     verify_identity(pool).await
 }
 
-// A file created between the Missing/Empty header probe and this write open must
-// not be absorbed: the baseline only ever applies to an empty schema.
+// A file appearing between the Missing/Empty header probe and this write open
+// must not be absorbed by the baseline.
 async fn ensure_empty_schema(pool: &SqlitePool, path: &Path) -> Result<(), StorageError> {
     let objects: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlite_master")
         .fetch_one(pool)
@@ -100,8 +97,8 @@ async fn ensure_empty_schema(pool: &SqlitePool, path: &Path) -> Result<(), Stora
     Ok(())
 }
 
-// TRUNCATE checkpoints report reader contention in their result row (busy=1),
-// not as an error; only a landed checkpoint makes the raw header a crash anchor.
+// wal_checkpoint(TRUNCATE) reports reader contention via its result row, not
+// as an error; only a landed checkpoint makes the raw header a crash anchor.
 async fn checkpoint_identity(pool: &SqlitePool, path: &Path) -> Result<(), StorageError> {
     let (busy, _, _) = sqlx::query_as::<_, (i64, i64, i64)>("PRAGMA wal_checkpoint(TRUNCATE)")
         .fetch_one(pool)
@@ -186,10 +183,9 @@ enum SchemaProbe {
         export_version: String,
     },
     MissingMeta,
-    // Read-only open failed (WAL recovery); the RW open below recovers.
+    // Read-only open failed: our own db mid-WAL-recovery; the RW open recovers it.
     Unreadable,
-    // Connected, but the metadata query or decode failed: not a healthy v1
-    // schema, so it must be rejected before the migrator can write anything.
+    // Connected, but the metadata query or decode failed.
     Malformed,
 }
 
@@ -390,8 +386,6 @@ mod tests {
         let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
             .await
             .unwrap();
-        // The init checkpoint must have pushed the header out of the WAL while
-        // the pool is still open; the raw header is the crash-recovery anchor.
         let probe = probe_header(&dir.path().join("shepherd.db")).unwrap();
         assert!(matches!(
             probe,
@@ -418,16 +412,13 @@ mod tests {
             .fetch_one(&mut reader)
             .await
             .unwrap();
-        // A frame the reader predates: the checkpoint cannot land it. (value=value
-        // would be optimized to a no-op with no WAL frame.)
+        // value=value would be optimized to a no-op with no WAL frame.
         sqlx::query("UPDATE command_lock SET value=value+1 WHERE id=1")
             .execute(store.pool())
             .await
             .unwrap();
 
-        // A held read snapshot leaves the header outside the main file: the
-        // checkpoint must report that, not silently claim the anchor landed.
-        // (busy_timeout waits the full 5s before contention is reported.)
+        // busy_timeout waits the full 5s before contention is reported.
         let err = checkpoint_identity(store.pool(), &db_path)
             .await
             .unwrap_err();
@@ -441,8 +432,7 @@ mod tests {
 
     #[tokio::test]
     async fn fresh_open_rejects_a_file_that_appeared_mid_open() {
-        // The race itself cannot be won deterministically; prove the guard that
-        // narrows it: a nonempty schema never receives the baseline migration.
+        // The race cannot be won deterministically; the guard is proven directly.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("late.db");
         create_foreign_db(&path, false).await;
@@ -500,8 +490,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Simulate a crash: main file + hot WAL survive, the shared-memory index
-        // does not, so the next opener must run recovery.
+        // Crash simulation: db + hot WAL survive without the -shm index.
         let crash_dir = tempfile::tempdir().unwrap();
         std::fs::copy(
             dir.path().join("shepherd.db"),
@@ -659,14 +648,13 @@ mod tests {
             store.pool().close().await;
             std::fs::copy(dir.path().join("shepherd.db"), &path).unwrap();
         }
-        // Break sqlite_master's b-tree root page (type flag at offset 100) while
-        // keeping the 100-byte file header — including our application_id — intact.
+        // Break sqlite_master's root page (offset 100) but keep the file header —
+        // including our application_id — intact.
         let mut bytes = std::fs::read(&path).unwrap();
         bytes[100] ^= 0xff;
         std::fs::write(&path, bytes).unwrap();
 
-        // Own-database rejections may leave -shm/-wal siblings from the read-only
-        // probe (normal SQLite reader behavior); the data file stays unmodified.
+        // Only the data file is byte-compared: the read-only probe may leave -shm/-wal siblings.
         let before = std::fs::read(&path).unwrap();
         let Err(err) = open(store_options(dir.path(), "corrupt.db", test_clock())).await else {
             panic!("expected corrupt schema rejection")
@@ -704,8 +692,7 @@ mod tests {
             err,
             StorageError::SchemaMismatch { version: 2, export_version } if export_version == "3.0.0"
         ));
-        // Own database: the read-only schema probe may create -shm/-wal siblings
-        // like any SQLite reader, but the data file itself stays unmodified.
+        // Only the data file is byte-compared: the read-only probe may leave -shm/-wal siblings.
         assert_eq!(std::fs::read(&db_path).unwrap(), before);
     }
 

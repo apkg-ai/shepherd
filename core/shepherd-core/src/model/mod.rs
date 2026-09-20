@@ -44,8 +44,7 @@ macro_rules! typed_uuid {
 typed_uuid!(ActorId);
 typed_uuid!(CommandId);
 
-// Shared ContextV7 keeps IDs generated within one millisecond monotonically
-// ordered; it is not Sync, hence the mutex.
+// ContextV7 is not Sync; the shared context keeps same-millisecond IDs monotonic.
 static V7_CONTEXT: LazyLock<std::sync::Mutex<ContextV7>> =
     LazyLock::new(|| std::sync::Mutex::new(ContextV7::new()));
 
