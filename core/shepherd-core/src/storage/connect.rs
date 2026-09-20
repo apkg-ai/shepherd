@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -64,24 +65,43 @@ pub async fn open(options: StoreOptions) -> Result<Store, StorageError> {
     }
 
     let pool = build_pool(path).await?;
+    let created = if fresh { file_identity(path) } else { None };
     if let Err(err) = initialize(&pool, path, fresh).await {
         pool.close().await;
         // Clean up our failed init; a ForeignDatabase is a foreign file we must not delete.
         if fresh && !matches!(err, StorageError::ForeignDatabase { .. }) {
-            remove_unless_landed(path);
+            remove_unless_landed(path, created);
         }
         return Err(err);
     }
     Ok(Store::new(pool, options.clock, options.codec))
 }
 
+// Release targets are Unix only (plan/13), so dev+ino is a stable file identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileIdentity {
+    dev: u64,
+    ino: u64,
+}
+
+fn file_identity(path: &Path) -> Option<FileIdentity> {
+    std::fs::metadata(path).ok().map(|meta| FileIdentity {
+        dev: meta.dev(),
+        ino: meta.ino(),
+    })
+}
+
 // Keep the db if the close-time checkpoint landed; else remove it and its WAL sidecars.
-fn remove_unless_landed(path: &Path) {
+// Only files this open created are removed: a replacement swapped into the path survives.
+fn remove_unless_landed(path: &Path, created: Option<FileIdentity>) {
     let landed = matches!(
         probe_header(path),
         Ok(HeaderProbe::Sqlite { application_id }) if application_id == APPLICATION_ID
     );
     if landed {
+        return;
+    }
+    if file_identity(path) != created {
         return;
     }
     for suffix in ["", "-wal", "-shm"] {
@@ -687,7 +707,7 @@ mod tests {
             .await
             .unwrap();
         store.pool().close().await;
-        remove_unless_landed(&db_path);
+        remove_unless_landed(&db_path, file_identity(&db_path));
         assert!(db_path.exists());
     }
 
@@ -708,7 +728,7 @@ mod tests {
         std::fs::write(dir.path().join("shepherd.db-wal"), b"stray wal").unwrap();
         std::fs::write(dir.path().join("shepherd.db-shm"), b"stray shm").unwrap();
 
-        remove_unless_landed(&db_path);
+        remove_unless_landed(&db_path, file_identity(&db_path));
         assert!(!db_path.exists());
         assert!(!dir.path().join("shepherd.db-wal").exists());
         assert!(!dir.path().join("shepherd.db-shm").exists());
@@ -722,6 +742,49 @@ mod tests {
             HeaderProbe::Sqlite { application_id } if application_id == APPLICATION_ID
         ));
         store.pool().close().await;
+    }
+
+    #[tokio::test]
+    async fn remove_unless_landed_spares_a_replacement_file() {
+        // The race cannot be won deterministically; the guard is proven directly.
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("shepherd.db");
+        {
+            let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+                .await
+                .unwrap();
+            store.pool().close().await;
+        }
+        let created = file_identity(&db_path);
+        assert!(created.is_some());
+
+        // A foreign file swapped into the path after our init must survive cleanup.
+        std::fs::write(dir.path().join("foreign.db"), b"foreign bytes").unwrap();
+        let foreign_identity = file_identity(&dir.path().join("foreign.db")).unwrap();
+        std::fs::rename(dir.path().join("foreign.db"), &db_path).unwrap();
+
+        remove_unless_landed(&db_path, created);
+        assert_eq!(file_identity(&db_path), Some(foreign_identity));
+        assert_eq!(std::fs::read(&db_path).unwrap(), b"foreign bytes".to_vec());
+    }
+
+    #[tokio::test]
+    async fn remove_unless_landed_spares_files_it_never_proved_owning() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("shepherd.db");
+        std::fs::write(dir.path().join("shepherd.db-wal"), b"stray wal").unwrap();
+
+        // An unlanded db without a captured identity is not provably ours.
+        std::fs::write(&db_path, SQLITE_MAGIC).unwrap();
+        remove_unless_landed(&db_path, None);
+        assert!(db_path.exists());
+        assert!(dir.path().join("shepherd.db-wal").exists());
+
+        // The db missing from the path: surviving sidecars are not provably ours either.
+        let identity = file_identity(&db_path).unwrap();
+        std::fs::remove_file(&db_path).unwrap();
+        remove_unless_landed(&db_path, Some(identity));
+        assert!(dir.path().join("shepherd.db-wal").exists());
     }
 
     #[tokio::test]
