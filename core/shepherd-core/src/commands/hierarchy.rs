@@ -9,7 +9,7 @@ use crate::model::{
     TaskTypeId, TaskTypePatch, TextPatch, validate_long_text, validate_required_text,
     validate_type_key, validate_type_label,
 };
-use crate::queries::hierarchy::{find_goal, find_project, find_task_type};
+use crate::queries::hierarchy::{find_goal, find_project, find_task_type, project_archived};
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store};
 
@@ -155,11 +155,9 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                let parent = find_project(tx, &project)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope_archived = project_archived(tx, &project).await?;
                 require_owner(&actor)?;
-                if parent.archived {
+                if scope_archived {
                     return Err(DomainError::ArchivedScope);
                 }
                 let title = validate_required_text("title", &input.title, NAME_MAX_CHARS)?;
@@ -214,7 +212,7 @@ impl Store {
                     .ok_or(DomainError::NotFound)?;
                 require_owner(&actor)?;
                 require_revision(ctx.expected_revision, current.revision)?;
-                if current.archived {
+                if current.archived || project_archived(tx, &project).await? {
                     return Err(DomainError::ArchivedScope);
                 }
                 let title = match &patch.title {
@@ -269,11 +267,9 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                let parent = find_project(tx, &project)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope_archived = project_archived(tx, &project).await?;
                 require_owner(&actor)?;
-                if parent.archived {
+                if scope_archived {
                     return Err(DomainError::ArchivedScope);
                 }
                 let key = validate_type_key(&input.key)?;
@@ -337,7 +333,7 @@ impl Store {
                     .ok_or(DomainError::NotFound)?;
                 require_owner(&actor)?;
                 require_revision(ctx.expected_revision, current.revision)?;
-                if current.archived {
+                if current.archived || project_archived(tx, &project).await? {
                     return Err(DomainError::ArchivedScope);
                 }
                 let label = match &patch.label {
@@ -650,6 +646,13 @@ mod tests {
         let f = fixture().await;
         let project = project(&f, "P").await;
         let goal = goal(&f, project.id, "G").await;
+        let code_type: TaskTypeId =
+            sqlx::query_scalar("SELECT id FROM task_types WHERE project_id = ?1 AND key = 'code'")
+                .bind(project.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .map(|id: String| id.parse().unwrap())
+                .unwrap();
         sqlx::query(
             "UPDATE projects SET archived = 1, archive_actor_id = ?1, \
              archive_reason = 'wrapped up', archive_created_at = ?2 WHERE id = ?3",
@@ -697,6 +700,59 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, DomainError::ArchivedScope));
+
+        // Live children beneath the archived project are frozen too.
+        let events_before: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        let err = f
+            .store
+            .update_goal(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project.id,
+                goal.id,
+                TextPatch {
+                    title: Some("Renamed".to_string()),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
+        let err = f
+            .store
+            .update_task_type(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project.id,
+                code_type,
+                TaskTypePatch {
+                    label: Some("Renamed".to_string()),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
+        let (goal_revision, goal_title): (i64, String) =
+            sqlx::query_as("SELECT revision, title FROM goals WHERE id = ?1")
+                .bind(goal.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(goal_revision, 1);
+        assert_eq!(goal_title, "G");
+        let type_revisions: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM task_types WHERE revision != 1")
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(type_revisions, 0);
+        let events_after: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(events_after, events_before);
+
         // The goal beneath the archived project is likewise frozen once itself archived.
         sqlx::query(
             "UPDATE goals SET archived = 1, archive_actor_id = ?1, \

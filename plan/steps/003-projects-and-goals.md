@@ -93,4 +93,13 @@ Project/goal create/get/update and full task-type registry parity (seed 6 builti
 - `DuplicateTaskTypeKey` has no contract wire code (plan/07's 409 list lacks a duplicate-key entry); `DomainError::code()` maps it to `validation_error` provisionally, to be settled when step 015 wires HTTP.
 - Three `AssertSqlSafe` sites interpolate compile-time column-list consts only (sqlx 0.9 `SqlSafeStr`).
 
+### Review follow-ups (local self-review, pre-PR)
+
+A high-effort local review of `main...HEAD` produced three findings, all fixed on the branch:
+
+- **Archived-parent guard on updates** [medium ×2]: `update_goal`/`update_task_type` only checked the entity's own `archived` flag, so a live child under an archived project could still be renamed (revision bump + event inside archived scope, violating plan/03). Added `queries::hierarchy::project_archived` (one scalar SELECT; `NotFound` when missing) and use it in all four child-scope commands — updates gained the parent check; creates switched to it from `find_project`, dropping a needless counts GROUP BY while keeping membership→capability→archived precedence. `mutations_beneath_an_archived_project_are_rejected` now also asserts live-goal and live-task-type updates under an archived project return `ArchivedScope` with revisions/events untouched.
+- **Snapshot reads** [low]: pool-backed `get_*`/`list_*` ran the entity SELECT and the epic-counts GROUP BY as two auto-commit statements, so a concurrent commit could pair revision N with counts from N+1 state. The five Store read wrappers now run in a deferred read transaction (plan/05: query helpers take an Executor or read transaction for one snapshot).
+
+Post-fix results: `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` clean; `cargo test --workspace` 115 green; coverage Unit 98.7% / Integration 100% / union 98.7% via the CI llvm-cov commands + `scripts/coverage-report.ts`; `python3 plan/validate.py` PASS.
+
 Next eligible step: [004](004-epics-and-tasks.md).

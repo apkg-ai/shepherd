@@ -196,6 +196,21 @@ pub(crate) async fn project_exists(
         .is_some())
 }
 
+// Shared archived-scope guard: NotFound when missing, true when the project scope is frozen.
+pub(crate) async fn project_archived(
+    conn: &mut SqliteConnection,
+    id: &ProjectId,
+) -> Result<bool, DomainError> {
+    let archived: Option<i64> = sqlx::query_scalar("SELECT archived FROM projects WHERE id = ?1")
+        .bind(id.to_string())
+        .fetch_optional(&mut *conn)
+        .await?;
+    match archived {
+        Some(value) => Ok(parse_flag("projects.archived", value)?),
+        None => Err(DomainError::NotFound),
+    }
+}
+
 pub(crate) async fn find_project(
     conn: &mut SqliteConnection,
     id: &ProjectId,
@@ -354,25 +369,28 @@ pub(crate) async fn list_task_types(
     }))
 }
 
-// Public read surface; downstream never touches the pool directly.
+// Public read surface; downstream never touches the pool directly. Each read runs
+// in a deferred read transaction so the entity row and its counts share one snapshot.
 impl Store {
     pub async fn get_project(&self, id: &ProjectId) -> Result<Project, DomainError> {
-        let mut conn = self.pool().acquire().await.map_err(StorageError::from)?;
-        find_project(&mut conn, id)
-            .await?
-            .ok_or(DomainError::NotFound)
+        let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
+        let found = find_project(&mut tx, id).await?;
+        tx.commit().await.map_err(StorageError::from)?;
+        found.ok_or(DomainError::NotFound)
     }
 
     pub async fn get_goal(&self, project: &ProjectId, goal: &GoalId) -> Result<Goal, DomainError> {
-        let mut conn = self.pool().acquire().await.map_err(StorageError::from)?;
-        find_goal(&mut conn, project, goal)
-            .await?
-            .ok_or(DomainError::NotFound)
+        let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
+        let found = find_goal(&mut tx, project, goal).await?;
+        tx.commit().await.map_err(StorageError::from)?;
+        found.ok_or(DomainError::NotFound)
     }
 
     pub async fn list_projects(&self, params: &ListParams) -> Result<Page<Project>, DomainError> {
-        let mut conn = self.pool().acquire().await.map_err(StorageError::from)?;
-        list_projects(&mut conn, params).await
+        let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
+        let page = list_projects(&mut tx, params).await?;
+        tx.commit().await.map_err(StorageError::from)?;
+        Ok(page)
     }
 
     pub async fn list_goals(
@@ -380,8 +398,10 @@ impl Store {
         project: &ProjectId,
         params: &ListParams,
     ) -> Result<Page<Goal>, DomainError> {
-        let mut conn = self.pool().acquire().await.map_err(StorageError::from)?;
-        list_goals(&mut conn, project, params).await
+        let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
+        let page = list_goals(&mut tx, project, params).await?;
+        tx.commit().await.map_err(StorageError::from)?;
+        Ok(page)
     }
 
     pub async fn list_task_types(
@@ -389,8 +409,10 @@ impl Store {
         project: &ProjectId,
         params: &ListParams,
     ) -> Result<Page<TaskType>, DomainError> {
-        let mut conn = self.pool().acquire().await.map_err(StorageError::from)?;
-        list_task_types(&mut conn, project, params).await
+        let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
+        let page = list_task_types(&mut tx, project, params).await?;
+        tx.commit().await.map_err(StorageError::from)?;
+        Ok(page)
     }
 }
 
