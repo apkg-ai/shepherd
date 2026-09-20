@@ -60,7 +60,7 @@ pub async fn open(options: StoreOptions) -> Result<Store, StorageError> {
                     export_version,
                 });
             }
-            SchemaProbe::MissingMeta => return Err(foreign()),
+            SchemaProbe::MissingMeta | SchemaProbe::Malformed => return Err(foreign()),
             // Read-only open failed: our own database mid-WAL-recovery after a
             // crash. The read-write open below performs the legitimate recovery.
             SchemaProbe::Unreadable => {}
@@ -68,23 +68,55 @@ pub async fn open(options: StoreOptions) -> Result<Store, StorageError> {
     }
 
     let pool = build_pool(path).await?;
-    if let Err(err) = initialize(&pool, fresh).await {
+    if let Err(err) = initialize(&pool, path, fresh).await {
         pool.close().await;
         return Err(err);
     }
     Ok(Store::new(pool, options.clock, options.codec))
 }
 
-async fn initialize(pool: &SqlitePool, fresh: bool) -> Result<(), StorageError> {
+async fn initialize(pool: &SqlitePool, path: &Path, fresh: bool) -> Result<(), StorageError> {
+    if fresh {
+        ensure_empty_schema(pool, path).await?;
+    }
     migrator().run(pool).await?;
     if fresh {
-        // Push the new header (application_id) out of the WAL immediately so the
-        // raw header probe identifies this database even after a later crash.
-        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-            .fetch_optional(pool)
-            .await?;
+        checkpoint_identity(pool, path).await?;
     }
     verify_identity(pool).await
+}
+
+// A file created between the Missing/Empty header probe and this write open must
+// not be absorbed: the baseline only ever applies to an empty schema.
+async fn ensure_empty_schema(pool: &SqlitePool, path: &Path) -> Result<(), StorageError> {
+    let objects: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlite_master")
+        .fetch_one(pool)
+        .await?;
+    if objects != 0 {
+        return Err(StorageError::ForeignDatabase {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(())
+}
+
+// TRUNCATE checkpoints report reader contention in their result row (busy=1),
+// not as an error; only a landed checkpoint makes the raw header a crash anchor.
+async fn checkpoint_identity(pool: &SqlitePool, path: &Path) -> Result<(), StorageError> {
+    let (busy, _, _) = sqlx::query_as::<_, (i64, i64, i64)>("PRAGMA wal_checkpoint(TRUNCATE)")
+        .fetch_one(pool)
+        .await?;
+    let landed = busy == 0
+        && matches!(
+            probe_header(path)?,
+            HeaderProbe::Sqlite { application_id } if application_id == APPLICATION_ID
+        );
+    if !landed {
+        return Err(StorageError::Checkpoint {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(())
 }
 
 fn is_mvp_path(db_path: &Path, configured: Option<&Path>) -> bool {
@@ -154,7 +186,11 @@ enum SchemaProbe {
         export_version: String,
     },
     MissingMeta,
+    // Read-only open failed (WAL recovery); the RW open below recovers.
     Unreadable,
+    // Connected, but the metadata query or decode failed: not a healthy v1
+    // schema, so it must be rejected before the migrator can write anything.
+    Malformed,
 }
 
 async fn probe_schema_meta(path: &Path) -> SchemaProbe {
@@ -172,8 +208,8 @@ async fn probe_schema_meta(path: &Path) -> SchemaProbe {
     .fetch_one(&mut conn)
     .await;
     let probe = match has_table {
-        Err(_) => SchemaProbe::Unreadable,
         Ok(0) => SchemaProbe::MissingMeta,
+        Err(_) => SchemaProbe::Malformed,
         Ok(_) => {
             match sqlx::query_as::<_, (i64, String)>(
                 "SELECT version, export_version FROM schema_meta",
@@ -191,7 +227,7 @@ async fn probe_schema_meta(path: &Path) -> SchemaProbe {
                     export_version,
                 },
                 Ok(None) => SchemaProbe::MissingMeta,
-                Err(_) => SchemaProbe::Unreadable,
+                Err(_) => SchemaProbe::Malformed,
             }
         }
     };
@@ -362,6 +398,60 @@ mod tests {
             HeaderProbe::Sqlite { application_id } if application_id == APPLICATION_ID
         ));
         store.pool().close().await;
+    }
+
+    #[tokio::test]
+    async fn contended_checkpoint_fails_loudly_and_lands_when_readers_release() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("shepherd.db");
+        let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+            .await
+            .unwrap();
+        let mut reader = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .read_only(true)
+            .connect()
+            .await
+            .unwrap();
+        sqlx::query("BEGIN").execute(&mut reader).await.unwrap();
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sqlite_master")
+            .fetch_one(&mut reader)
+            .await
+            .unwrap();
+        // A frame the reader predates: the checkpoint cannot land it. (value=value
+        // would be optimized to a no-op with no WAL frame.)
+        sqlx::query("UPDATE command_lock SET value=value+1 WHERE id=1")
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        // A held read snapshot leaves the header outside the main file: the
+        // checkpoint must report that, not silently claim the anchor landed.
+        // (busy_timeout waits the full 5s before contention is reported.)
+        let err = checkpoint_identity(store.pool(), &db_path)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StorageError::Checkpoint { .. }));
+
+        sqlx::query("COMMIT").execute(&mut reader).await.unwrap();
+        reader.close().await.unwrap();
+        checkpoint_identity(store.pool(), &db_path).await.unwrap();
+        store.pool().close().await;
+    }
+
+    #[tokio::test]
+    async fn fresh_open_rejects_a_file_that_appeared_mid_open() {
+        // The race itself cannot be won deterministically; prove the guard that
+        // narrows it: a nonempty schema never receives the baseline migration.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("late.db");
+        create_foreign_db(&path, false).await;
+        let pool = build_pool(&path).await.unwrap();
+        let Err(err) = ensure_empty_schema(&pool, &path).await else {
+            panic!("expected mid-open file rejection")
+        };
+        assert!(matches!(err, StorageError::ForeignDatabase { path: p } if p == path));
+        pool.close().await;
     }
 
     #[tokio::test]
@@ -538,6 +628,51 @@ mod tests {
             .unwrap();
         conn.close().await.unwrap();
         assert_rejected_without_byte_changes(dir.path(), "claimed.db").await;
+    }
+
+    #[tokio::test]
+    async fn matching_id_with_malformed_schema_meta_is_rejected_without_byte_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("claimed.db");
+        create_foreign_db(&path, false).await;
+        let mut conn = SqliteConnectOptions::new()
+            .filename(&path)
+            .connect()
+            .await
+            .unwrap();
+        sqlx::raw_sql("PRAGMA application_id=1397248068; CREATE TABLE schema_meta(junk TEXT);")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        conn.close().await.unwrap();
+        assert_rejected_without_byte_changes(dir.path(), "claimed.db").await;
+    }
+
+    #[tokio::test]
+    async fn matching_id_with_corrupt_schema_is_rejected_without_byte_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("corrupt.db");
+        {
+            let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+                .await
+                .unwrap();
+            store.pool().close().await;
+            std::fs::copy(dir.path().join("shepherd.db"), &path).unwrap();
+        }
+        // Break sqlite_master's b-tree root page (type flag at offset 100) while
+        // keeping the 100-byte file header — including our application_id — intact.
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[100] ^= 0xff;
+        std::fs::write(&path, bytes).unwrap();
+
+        // Own-database rejections may leave -shm/-wal siblings from the read-only
+        // probe (normal SQLite reader behavior); the data file stays unmodified.
+        let before = std::fs::read(&path).unwrap();
+        let Err(err) = open(store_options(dir.path(), "corrupt.db", test_clock())).await else {
+            panic!("expected corrupt schema rejection")
+        };
+        assert!(matches!(err, StorageError::ForeignDatabase { .. }));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
     }
 
     #[tokio::test]

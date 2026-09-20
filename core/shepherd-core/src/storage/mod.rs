@@ -1,5 +1,8 @@
 mod connect;
+#[cfg(any(test, feature = "test-support"))]
 pub mod rows;
+#[cfg(not(any(test, feature = "test-support")))]
+pub(crate) mod rows;
 mod transaction;
 
 pub use connect::{APPLICATION_ID, EXPORT_VERSION, SCHEMA_VERSION, StoreOptions, open};
@@ -28,7 +31,15 @@ impl Store {
         Self { pool, clock, codec }
     }
 
+    // Writable pool access stays crate-internal in production builds so downstream
+    // crates cannot bypass command_transaction's reservation invariant.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    pub(crate) fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
@@ -47,6 +58,8 @@ pub enum StorageError {
     MvpDatabase { path: PathBuf },
     #[error("foreign or nonempty non-v1 database at {path}; refusing to open or modify it")]
     ForeignDatabase { path: PathBuf },
+    #[error("initialization checkpoint did not reach the database header at {path}")]
+    Checkpoint { path: PathBuf },
     #[error("schema identity mismatch: version {version}, export_version {export_version}")]
     SchemaMismatch {
         version: i64,
