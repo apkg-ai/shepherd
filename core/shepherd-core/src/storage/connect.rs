@@ -37,8 +37,7 @@ pub async fn open(options: StoreOptions) -> Result<Store, StorageError> {
     }
     let foreign = || StorageError::ForeignDatabase { path: path.clone() };
 
-    // Foreign files must be rejected from raw bytes alone: any SQLite open can
-    // create -shm/-wal siblings.
+    // Foreign files are rejected from raw bytes: any SQLite open can create -shm/-wal siblings.
     let fresh = match probe_header(path)? {
         HeaderProbe::Missing | HeaderProbe::Empty => true,
         HeaderProbe::NotSqlite => return Err(foreign()),
@@ -83,8 +82,7 @@ async fn initialize(pool: &SqlitePool, path: &Path, fresh: bool) -> Result<(), S
     verify_identity(pool).await
 }
 
-// A file appearing between the Missing/Empty header probe and this write open
-// must not be absorbed by the baseline.
+// A file appearing between the header probe and this write must not receive the baseline.
 async fn ensure_empty_schema(pool: &SqlitePool, path: &Path) -> Result<(), StorageError> {
     let objects: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlite_master")
         .fetch_one(pool)
@@ -97,8 +95,7 @@ async fn ensure_empty_schema(pool: &SqlitePool, path: &Path) -> Result<(), Stora
     Ok(())
 }
 
-// wal_checkpoint(TRUNCATE) reports reader contention via its result row, not
-// as an error; only a landed checkpoint makes the raw header a crash anchor.
+// wal_checkpoint(TRUNCATE) reports contention via its result row, not an error.
 async fn checkpoint_identity(pool: &SqlitePool, path: &Path) -> Result<(), StorageError> {
     let (busy, _, _) = sqlx::query_as::<_, (i64, i64, i64)>("PRAGMA wal_checkpoint(TRUNCATE)")
         .fetch_one(pool)
@@ -648,8 +645,7 @@ mod tests {
             store.pool().close().await;
             std::fs::copy(dir.path().join("shepherd.db"), &path).unwrap();
         }
-        // Break sqlite_master's root page (offset 100) but keep the file header —
-        // including our application_id — intact.
+        // Break sqlite_master's root page (offset 100), keeping the file header intact.
         let mut bytes = std::fs::read(&path).unwrap();
         bytes[100] ^= 0xff;
         std::fs::write(&path, bytes).unwrap();

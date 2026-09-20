@@ -5,13 +5,11 @@ use sqlx::{Sqlite, Transaction};
 
 use super::{StorageError, Store};
 
-// Boxed rather than AsyncFnOnce: spawned callers trip rustc's "implementation of
-// AsyncFnOnce is not general enough" higher-ranked inference limit.
+// Boxed, not AsyncFnOnce: spawned callers trip rustc's AsyncFnOnce "not general enough" limit.
 pub type TxFuture<'t, T> = Pin<Box<dyn Future<Output = Result<T, StorageError>> + Send + 't>>;
 
 impl Store {
-    // Write reservation before any reads (plan/05): the no-op UPDATE upgrades the
-    // deferred BEGIN to SQLite's write lock so concurrent commands serialize.
+    // Write reservation before reads (plan/05): the no-op UPDATE upgrades BEGIN to a write lock.
     pub async fn command_transaction<T, F>(&self, command: F) -> Result<T, StorageError>
     where
         F: for<'t> FnOnce(&'t mut Transaction<'static, Sqlite>) -> TxFuture<'t, T>,

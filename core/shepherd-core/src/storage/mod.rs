@@ -31,8 +31,7 @@ impl Store {
         Self { pool, clock, codec }
     }
 
-    // crate-internal in production: downstream crates must not bypass
-    // command_transaction's reservation.
+    // crate-internal in production: downstream crates must not bypass command_transaction.
     #[cfg(any(test, feature = "test-support"))]
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
