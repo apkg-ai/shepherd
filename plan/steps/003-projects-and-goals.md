@@ -1,6 +1,6 @@
 # 003 — Project and goal ownership
 
-Status: not started. Requirements: HIER-01 HIER-02.
+Status: implemented on branch `v1-003-projects-and-goals` (PR pending). Requirements: HIER-01 HIER-02.
 
 ## Objective and prerequisites
 
@@ -58,13 +58,39 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Completion checklist
 
-- [ ] Referenced requirements and every acceptance sentence implemented.
-- [ ] Schemas, permissions, transitions and clients remain consistent.
-- [ ] Success and rejection behavior verified at the public boundary.
-- [ ] Required commands pass; material environmental limitation recorded accurately.
-- [ ] Temporary code and next-step dependencies documented.
-- [ ] Handoff below completed; next eligible step linked.
+- [x] Referenced requirements and every acceptance sentence implemented.
+- [x] Schemas, permissions, transitions and clients remain consistent.
+- [x] Success and rejection behavior verified at the public boundary.
+- [x] Required commands pass; material environmental limitation recorded accurately.
+- [x] Temporary code and next-step dependencies documented.
+- [x] Handoff below completed; next eligible step linked.
 
 ## Implementation handoff record
 
-Fill when implementing, not during planning: commit/branch; files changed; test commands and results; any reproduced limitation; temporary interfaces; next eligible step IDs. If an acceptance criterion cannot pass, leave this step incomplete and explain the concrete blocker. Do not mark complete for code that merely compiles.
+Branch `v1-003-projects-and-goals` (PR pending).
+
+### Files changed
+
+- New: `core/shepherd-core/src/{error.rs, model/project.rs, model/goal.rs, commands/mod.rs, commands/hierarchy.rs, queries/mod.rs, queries/hierarchy.rs}`, `core/shepherd-core/tests/v1_projects_and_goals.rs`.
+- Amended: `lib.rs`/`model/mod.rs` (module declarations, shared `Counts`/`LifecycleRecord`/`EventId`/text validators, `typed_uuid!` re-export), `storage/transaction.rs` (extracted `begin_command` so `domain_transaction` shares the write reservation; `command_transaction` behavior unchanged), `core/shepherd-core/Cargo.toml` + `core/Cargo.lock`, `plan/dependencies.md` (serde =1.0.229 derive, serde_json =1.0.151, base64 =0.23.1 — all versions already in the lockfile).
+
+### What was built
+
+Project/goal create/get/update and full task-type registry parity (seed 6 builtins atomically in createProject; createTaskType/listTaskTypes/updateTaskType, label rename only) as `impl Store` domain commands/queries. `CommandContext`/`CommandResult` per plan/05; inside each command transaction: actor revocation recheck → route membership → owner capability → `expected_revision` (None → `precondition_required`, mismatch → `revision_conflict`) → archived-scope guard → content validity → writes → events (one command_id, ordered resource-kind-then-UUID, same tx). `DomainError` in `error.rs` with stable Problem code strings. Cursor codec: base64url(no-pad) JSON `{v,e,f,c,i}` binding endpoint + normalized filter fingerprint; mismatch/tamper → `invalid_cursor`. Lists: created_at ASC, id ASC keyset paging (limit default 50/max 200, fetch limit+1, next_cursor omitted at end), archived excluded unless `include_archived`, counts via one batched GROUP BY over `epics` (returns zeros now); `Goal.completed` derived (`total > 0 && done == total`).
+
+### Test commands and results (Rust 1.98.1)
+
+- From `core/`: `cargo fmt --check` — clean; `cargo test --workspace` — 115 green (80 shepherd-core unit incl. in-module command/query suites, 12 `v1_projects_and_goals`, 13 `v1_storage_foundation`, 10 retained server); `cargo clippy --all-targets -- -D warnings` — clean; `cargo test --workspace --doc` — clean. Exit codes checked directly, never piped.
+- Coverage via the CI llvm-cov commands + `node scripts/coverage-report.ts --report core --dir core/coverage`: Unit 98.7% (≥95) ✅, Integration 100.0% (≥70) ✅, union 98.7% (≥92) ✅.
+- `python3 plan/validate.py` — PASS (29 step DAG, 70 operations), rerun after this document update.
+- Every acceptance sentence has a named regression test: `owner_creates_project_and_two_goals`, `agent_cannot_create_project_or_goal`, `empty_goal_reports_zero_counts_and_not_completed`, `duplicate_task_type_key_fails`, `cursor_reused_with_different_filter_fails`, `cross_project_goal_get_returns_not_found`; plus `stale_revision_leaves_resource_unchanged`, `update_bumps_revision_exactly_once`, `goal_pages_round_trip_with_cursor`, `invalid_input_is_rejected_without_writes`, `two_pools_serialize_goal_creation` (two independent pools on one file), `include_archived_filter_controls_visibility`. Persisted-state checks use an independent read-only connection; mutation failures proven to leave rows/revisions/events untouched.
+
+### Limitations and temporary interfaces
+
+- Idempotency replay and post-commit notify are not wired: `CommandContext.idempotency_key` is carried but unused until the real codec (007) and events/notifier steps; `domain_transaction` does reservation → checks → writes → events → single commit only.
+- `TaskTypePatch` has no `archived` field: archive/unarchive of registry entries is step 008 ("archived type cannot be assigned" semantics land there). Archived entries reject label renames (`ArchivedScope`).
+- The archived-scope guard on project/goal/task-type mutations is dormant — no public command can archive until step 006 — and is exercised via direct-SQL fixtures.
+- `DuplicateTaskTypeKey` has no contract wire code (plan/07's 409 list lacks a duplicate-key entry); `DomainError::code()` maps it to `validation_error` provisionally, to be settled when step 015 wires HTTP.
+- Three `AssertSqlSafe` sites interpolate compile-time column-list consts only (sqlx 0.9 `SqlSafeStr`).
+
+Next eligible step: [004](004-epics-and-tasks.md).

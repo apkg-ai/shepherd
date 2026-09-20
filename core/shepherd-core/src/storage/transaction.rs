@@ -10,10 +10,7 @@ pub type TxFuture<'t, T> = Pin<Box<dyn Future<Output = Result<T, StorageError>> 
 
 impl Store {
     // Write reservation before reads (plan/05): the no-op UPDATE upgrades BEGIN to a write lock.
-    pub async fn command_transaction<T, F>(&self, command: F) -> Result<T, StorageError>
-    where
-        F: for<'t> FnOnce(&'t mut Transaction<'static, Sqlite>) -> TxFuture<'t, T>,
-    {
+    pub(crate) async fn begin_command(&self) -> Result<Transaction<'static, Sqlite>, StorageError> {
         let mut tx = self.pool().begin().await?;
         let reserved = sqlx::query("UPDATE command_lock SET value=value WHERE id=1")
             .execute(&mut *tx)
@@ -24,6 +21,14 @@ impl Store {
                 "command_lock row missing; write serialization unavailable".into(),
             ));
         }
+        Ok(tx)
+    }
+
+    pub async fn command_transaction<T, F>(&self, command: F) -> Result<T, StorageError>
+    where
+        F: for<'t> FnOnce(&'t mut Transaction<'static, Sqlite>) -> TxFuture<'t, T>,
+    {
+        let mut tx = self.begin_command().await?;
         match command(&mut tx).await {
             Ok(value) => {
                 tx.commit().await?;

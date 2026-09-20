@@ -13,6 +13,9 @@ Retain current package manifests and lockfiles for existing functionality. New a
 | fs2 | =0.4.3 | Cross-process daemon file lock | [Crate documentation](https://docs.rs/fs2/0.4.3/fs2/) |
 | subtle | =2.6.1 | Constant-time credential digest comparison | Verify via pinned crate resolution; no custom crypto comparison |
 | tracing | =0.1.44 | Structured diagnostic events; existing lockfile version | core/Cargo.lock inspected |
+| serde | =1.0.229, features=[derive] | ProjectSettings snapshot and cursor payload (de)serialization | version already in lockfile; core/Cargo.lock inspected |
+| serde_json | =1.0.151 | Settings/affected_ids JSON text and cursor payloads | version already in lockfile; core/Cargo.lock inspected |
+| base64 | =0.23.1 | base64url no-pad cursor codec | version already in lockfile; core/Cargo.lock inspected |
 
 Use an internal tracing Subscriber that writes the documented JSON log fields if no subscriber is already available; no tracing-subscriber dependency is needed for v1's fixed format. Use rmcp's schemars re-export rather than independently choosing another version. Existing clap handles CLI arguments. Add Tokio io-std/io-util/signal features where required. The new crates are selected; this documentation task does not install or compile them. Owner step must resolve lockfile and prove compatibility on Rust 1.98.1 before merging. Do not silently substitute another SDK/framework on failure; document a reproduced incompatibility.
 
