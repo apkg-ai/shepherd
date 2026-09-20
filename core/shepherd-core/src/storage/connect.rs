@@ -725,6 +725,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn contended_fresh_init_is_cleaned_up_and_retryable() {
+        // The reader must snapshot after the WAL conversion (earlier would block
+        // build_pool) but before the baseline commit, so it cannot be scheduled
+        // deterministically; retry the whole first-open until it truly contends.
+        for _ in 0..5 {
+            let dir = tempfile::tempdir().unwrap();
+            let db_path = dir.path().join("shepherd.db");
+            let wal_path = dir.path().join("shepherd.db-wal");
+            let reader = tokio::spawn({
+                let (db_path, wal_path) = (db_path.clone(), wal_path.clone());
+                async move {
+                    while !wal_path.exists() {
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                    let mut conn = SqliteConnectOptions::new()
+                        .filename(&db_path)
+                        .read_only(true)
+                        .connect()
+                        .await
+                        .unwrap();
+                    sqlx::query("BEGIN").execute(&mut conn).await.unwrap();
+                    sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sqlite_master")
+                        .fetch_one(&mut conn)
+                        .await
+                        .unwrap();
+                    // Hold the snapshot far beyond the checkpoint's busy_timeout.
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+            });
+
+            match open(store_options(dir.path(), "shepherd.db", test_clock())).await {
+                Err(StorageError::Checkpoint { .. }) => {
+                    reader.abort();
+                    assert!(!db_path.exists());
+                    assert!(!wal_path.exists());
+                    assert!(!dir.path().join("shepherd.db-shm").exists());
+
+                    let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+                        .await
+                        .unwrap();
+                    let probe = probe_header(&db_path).unwrap();
+                    assert!(matches!(
+                        probe,
+                        HeaderProbe::Sqlite { application_id } if application_id == APPLICATION_ID
+                    ));
+                    store.pool().close().await;
+                    return;
+                }
+                Ok(store) => {
+                    store.pool().close().await;
+                    reader.abort();
+                }
+                Err(other) => panic!("unexpected open error: {other:?}"),
+            }
+        }
+        panic!("could not trigger checkpoint contention in 5 attempts");
+    }
+
+    #[tokio::test]
     async fn newer_schema_meta_is_rejected_without_byte_changes() {
         let dir = tempfile::tempdir().unwrap();
         {
