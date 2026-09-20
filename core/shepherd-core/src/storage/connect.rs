@@ -762,10 +762,26 @@ mod tests {
         std::fs::write(dir.path().join("foreign.db"), b"foreign bytes").unwrap();
         let foreign_identity = file_identity(&dir.path().join("foreign.db")).unwrap();
         std::fs::rename(dir.path().join("foreign.db"), &db_path).unwrap();
+        std::fs::write(dir.path().join("shepherd.db-wal"), b"stray wal").unwrap();
+        std::fs::write(dir.path().join("shepherd.db-shm"), b"stray shm").unwrap();
 
         remove_unless_landed(&db_path, created);
         assert_eq!(file_identity(&db_path), Some(foreign_identity));
         assert_eq!(std::fs::read(&db_path).unwrap(), b"foreign bytes".to_vec());
+        assert_eq!(
+            std::fs::read(dir.path().join("shepherd.db-wal")).unwrap(),
+            b"stray wal".to_vec()
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("shepherd.db-shm")).unwrap(),
+            b"stray shm".to_vec()
+        );
+
+        // The spared foreign file is then rejected by the next open, not absorbed.
+        let Err(err) = open(store_options(dir.path(), "shepherd.db", test_clock())).await else {
+            panic!("expected foreign database rejection")
+        };
+        assert!(matches!(err, StorageError::ForeignDatabase { .. }));
     }
 
     #[tokio::test]
