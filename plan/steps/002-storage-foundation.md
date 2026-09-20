@@ -137,4 +137,10 @@ Three actionable findings, one question, all adjudicated against the current tre
 
 Post-round results: `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` clean; `cargo test --workspace` 66 tests green (43 shepherd-core unit, 13 `v1_storage_foundation`, 10 retained server incl. boot); coverage Unit 98.2% (≥95) ✅ / Integration 100.0% (≥70) ✅ / union 98.3% (≥92) ✅ via the CI llvm-cov commands + `scripts/coverage-report.ts`; `python3 plan/validate.py` PASS.
 
+### Review follow-ups, round 3 (CodeRabbit on PR #83, commit `d79fa64`)
+
+- **Failed fresh init is retryable** [Minor]: a Checkpoint (or any non-foreign) init failure left a baseline-applied file whose id-less raw header every retry rejected as `foreign_database` — permanently unopenable. `open()` now closes the pool first (SQLite's last-connection checkpoint often lands the header), keeps a landed database, and otherwise removes the fresh db and its `-wal`/`-shm` sidecars so a retry of `open` starts clean; a `ForeignDatabase` from the mid-open guard never deletes the foreign file. Rejected the suggested in-`open` checkpoint retry: the pool's 5 s `busy_timeout` already makes each attempt wait out transient readers. Named tests: `remove_unless_landed_keeps_a_landed_database`, `remove_unless_landed_clears_an_unlanded_init_for_a_clean_retry` (simulates the failed-init bytes, asserts sidecar removal and a clean retry).
+
+Post-round results: `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` clean; `cargo test --workspace` 68 tests green; coverage Unit 98.2% (≥95) ✅ / Integration 100.0% (≥70) ✅ / union 98.3% (≥92) ✅.
+
 Next eligible step: 003.

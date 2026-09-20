@@ -66,9 +66,29 @@ pub async fn open(options: StoreOptions) -> Result<Store, StorageError> {
     let pool = build_pool(path).await?;
     if let Err(err) = initialize(&pool, path, fresh).await {
         pool.close().await;
+        // Clean up our failed init; a ForeignDatabase is a foreign file we must not delete.
+        if fresh && !matches!(err, StorageError::ForeignDatabase { .. }) {
+            remove_unless_landed(path);
+        }
         return Err(err);
     }
     Ok(Store::new(pool, options.clock, options.codec))
+}
+
+// Keep the db if the close-time checkpoint landed; else remove it and its WAL sidecars.
+fn remove_unless_landed(path: &Path) {
+    let landed = matches!(
+        probe_header(path),
+        Ok(HeaderProbe::Sqlite { application_id }) if application_id == APPLICATION_ID
+    );
+    if landed {
+        return;
+    }
+    for suffix in ["", "-wal", "-shm"] {
+        let mut sidecar = path.as_os_str().to_owned();
+        sidecar.push(suffix);
+        let _ = std::fs::remove_file(Path::new(&sidecar));
+    }
 }
 
 async fn initialize(pool: &SqlitePool, path: &Path, fresh: bool) -> Result<(), StorageError> {
@@ -657,6 +677,51 @@ mod tests {
         };
         assert!(matches!(err, StorageError::ForeignDatabase { .. }));
         assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn remove_unless_landed_keeps_a_landed_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("shepherd.db");
+        let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+            .await
+            .unwrap();
+        store.pool().close().await;
+        remove_unless_landed(&db_path);
+        assert!(db_path.exists());
+    }
+
+    #[tokio::test]
+    async fn remove_unless_landed_clears_an_unlanded_init_for_a_clean_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("shepherd.db");
+        {
+            let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+                .await
+                .unwrap();
+            store.pool().close().await;
+        }
+        // Simulate a failed init: baseline applied, raw header still without the id.
+        let mut bytes = std::fs::read(&db_path).unwrap();
+        bytes[APPLICATION_ID_OFFSET..APPLICATION_ID_OFFSET + 4].fill(0);
+        std::fs::write(&db_path, bytes).unwrap();
+        std::fs::write(dir.path().join("shepherd.db-wal"), b"stray wal").unwrap();
+        std::fs::write(dir.path().join("shepherd.db-shm"), b"stray shm").unwrap();
+
+        remove_unless_landed(&db_path);
+        assert!(!db_path.exists());
+        assert!(!dir.path().join("shepherd.db-wal").exists());
+        assert!(!dir.path().join("shepherd.db-shm").exists());
+
+        let store = open(store_options(dir.path(), "shepherd.db", test_clock()))
+            .await
+            .unwrap();
+        let probe = probe_header(&db_path).unwrap();
+        assert!(matches!(
+            probe,
+            HeaderProbe::Sqlite { application_id } if application_id == APPLICATION_ID
+        ));
+        store.pool().close().await;
     }
 
     #[tokio::test]

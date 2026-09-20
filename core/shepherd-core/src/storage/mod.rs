@@ -57,7 +57,7 @@ pub enum StorageError {
     MvpDatabase { path: PathBuf },
     #[error("foreign or nonempty non-v1 database at {path}; refusing to open or modify it")]
     ForeignDatabase { path: PathBuf },
-    #[error("initialization checkpoint did not reach the database header at {path}")]
+    #[error("initialization checkpoint did not complete; retry the open: {path}")]
     Checkpoint { path: PathBuf },
     #[error("schema identity mismatch: version {version}, export_version {export_version}")]
     SchemaMismatch {
