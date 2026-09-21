@@ -211,7 +211,8 @@ pub(crate) async fn project_archived(
     }
 }
 
-pub(crate) async fn find_project(
+// Row-only selectors for mutation guard loads: no epic-counts GROUP BY on the write path.
+pub(crate) async fn project_row(
     conn: &mut SqliteConnection,
     id: &ProjectId,
 ) -> Result<Option<Project>, DomainError> {
@@ -219,20 +220,27 @@ pub(crate) async fn find_project(
     let query = AssertSqlSafe(format!(
         "SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1"
     ));
-    let row = sqlx::query(query)
+    sqlx::query(query)
         .bind(id.to_string())
         .fetch_optional(&mut *conn)
-        .await?;
-    let Some(row) = row else {
+        .await?
+        .map(|row| project_from_row(&row))
+        .transpose()
+}
+
+pub(crate) async fn find_project(
+    conn: &mut SqliteConnection,
+    id: &ProjectId,
+) -> Result<Option<Project>, DomainError> {
+    let Some(mut project) = project_row(conn, id).await? else {
         return Ok(None);
     };
-    let mut project = project_from_row(&row)?;
     attach_project_counts(conn, std::slice::from_mut(&mut project)).await?;
     Ok(Some(project))
 }
 
-// Scoped by project so a cross-project id never leaks another project's goal.
-pub(crate) async fn find_goal(
+// Row-only, scoped by project so a cross-project id never leaks another project's goal.
+pub(crate) async fn goal_row(
     conn: &mut SqliteConnection,
     project: &ProjectId,
     goal: &GoalId,
@@ -240,15 +248,23 @@ pub(crate) async fn find_goal(
     let query = AssertSqlSafe(format!(
         "SELECT {GOAL_COLUMNS} FROM goals WHERE id = ?1 AND project_id = ?2"
     ));
-    let row = sqlx::query(query)
+    sqlx::query(query)
         .bind(goal.to_string())
         .bind(project.to_string())
         .fetch_optional(&mut *conn)
-        .await?;
-    let Some(row) = row else {
+        .await?
+        .map(|row| goal_from_row(&row))
+        .transpose()
+}
+
+pub(crate) async fn find_goal(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    goal: &GoalId,
+) -> Result<Option<Goal>, DomainError> {
+    let Some(mut goal) = goal_row(conn, project, goal).await? else {
         return Ok(None);
     };
-    let mut goal = goal_from_row(&row)?;
     attach_goal_counts(conn, std::slice::from_mut(&mut goal)).await?;
     Ok(Some(goal))
 }

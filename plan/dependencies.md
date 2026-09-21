@@ -7,11 +7,11 @@ Retain current package manifests and lockfiles for existing functionality. New a
 | reqwest | =0.13.5, default-features=false, features=[json] | Shared Rust local REST client | [Crate documentation](https://docs.rs/reqwest/0.13.5/reqwest/) |
 | rmcp | =3.3.0, default-features=false, features=[server,macros,transport-io,schemars] | Official Rust stdio MCP server | [Crate documentation](https://docs.rs/rmcp/3.3.0/rmcp/) |
 | react-markdown | 10.1.0 | Safe Markdown preview without raw HTML | [Release](https://github.com/remarkjs/react-markdown/releases/tag/10.1.0) |
-| getrandom | =0.3.4 | Random token bytes; version already in lockfile | core/Cargo.lock inspected |
-| sha2 | =0.10.9 | Credential/request hashes; existing lockfile version | core/Cargo.lock inspected |
+| getrandom | =0.3.4 | Random token bytes; per-process cursor-MAC key; version already in lockfile | core/Cargo.lock inspected |
+| sha2 | =0.10.9 | Credential/request hashes; cursor payload HMAC-SHA256 (RFC 4231 construction); existing lockfile version | core/Cargo.lock inspected |
 | aes-gcm | =0.10.3 | Encrypted idempotency response cache | [Crate documentation](https://docs.rs/aes-gcm/0.10.3/aes_gcm/) |
 | fs2 | =0.4.3 | Cross-process daemon file lock | [Crate documentation](https://docs.rs/fs2/0.4.3/fs2/) |
-| subtle | =2.6.1 | Constant-time credential digest comparison | Verify via pinned crate resolution; no custom crypto comparison |
+| subtle | =2.6.1 | Constant-time credential digest and cursor-MAC comparison | Verify via pinned crate resolution; no custom crypto comparison |
 | tracing | =0.1.44 | Structured diagnostic events; existing lockfile version | core/Cargo.lock inspected |
 | serde | =1.0.229, features=[derive] | ProjectSettings snapshot and cursor payload (de)serialization | version already in lockfile; core/Cargo.lock inspected |
 | serde_json | =1.0.151 | Settings/affected_ids JSON text and cursor payloads | version already in lockfile; core/Cargo.lock inspected |

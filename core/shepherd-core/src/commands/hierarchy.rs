@@ -9,7 +9,9 @@ use crate::model::{
     TaskTypeId, TaskTypePatch, TextPatch, validate_long_text, validate_required_text,
     validate_type_key, validate_type_label,
 };
-use crate::queries::hierarchy::{find_goal, find_project, find_task_type, project_archived};
+use crate::queries::hierarchy::{
+    find_goal, find_project, find_task_type, goal_row, project_archived, project_row,
+};
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store};
 
@@ -93,13 +95,19 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                let current = find_project(tx, &project)
+                let current = project_row(tx, &project)
                     .await?
                     .ok_or(DomainError::NotFound)?;
                 require_owner(&actor)?;
                 require_revision(ctx.expected_revision, current.revision)?;
                 if current.archived {
                     return Err(DomainError::ArchivedScope);
+                }
+                if patch.name.is_none() && patch.description.is_none() && patch.settings.is_none() {
+                    return Err(DomainError::Validation {
+                        field: "patch",
+                        message: "at least one field must be provided".into(),
+                    });
                 }
                 let name = match &patch.name {
                     Some(value) => validate_required_text("name", value, NAME_MAX_CHARS)?,
@@ -207,13 +215,19 @@ impl Store {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 // Membership precedes the revision check: a foreign goal is 404, never 412.
-                let current = find_goal(tx, &project, &goal)
+                let current = goal_row(tx, &project, &goal)
                     .await?
                     .ok_or(DomainError::NotFound)?;
                 require_owner(&actor)?;
                 require_revision(ctx.expected_revision, current.revision)?;
                 if current.archived || project_archived(tx, &project).await? {
                     return Err(DomainError::ArchivedScope);
+                }
+                if patch.title.is_none() && patch.description.is_none() {
+                    return Err(DomainError::Validation {
+                        field: "patch",
+                        message: "at least one field must be provided".into(),
+                    });
                 }
                 let title = match &patch.title {
                     Some(value) => validate_required_text("title", value, NAME_MAX_CHARS)?,
@@ -335,6 +349,12 @@ impl Store {
                 require_revision(ctx.expected_revision, current.revision)?;
                 if current.archived || project_archived(tx, &project).await? {
                     return Err(DomainError::ArchivedScope);
+                }
+                if patch.label.is_none() {
+                    return Err(DomainError::Validation {
+                        field: "patch",
+                        message: "at least one field must be provided".into(),
+                    });
                 }
                 let label = match &patch.label {
                     Some(value) => validate_type_label(value)?,
@@ -626,8 +646,12 @@ mod tests {
         assert_eq!(updated.name, "P2");
         assert_eq!(updated.updated_at, f.clock.now());
 
-        // An empty patch is still a command: apply and bump exactly once.
-        let bumped = f
+        // An all-None patch is rejected: no revision bump, no event.
+        let events_before: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        let err = f
             .store
             .update_project(
                 ctx(&f.owner, &f.clock, Some(2)),
@@ -635,10 +659,24 @@ mod tests {
                 ProjectPatch::default(),
             )
             .await
-            .unwrap()
-            .value;
-        assert_eq!(bumped.revision.value(), 3);
-        assert_eq!(bumped.name, "P2");
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation { field: "patch", .. }
+        ));
+        let (revision, name): (i64, String) =
+            sqlx::query_as("SELECT revision, name FROM projects WHERE id = ?1")
+                .bind(project.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(revision, 2);
+        assert_eq!(name, "P2");
+        let events_after: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(events_after, events_before);
     }
 
     #[tokio::test]
@@ -864,6 +902,72 @@ mod tests {
         assert_eq!(updated.revision.value(), 2);
         assert_eq!(updated.title, "Renamed");
         assert_eq!(updated.description, "body");
+    }
+
+    #[tokio::test]
+    async fn empty_patches_are_rejected_without_writes() {
+        let f = fixture().await;
+        let project = project(&f, "P").await;
+        let goal = goal(&f, project.id, "G").await;
+        let code_type: TaskTypeId =
+            sqlx::query_scalar("SELECT id FROM task_types WHERE project_id = ?1 AND key = 'code'")
+                .bind(project.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .map(|id: String| id.parse().unwrap())
+                .unwrap();
+
+        let events_before: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        let goal_err = f
+            .store
+            .update_goal(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project.id,
+                goal.id,
+                TextPatch::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            goal_err,
+            DomainError::Validation { field: "patch", .. }
+        ));
+        let type_err = f
+            .store
+            .update_task_type(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project.id,
+                code_type,
+                TaskTypePatch::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            type_err,
+            DomainError::Validation { field: "patch", .. }
+        ));
+
+        let goal_revision: i64 = sqlx::query_scalar("SELECT revision FROM goals WHERE id = ?1")
+            .bind(goal.id.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(goal_revision, 1);
+        let type_revision: i64 =
+            sqlx::query_scalar("SELECT revision FROM task_types WHERE id = ?1")
+                .bind(code_type.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(type_revision, 1);
+        let events_after: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(events_after, events_before);
     }
 
     #[tokio::test]
