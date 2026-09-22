@@ -1207,4 +1207,294 @@ mod integration_tests {
         );
         assert!(page1.items.iter().all(|t| t.builtin));
     }
+
+    async fn epic(f: &Fixture, project: ProjectId, goal: GoalId, title: &str) -> Epic {
+        f.store
+            .create_epic(
+                ctx(f),
+                project,
+                goal,
+                crate::model::EpicCreate {
+                    title: title.to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+    }
+
+    async fn task(f: &Fixture, project: ProjectId, epic: EpicId, title: &str) -> Task {
+        f.store
+            .create_task(
+                ctx(f),
+                project,
+                epic,
+                crate::model::TaskCreate {
+                    title: title.to_string(),
+                    type_key: "code".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value
+    }
+
+    #[tokio::test]
+    async fn epic_get_and_list_with_task_counts() {
+        let f = fixture().await;
+        let project = project(&f, "P").await;
+        let goal = goal(&f, project.id, "G").await;
+        let e1 = epic(&f, project.id, goal.id, "e1").await;
+        let _t1 = task(&f, project.id, e1.id, "t1").await;
+        let _t2 = task(&f, project.id, e1.id, "t2").await;
+
+        let fetched = f.store.get_epic(&project.id, &e1.id).await.unwrap();
+        assert_eq!(fetched.task_counts.total, 2);
+        assert_eq!(fetched.task_counts.done, 0);
+
+        let page = f
+            .store
+            .list_epics(&project.id, &goal.id, &ListParams::default())
+            .await
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].task_counts.total, 2);
+    }
+
+    #[tokio::test]
+    async fn task_get_and_list() {
+        let f = fixture().await;
+        let project = project(&f, "P").await;
+        let goal = goal(&f, project.id, "G").await;
+        let e = epic(&f, project.id, goal.id, "E").await;
+        let t = task(&f, project.id, e.id, "T").await;
+
+        let fetched = f.store.get_task(&project.id, &t.id).await.unwrap();
+        assert_eq!(fetched.title, "T");
+        assert_eq!(fetched.epic_id, e.id);
+
+        let page = f
+            .store
+            .list_tasks(&project.id, &e.id, &ListParams::default())
+            .await
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id, t.id);
+    }
+
+    #[tokio::test]
+    async fn epic_and_task_reads_scope_by_project() {
+        let f = fixture().await;
+        let project_a = project(&f, "A").await;
+        let project_b = project(&f, "B").await;
+        let goal_a = goal(&f, project_a.id, "GA").await;
+        let e = epic(&f, project_a.id, goal_a.id, "E").await;
+        let t = task(&f, project_a.id, e.id, "T").await;
+
+        assert!(matches!(
+            f.store.get_epic(&project_b.id, &e.id).await.unwrap_err(),
+            DomainError::NotFound
+        ));
+        assert!(matches!(
+            f.store.get_task(&project_b.id, &t.id).await.unwrap_err(),
+            DomainError::NotFound
+        ));
+        assert!(matches!(
+            f.store
+                .list_epics(
+                    &project_a.id,
+                    &GoalId::generate(f.clock.now()),
+                    &ListParams::default()
+                )
+                .await
+                .unwrap_err(),
+            DomainError::NotFound
+        ));
+        assert!(matches!(
+            f.store
+                .list_tasks(
+                    &project_a.id,
+                    &EpicId::generate(f.clock.now()),
+                    &ListParams::default()
+                )
+                .await
+                .unwrap_err(),
+            DomainError::NotFound
+        ));
+    }
+
+    #[tokio::test]
+    async fn task_counts_include_waived_tasks() {
+        let f = fixture().await;
+        let project = project(&f, "P").await;
+        let goal = goal(&f, project.id, "G").await;
+        let e = epic(&f, project.id, goal.id, "E").await;
+        let now = format_ts(&f.clock.now());
+        let owner_id = f.owner.id.to_string();
+
+        // Seed: 1 done, 1 cancelled, 1 cancelled+waived.
+        for (status, cancelled, waiver) in [
+            ("done", false, false),
+            ("cancelled", true, false),
+            ("cancelled", true, true),
+        ] {
+            let id = crate::model::TaskId::generate(f.clock.now()).to_string();
+            sqlx::query(
+                "INSERT INTO tasks (id, revision, created_at, updated_at, project_id, \
+                 epic_id, title, description, type_key, status, phase, planning_required, \
+                 plan_review, work_review, archived, attempt_count, \
+                 cancellation_actor_id, cancellation_reason, cancellation_created_at, \
+                 waiver_actor_id, waiver_reason, waiver_created_at) \
+                 VALUES (?1, 1, ?2, ?2, ?3, ?4, 'x', '', 'code', ?5, 'complete', 0, \
+                 'none', 'none', 0, 0, ?6, ?7, ?8, ?9, ?10, ?11)",
+            )
+            .bind(&id)
+            .bind(&now)
+            .bind(project.id.to_string())
+            .bind(e.id.to_string())
+            .bind(status)
+            .bind(cancelled.then_some(&owner_id))
+            .bind(cancelled.then_some("reason"))
+            .bind(cancelled.then_some(now.clone()))
+            .bind(waiver.then_some(&owner_id))
+            .bind(waiver.then_some("waived"))
+            .bind(waiver.then_some(now.clone()))
+            .execute(f.store.pool())
+            .await
+            .unwrap();
+        }
+
+        let fetched = f.store.get_epic(&project.id, &e.id).await.unwrap();
+        assert_eq!(fetched.task_counts.total, 3);
+        assert_eq!(fetched.task_counts.done, 1);
+        assert_eq!(fetched.task_counts.cancelled, 2);
+        assert_eq!(fetched.task_counts.waived, 1);
+    }
+
+    #[tokio::test]
+    async fn epic_pages_tiebreak_on_id_and_terminate() {
+        let f = fixture().await;
+        let project = project(&f, "P").await;
+        let goal = goal(&f, project.id, "G").await;
+        let e1 = epic(&f, project.id, goal.id, "e1").await;
+        let e2 = epic(&f, project.id, goal.id, "e2").await;
+        f.clock.advance(chrono::TimeDelta::milliseconds(3));
+        let e3 = epic(&f, project.id, goal.id, "e3").await;
+
+        let page1 = f
+            .store
+            .list_epics(
+                &project.id,
+                &goal.id,
+                &ListParams {
+                    limit: Some(2),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            page1.items.iter().map(|e| e.id).collect::<Vec<_>>(),
+            vec![e1.id, e2.id]
+        );
+        assert!(page1.next_cursor.is_some());
+
+        let page2 = f
+            .store
+            .list_epics(
+                &project.id,
+                &goal.id,
+                &ListParams {
+                    limit: Some(2),
+                    cursor: page1.next_cursor,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(page2.items.len(), 1);
+        assert_eq!(page2.items[0].id, e3.id);
+        assert!(page2.next_cursor.is_none());
+    }
+
+    #[tokio::test]
+    async fn task_pages_tiebreak_on_id_and_terminate() {
+        let f = fixture().await;
+        let project = project(&f, "P").await;
+        let goal = goal(&f, project.id, "G").await;
+        let e = epic(&f, project.id, goal.id, "E").await;
+        let t1 = task(&f, project.id, e.id, "t1").await;
+        let t2 = task(&f, project.id, e.id, "t2").await;
+        f.clock.advance(chrono::TimeDelta::milliseconds(3));
+        let t3 = task(&f, project.id, e.id, "t3").await;
+
+        let page1 = f
+            .store
+            .list_tasks(
+                &project.id,
+                &e.id,
+                &ListParams {
+                    limit: Some(2),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            page1.items.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![t1.id, t2.id]
+        );
+
+        let page2 = f
+            .store
+            .list_tasks(
+                &project.id,
+                &e.id,
+                &ListParams {
+                    limit: Some(2),
+                    cursor: page1.next_cursor,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(page2.items.len(), 1);
+        assert_eq!(page2.items[0].id, t3.id);
+        assert!(page2.next_cursor.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_projects_pages_with_cursors() {
+        let f = fixture().await;
+        let _p1 = project(&f, "P1").await;
+        let _p2 = project(&f, "P2").await;
+        f.clock.advance(chrono::TimeDelta::milliseconds(3));
+        let p3 = project(&f, "P3").await;
+
+        let page1 = f
+            .store
+            .list_projects(&ListParams {
+                limit: Some(2),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(page1.items.len(), 2);
+        assert!(page1.next_cursor.is_some());
+
+        let page2 = f
+            .store
+            .list_projects(&ListParams {
+                limit: Some(2),
+                cursor: page1.next_cursor,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(page2.items.len(), 1);
+        assert_eq!(page2.items[0].id, p3.id);
+        assert!(page2.next_cursor.is_none());
+    }
 }

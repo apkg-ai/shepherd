@@ -1970,9 +1970,9 @@ async fn update_task_description_change_triggers_phase_recomputation() {
         &s,
         "P",
         ProjectSettings {
-            planning_required: false,
-            plan_review: ReviewPolicy::None,
-            work_review: ReviewPolicy::None,
+            planning_required: true,
+            plan_review: ReviewPolicy::Human,
+            work_review: ReviewPolicy::Human,
             ..Default::default()
         },
     )
@@ -1980,7 +1980,14 @@ async fn update_task_description_change_triggers_phase_recomputation() {
     let goal = create_goal(&s, project.id, "G").await;
     let epic = create_epic(&s, project.id, goal.id, "E").await;
     let task = create_task(&s, project.id, epic.id, "T").await;
-    assert_eq!(task.phase, TaskPhase::Execution);
+    assert_eq!(task.phase, TaskPhase::Planning);
+
+    // Simulate a task that reached execution (normally via claims, seeded here).
+    sqlx::query("UPDATE tasks SET phase = 'execution', status = 'active' WHERE id = ?1")
+        .bind(task.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
 
     s.clock.advance(TimeDelta::seconds(1));
     let updated = s
@@ -1990,15 +1997,16 @@ async fn update_task_description_change_triggers_phase_recomputation() {
             project.id,
             task.id,
             TaskPatch {
-                description: Some("New description".to_string()),
+                description: Some("Scope changed".to_string()),
                 ..Default::default()
             },
         )
         .await
         .unwrap()
         .value;
-    assert_eq!(updated.description, "New description");
-    assert_eq!(updated.phase, TaskPhase::Execution);
+    assert_eq!(updated.description, "Scope changed");
+    // Description change resets phase back to planning (planning_required=true).
+    assert_eq!(updated.phase, TaskPhase::Planning);
 }
 
 #[tokio::test]
@@ -2018,9 +2026,16 @@ async fn update_task_same_policy_does_not_reset_phase() {
     let goal = create_goal(&s, project.id, "G").await;
     let epic = create_epic(&s, project.id, goal.id, "E").await;
     let task = create_task(&s, project.id, epic.id, "T").await;
-    assert_eq!(task.phase, TaskPhase::Planning);
+
+    // Move task to execution (simulating claim-driven advancement).
+    sqlx::query("UPDATE tasks SET phase = 'execution', status = 'active' WHERE id = ?1")
+        .bind(task.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
 
     s.clock.advance(TimeDelta::seconds(1));
+    // Sending the same policy values must NOT trigger a phase reset.
     let updated = s
         .store
         .update_task(
@@ -2036,7 +2051,7 @@ async fn update_task_same_policy_does_not_reset_phase() {
         .await
         .unwrap()
         .value;
-    assert_eq!(updated.phase, TaskPhase::Planning);
+    assert_eq!(updated.phase, TaskPhase::Execution);
     assert!(updated.planning_required);
 }
 
@@ -2373,4 +2388,104 @@ async fn archived_tasks_are_hidden_unless_requested() {
         .await
         .unwrap();
     assert_eq!(all.items.len(), 2);
+}
+
+// ── Agent-rename with lowered policy ─────────────────────────────────
+
+#[tokio::test]
+async fn agent_can_rename_task_with_human_lowered_policy() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            planning_required: true,
+            plan_review: ReviewPolicy::Human,
+            work_review: ReviewPolicy::Human,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    // Owner creates task with lowered policy (below project defaults).
+    let task = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "T".to_string(),
+                type_key: "code".to_string(),
+                planning_required: Some(false),
+                plan_review: Some(ReviewPolicy::None),
+                work_review: Some(ReviewPolicy::None),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(task.plan_review, ReviewPolicy::None);
+
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    // Agent renames the task (title-only patch, no policy change) — must succeed.
+    s.clock.advance(TimeDelta::seconds(1));
+    let updated = s
+        .store
+        .update_task(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                title: Some("Renamed by agent".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(updated.title, "Renamed by agent");
+    assert_eq!(updated.plan_review, ReviewPolicy::None);
+}
+
+// ── Update task under terminal epic ──────────────────────────────────
+
+#[tokio::test]
+async fn update_task_beneath_terminal_epic_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    sqlx::query(
+        "UPDATE epics SET status = 'cancelled', cancellation_actor_id = ?1, \
+         cancellation_reason = 'scrapped', cancellation_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(epic.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                title: Some("Late rename".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::TerminalScope));
 }
