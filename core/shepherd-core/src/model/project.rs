@@ -215,4 +215,15 @@ mod tests {
             assert_eq!(label.to_lowercase(), key);
         }
     }
+
+    #[test]
+    fn review_policy_as_str_matches_serde_names() {
+        assert_eq!(ReviewPolicy::Human.as_str(), "human");
+        assert_eq!(ReviewPolicy::Agent.as_str(), "agent");
+        assert_eq!(ReviewPolicy::None.as_str(), "none");
+        for policy in [ReviewPolicy::Human, ReviewPolicy::Agent, ReviewPolicy::None] {
+            let json = serde_json::to_string(&policy).unwrap();
+            assert_eq!(json, format!("\"{}\"", policy.as_str()));
+        }
+    }
 }

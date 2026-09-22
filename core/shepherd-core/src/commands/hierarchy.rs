@@ -415,7 +415,13 @@ impl Store {
                     .ok_or(DomainError::NotFound)?;
                 require_owner(&actor)?;
                 require_revision(ctx.expected_revision, current.revision)?;
-                if current.archived || project_archived(tx, &project).await? {
+                let goal_current = goal_row(tx, &project, &current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
                     return Err(DomainError::ArchivedScope);
                 }
                 if current.status.is_terminal() {
@@ -484,7 +490,13 @@ impl Store {
                     .await?
                     .ok_or(DomainError::NotFound)?;
                 require_revision(ctx.expected_revision, current.revision)?;
-                if current.archived || project_archived(tx, &project).await? {
+                let goal_current = goal_row(tx, &project, &current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
                     return Err(DomainError::ArchivedScope);
                 }
                 if current.status != EpicStatus::Proposed {
@@ -636,8 +648,21 @@ impl Store {
                 let current = task_row(tx, &project, &task)
                     .await?
                     .ok_or(DomainError::NotFound)?;
+                // Capability before revision (plan/04 failure precedence).
+                let has_policy_change = patch.planning_required.is_some()
+                    || patch.plan_review.is_some()
+                    || patch.work_review.is_some();
+                if has_policy_change {
+                    require_owner(&actor)?;
+                }
                 require_revision(ctx.expected_revision, current.revision)?;
-                if current.archived || project_archived(tx, &project).await? {
+                let epic_current = epic_row(tx, &project, &current.epic_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || epic_current.archived
+                    || project_archived(tx, &project).await?
+                {
                     return Err(DomainError::ArchivedScope);
                 }
                 if current.status.is_terminal() {
@@ -648,14 +673,6 @@ impl Store {
                         field: "patch",
                         message: "at least one field must be provided".into(),
                     });
-                }
-
-                // Policy changes require owner.
-                let has_policy_change = patch.planning_required.is_some()
-                    || patch.plan_review.is_some()
-                    || patch.work_review.is_some();
-                if has_policy_change {
-                    require_owner(&actor)?;
                 }
 
                 let title = match &patch.title {
@@ -715,8 +732,12 @@ impl Store {
                     work_review,
                 )?;
 
-                // Policy or description change resets phase; title/type alone do not.
-                let phase = if patch.has_policy_or_description_change() {
+                // Actual value change (not mere presence) triggers phase reset.
+                let policy_actually_changed = description != current.description
+                    || planning_required != current.planning_required
+                    || plan_review != current.plan_review
+                    || work_review != current.work_review;
+                let phase = if policy_actually_changed {
                     policy::initial_phase(planning_required)
                 } else {
                     current.phase
@@ -742,7 +763,7 @@ impl Store {
                 .bind(plan_review.as_str())
                 .bind(work_review.as_str())
                 .bind(phase.as_str())
-                .bind(patch.has_policy_or_description_change())
+                .bind(policy_actually_changed)
                 .bind(task.to_string())
                 .execute(&mut **tx)
                 .await?;
@@ -780,13 +801,15 @@ impl Store {
                     .await?
                     .ok_or(DomainError::NotFound)?;
                 require_revision(ctx.expected_revision, current.revision)?;
-                if current.archived || project_archived(tx, &project).await? {
-                    return Err(DomainError::ArchivedScope);
-                }
-                // Epic must also not be terminal.
                 let epic_current = epic_row(tx, &project, &current.epic_id)
                     .await?
                     .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || epic_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
                 if epic_current.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
                 }

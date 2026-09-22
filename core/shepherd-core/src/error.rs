@@ -105,6 +105,11 @@ mod tests {
             "invalid_cursor"
         );
         assert_eq!(DomainError::ArchivedScope.code(), "terminal");
+        assert_eq!(DomainError::TerminalScope.code(), "terminal");
+        assert_eq!(
+            DomainError::InvalidState("wrong".into()).code(),
+            "invalid_state"
+        );
     }
 
     #[test]
