@@ -43,26 +43,6 @@ fn stored_revision(column: &str, value: i64) -> Result<Revision, DomainError> {
         .ok_or_else(|| StorageError::Corrupt(format!("{column}: {value}")).into())
 }
 
-fn lifecycle_from_row(
-    table: &str,
-    row: &SqliteRow,
-) -> Result<Option<LifecycleRecord>, DomainError> {
-    let actor_id: Option<String> = row.try_get("archive_actor_id")?;
-    let Some(actor_id) = actor_id else {
-        return Ok(None);
-    };
-    let reason: Option<String> = row.try_get("archive_reason")?;
-    let created_at: Option<String> = row.try_get("archive_created_at")?;
-    let (Some(reason), Some(created_at)) = (reason, created_at) else {
-        return Err(StorageError::Corrupt(format!("{table}: partial archive record")).into());
-    };
-    Ok(Some(LifecycleRecord {
-        actor_id: ActorId::from_uuid(parse_uuid("archive_actor_id", &actor_id)?),
-        reason,
-        created_at: parse_ts("archive_created_at", &created_at)?,
-    }))
-}
-
 // Counts are placeholders here; attach_*_counts fills them from the batched GROUP BY.
 pub(crate) fn project_from_row(row: &SqliteRow) -> Result<Project, DomainError> {
     let id: String = row.try_get("id")?;
@@ -80,7 +60,7 @@ pub(crate) fn project_from_row(row: &SqliteRow) -> Result<Project, DomainError> 
             .map_err(|err| StorageError::Corrupt(format!("projects.settings: {err}")))?,
         archived: parse_flag("projects.archived", row.try_get("archived")?)?,
         epic_counts: Counts::ZERO,
-        archive: lifecycle_from_row("projects", row)?,
+        archive: lifecycle_record("projects", "archive", row)?,
     })
 }
 
@@ -100,7 +80,7 @@ pub(crate) fn goal_from_row(row: &SqliteRow) -> Result<Goal, DomainError> {
         archived: parse_flag("goals.archived", row.try_get("archived")?)?,
         epic_counts: Counts::ZERO,
         completed: false,
-        archive: lifecycle_from_row("goals", row)?,
+        archive: lifecycle_record("goals", "archive", row)?,
     })
 }
 
@@ -527,6 +507,7 @@ pub(crate) async fn task_row(
         .transpose()
 }
 
+// Tasks are leaves: no child counts to attach (unlike find_project/find_goal/find_epic).
 pub(crate) async fn find_task(
     conn: &mut SqliteConnection,
     project: &ProjectId,

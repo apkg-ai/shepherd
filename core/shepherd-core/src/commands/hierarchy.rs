@@ -334,6 +334,7 @@ impl Store {
         .await
     }
 
+    // No require_owner: agents create epics (proposed via proposal_gate).
     pub async fn create_epic(
         &self,
         ctx: CommandContext,
@@ -344,7 +345,10 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                if project_archived(tx, &project).await? {
+                let proj = project_row(tx, &project)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if proj.archived {
                     return Err(DomainError::ArchivedScope);
                 }
                 let goal_current = goal_row(tx, &project, &goal)
@@ -356,11 +360,7 @@ impl Store {
                 let title = validate_required_text("title", &input.title, NAME_MAX_CHARS)?;
                 let description = input.description.unwrap_or_default();
                 validate_long_text("description", &description, DESCRIPTION_MAX_CHARS)?;
-
-                // Load project settings for proposal gate.
-                let proj = project_row(tx, &project)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                // Agents get Proposed when proposal_gate is true; humans always get Open.
                 let status = policy::initial_epic_status(actor.kind, proj.settings.proposal_gate);
 
                 let id = EpicId::generate(ctx.now);
@@ -507,11 +507,12 @@ impl Store {
                 }
                 let next = current.revision.next();
                 sqlx::query(
-                    "UPDATE epics SET revision = ?1, updated_at = ?2, status = 'open' \
-                     WHERE id = ?3",
+                    "UPDATE epics SET revision = ?1, updated_at = ?2, status = ?3 \
+                     WHERE id = ?4",
                 )
                 .bind(next.value())
                 .bind(format_ts(&ctx.now))
+                .bind(EpicStatus::Open.as_str())
                 .bind(epic.to_string())
                 .execute(&mut **tx)
                 .await?;
@@ -535,6 +536,7 @@ impl Store {
         .await
     }
 
+    // No require_owner: agents create tasks (proposed via proposal_gate).
     pub async fn create_task(
         &self,
         ctx: CommandContext,
@@ -656,13 +658,13 @@ impl Store {
                     require_owner(&actor)?;
                 }
                 require_revision(ctx.expected_revision, current.revision)?;
+                let proj = project_row(tx, &project)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
                 let epic_current = epic_row(tx, &project, &current.epic_id)
                     .await?
                     .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || epic_current.archived
-                    || project_archived(tx, &project).await?
-                {
+                if current.archived || epic_current.archived || proj.archived {
                     return Err(DomainError::ArchivedScope);
                 }
                 if current.status.is_terminal() {
@@ -719,11 +721,6 @@ impl Store {
                     patch.planning_required.unwrap_or(current.planning_required);
                 let plan_review = patch.plan_review.unwrap_or(current.plan_review);
                 let work_review = patch.work_review.unwrap_or(current.work_review);
-
-                // Enforce agent-cannot-lower on the resolved values.
-                let proj = project_row(tx, &project)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
                 policy::validate_policy_update(
                     &proj.settings,
                     actor.kind,
@@ -821,11 +818,12 @@ impl Store {
                 }
                 let next = current.revision.next();
                 sqlx::query(
-                    "UPDATE tasks SET revision = ?1, updated_at = ?2, status = 'open' \
-                     WHERE id = ?3",
+                    "UPDATE tasks SET revision = ?1, updated_at = ?2, status = ?3 \
+                     WHERE id = ?4",
                 )
                 .bind(next.value())
                 .bind(format_ts(&ctx.now))
+                .bind(crate::model::TaskStatus::Open.as_str())
                 .bind(task.to_string())
                 .execute(&mut **tx)
                 .await?;

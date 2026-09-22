@@ -18,6 +18,34 @@ fn review_rank(policy: ReviewPolicy) -> u8 {
     }
 }
 
+fn enforce_agent_floor(
+    settings: &ProjectSettings,
+    actor_kind: ActorKind,
+    planning_required: bool,
+    plan_review: ReviewPolicy,
+    work_review: ReviewPolicy,
+) -> Result<(), DomainError> {
+    if actor_kind != ActorKind::Agent {
+        return Ok(());
+    }
+    if !planning_required && settings.planning_required {
+        return Err(DomainError::Forbidden(
+            "agent cannot lower planning_required".into(),
+        ));
+    }
+    if review_rank(plan_review) < review_rank(settings.plan_review) {
+        return Err(DomainError::Forbidden(
+            "agent cannot lower plan_review policy".into(),
+        ));
+    }
+    if review_rank(work_review) < review_rank(settings.work_review) {
+        return Err(DomainError::Forbidden(
+            "agent cannot lower work_review policy".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Resolve task policy from project defaults and creator input.
 /// Agents cannot lower any field below the project default.
 pub fn resolve_task_policy(
@@ -30,25 +58,13 @@ pub fn resolve_task_policy(
         .unwrap_or(settings.planning_required);
     let plan_review = input.plan_review.unwrap_or(settings.plan_review);
     let work_review = input.work_review.unwrap_or(settings.work_review);
-
-    if actor_kind == ActorKind::Agent {
-        if !planning_required && settings.planning_required {
-            return Err(DomainError::Forbidden(
-                "agent cannot lower planning_required".into(),
-            ));
-        }
-        if review_rank(plan_review) < review_rank(settings.plan_review) {
-            return Err(DomainError::Forbidden(
-                "agent cannot lower plan_review policy".into(),
-            ));
-        }
-        if review_rank(work_review) < review_rank(settings.work_review) {
-            return Err(DomainError::Forbidden(
-                "agent cannot lower work_review policy".into(),
-            ));
-        }
-    }
-
+    enforce_agent_floor(
+        settings,
+        actor_kind,
+        planning_required,
+        plan_review,
+        work_review,
+    )?;
     Ok(ResolvedPolicy {
         planning_required,
         plan_review,
@@ -64,24 +80,13 @@ pub fn validate_policy_update(
     plan_review: ReviewPolicy,
     work_review: ReviewPolicy,
 ) -> Result<(), DomainError> {
-    if actor_kind == ActorKind::Agent {
-        if !planning_required && settings.planning_required {
-            return Err(DomainError::Forbidden(
-                "agent cannot lower planning_required".into(),
-            ));
-        }
-        if review_rank(plan_review) < review_rank(settings.plan_review) {
-            return Err(DomainError::Forbidden(
-                "agent cannot lower plan_review policy".into(),
-            ));
-        }
-        if review_rank(work_review) < review_rank(settings.work_review) {
-            return Err(DomainError::Forbidden(
-                "agent cannot lower work_review policy".into(),
-            ));
-        }
-    }
-    Ok(())
+    enforce_agent_floor(
+        settings,
+        actor_kind,
+        planning_required,
+        plan_review,
+        work_review,
+    )
 }
 
 pub fn initial_phase(planning_required: bool) -> TaskPhase {

@@ -130,13 +130,6 @@ impl TaskPatch {
             && self.plan_review.is_none()
             && self.work_review.is_none()
     }
-
-    pub fn has_policy_or_description_change(&self) -> bool {
-        self.description.is_some()
-            || self.planning_required.is_some()
-            || self.plan_review.is_some()
-            || self.work_review.is_some()
-    }
 }
 
 #[cfg(test)]
@@ -181,28 +174,25 @@ mod tests {
     }
 
     #[test]
-    fn task_patch_emptiness_and_policy_detection() {
+    fn task_patch_emptiness() {
         assert!(TaskPatch::default().is_empty());
-        assert!(!TaskPatch::default().has_policy_or_description_change());
 
         let title_only = TaskPatch {
             title: Some("New".into()),
             ..Default::default()
         };
         assert!(!title_only.is_empty());
-        assert!(!title_only.has_policy_or_description_change());
 
         let desc_change = TaskPatch {
             description: Some("Changed".into()),
             ..Default::default()
         };
         assert!(!desc_change.is_empty());
-        assert!(desc_change.has_policy_or_description_change());
 
         let policy_change = TaskPatch {
             plan_review: Some(ReviewPolicy::Agent),
             ..Default::default()
         };
-        assert!(policy_change.has_policy_or_description_change());
+        assert!(!policy_change.is_empty());
     }
 }
