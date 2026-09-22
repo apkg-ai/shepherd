@@ -24,6 +24,16 @@ pub enum ReviewPolicy {
     None,
 }
 
+impl ReviewPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReviewPolicy::Human => "human",
+            ReviewPolicy::Agent => "agent",
+            ReviewPolicy::None => "none",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectSettings {

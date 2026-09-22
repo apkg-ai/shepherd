@@ -1,6 +1,9 @@
+mod epic;
 mod goal;
 mod project;
+mod task;
 
+pub use epic::{Epic, EpicCreate, EpicId, EpicStatus};
 pub use goal::{Goal, GoalCreate, GoalId, TextPatch, goal_completed};
 pub use project::{
     BUILTIN_TASK_TYPES, Project, ProjectCreate, ProjectId, ProjectPatch, ProjectSettings,
@@ -9,6 +12,7 @@ pub use project::{
 pub(crate) use project::{
     DESCRIPTION_MAX_CHARS, NAME_MAX_CHARS, validate_type_key, validate_type_label,
 };
+pub use task::{Task, TaskCreate, TaskId, TaskPatch, TaskPhase, TaskStatus};
 
 use std::fmt;
 use std::str::FromStr;

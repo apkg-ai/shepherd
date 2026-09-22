@@ -4,16 +4,19 @@ use super::{
 };
 use crate::error::DomainError;
 use crate::model::{
-    BUILTIN_TASK_TYPES, DESCRIPTION_MAX_CHARS, Goal, GoalCreate, GoalId, NAME_MAX_CHARS, Project,
-    ProjectCreate, ProjectId, ProjectPatch, ProjectSettings, Revision, TaskType, TaskTypeCreate,
+    BUILTIN_TASK_TYPES, DESCRIPTION_MAX_CHARS, Epic, EpicCreate, EpicId, EpicStatus, Goal,
+    GoalCreate, GoalId, NAME_MAX_CHARS, Project, ProjectCreate, ProjectId, ProjectPatch,
+    ProjectSettings, Revision, Task, TaskCreate, TaskId, TaskPatch, TaskType, TaskTypeCreate,
     TaskTypeId, TaskTypePatch, TextPatch, validate_long_text, validate_required_text,
     validate_type_key, validate_type_label,
 };
 use crate::queries::hierarchy::{
-    find_goal, find_project, find_task_type, goal_row, project_archived, project_row,
+    epic_row, find_epic, find_goal, find_project, find_task, find_task_type, goal_row,
+    project_archived, project_row, task_row,
 };
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store};
+use crate::workflow::policy;
 
 fn settings_json(settings: &ProjectSettings) -> Result<String, DomainError> {
     serde_json::to_string(settings)
@@ -324,6 +327,498 @@ impl Store {
                     .ok_or_else(|| missing_after_write("task type"))?;
                 Ok(CommandResult {
                     value: task_type,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn create_epic(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        goal: GoalId,
+        input: EpicCreate,
+    ) -> Result<CommandResult<Epic>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                if project_archived(tx, &project).await? {
+                    return Err(DomainError::ArchivedScope);
+                }
+                let goal_current = goal_row(tx, &project, &goal)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if goal_current.archived {
+                    return Err(DomainError::ArchivedScope);
+                }
+                let title = validate_required_text("title", &input.title, NAME_MAX_CHARS)?;
+                let description = input.description.unwrap_or_default();
+                validate_long_text("description", &description, DESCRIPTION_MAX_CHARS)?;
+
+                // Load project settings for proposal gate.
+                let proj = project_row(tx, &project)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                let status = policy::initial_epic_status(actor.kind, proj.settings.proposal_gate);
+
+                let id = EpicId::generate(ctx.now);
+                let now_text = format_ts(&ctx.now);
+                sqlx::query(
+                    "INSERT INTO epics (id, revision, created_at, updated_at, project_id, \
+                     goal_id, title, description, status, archived) \
+                     VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, 0)",
+                )
+                .bind(id.to_string())
+                .bind(Revision::INITIAL.value())
+                .bind(&now_text)
+                .bind(project.to_string())
+                .bind(goal.to_string())
+                .bind(&title)
+                .bind(&description)
+                .bind(status.as_str())
+                .execute(&mut **tx)
+                .await?;
+                let events = append_events(
+                    tx,
+                    &project,
+                    &ctx,
+                    "createEpic",
+                    vec![PendingEvent::epic(id, Revision::INITIAL)],
+                )
+                .await?;
+                let epic = find_epic(tx, &project, &id)
+                    .await?
+                    .ok_or_else(|| missing_after_write("epic"))?;
+                Ok(CommandResult {
+                    value: epic,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn update_epic(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        epic: EpicId,
+        patch: TextPatch,
+    ) -> Result<CommandResult<Epic>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = epic_row(tx, &project, &epic)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                if current.archived || project_archived(tx, &project).await? {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if current.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                if patch.title.is_none() && patch.description.is_none() {
+                    return Err(DomainError::Validation {
+                        field: "patch",
+                        message: "at least one field must be provided".into(),
+                    });
+                }
+                let title = match &patch.title {
+                    Some(value) => validate_required_text("title", value, NAME_MAX_CHARS)?,
+                    None => current.title,
+                };
+                let description = match patch.description {
+                    Some(value) => {
+                        validate_long_text("description", &value, DESCRIPTION_MAX_CHARS)?;
+                        value
+                    }
+                    None => current.description,
+                };
+                let next = current.revision.next();
+                sqlx::query(
+                    "UPDATE epics SET revision = ?1, updated_at = ?2, title = ?3, \
+                     description = ?4 WHERE id = ?5",
+                )
+                .bind(next.value())
+                .bind(format_ts(&ctx.now))
+                .bind(&title)
+                .bind(&description)
+                .bind(epic.to_string())
+                .execute(&mut **tx)
+                .await?;
+                let events = append_events(
+                    tx,
+                    &project,
+                    &ctx,
+                    "updateEpic",
+                    vec![PendingEvent::epic(epic, next)],
+                )
+                .await?;
+                let updated = find_epic(tx, &project, &epic)
+                    .await?
+                    .ok_or_else(|| missing_after_write("epic"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn accept_epic(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        epic: EpicId,
+    ) -> Result<CommandResult<Epic>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                require_owner(&actor)?;
+                let current = epic_row(tx, &project, &epic)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                if current.archived || project_archived(tx, &project).await? {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if current.status != EpicStatus::Proposed {
+                    return Err(DomainError::InvalidState(format!(
+                        "epic status is {} but must be proposed",
+                        current.status.as_str()
+                    )));
+                }
+                let next = current.revision.next();
+                sqlx::query(
+                    "UPDATE epics SET revision = ?1, updated_at = ?2, status = 'open' \
+                     WHERE id = ?3",
+                )
+                .bind(next.value())
+                .bind(format_ts(&ctx.now))
+                .bind(epic.to_string())
+                .execute(&mut **tx)
+                .await?;
+                let events = append_events(
+                    tx,
+                    &project,
+                    &ctx,
+                    "acceptEpic",
+                    vec![PendingEvent::epic(epic, next)],
+                )
+                .await?;
+                let updated = find_epic(tx, &project, &epic)
+                    .await?
+                    .ok_or_else(|| missing_after_write("epic"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn create_task(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        epic: EpicId,
+        input: TaskCreate,
+    ) -> Result<CommandResult<Task>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let proj = project_row(tx, &project)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if proj.archived {
+                    return Err(DomainError::ArchivedScope);
+                }
+                let epic_current = epic_row(tx, &project, &epic)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if epic_current.archived {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if epic_current.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                let title = validate_required_text("title", &input.title, NAME_MAX_CHARS)?;
+                let description = input.description.clone().unwrap_or_default();
+                validate_long_text("description", &description, DESCRIPTION_MAX_CHARS)?;
+
+                // Validate type_key exists and is not archived.
+                let type_check: Option<(i64,)> = sqlx::query_as(
+                    "SELECT archived FROM task_types WHERE project_id = ?1 AND key = ?2",
+                )
+                .bind(project.to_string())
+                .bind(&input.type_key)
+                .fetch_optional(&mut **tx)
+                .await?;
+                match type_check {
+                    None => {
+                        return Err(DomainError::Validation {
+                            field: "type_key",
+                            message: format!("task type '{}' does not exist", input.type_key),
+                        });
+                    }
+                    Some((1,)) => {
+                        return Err(DomainError::Validation {
+                            field: "type_key",
+                            message: format!("task type '{}' is archived", input.type_key),
+                        });
+                    }
+                    _ => {}
+                }
+
+                let resolved = policy::resolve_task_policy(&proj.settings, actor.kind, &input)?;
+                let phase = policy::initial_phase(resolved.planning_required);
+                let status = policy::initial_status(actor.kind, proj.settings.proposal_gate);
+
+                let id = TaskId::generate(ctx.now);
+                let now_text = format_ts(&ctx.now);
+                sqlx::query(
+                    "INSERT INTO tasks (id, revision, created_at, updated_at, project_id, \
+                     epic_id, title, description, type_key, status, phase, \
+                     planning_required, plan_review, work_review, archived, attempt_count) \
+                     VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, 0)",
+                )
+                .bind(id.to_string())
+                .bind(Revision::INITIAL.value())
+                .bind(&now_text)
+                .bind(project.to_string())
+                .bind(epic.to_string())
+                .bind(&title)
+                .bind(&description)
+                .bind(&input.type_key)
+                .bind(status.as_str())
+                .bind(phase.as_str())
+                .bind(i64::from(resolved.planning_required))
+                .bind(resolved.plan_review.as_str())
+                .bind(resolved.work_review.as_str())
+                .execute(&mut **tx)
+                .await?;
+                let events = append_events(
+                    tx,
+                    &project,
+                    &ctx,
+                    "createTask",
+                    vec![PendingEvent::task(id, Revision::INITIAL)],
+                )
+                .await?;
+                let task = find_task(tx, &project, &id)
+                    .await?
+                    .ok_or_else(|| missing_after_write("task"))?;
+                Ok(CommandResult {
+                    value: task,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn update_task(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        task: TaskId,
+        patch: TaskPatch,
+    ) -> Result<CommandResult<Task>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = task_row(tx, &project, &task)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                if current.archived || project_archived(tx, &project).await? {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if current.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                if patch.is_empty() {
+                    return Err(DomainError::Validation {
+                        field: "patch",
+                        message: "at least one field must be provided".into(),
+                    });
+                }
+
+                // Policy changes require owner.
+                let has_policy_change = patch.planning_required.is_some()
+                    || patch.plan_review.is_some()
+                    || patch.work_review.is_some();
+                if has_policy_change {
+                    require_owner(&actor)?;
+                }
+
+                let title = match &patch.title {
+                    Some(value) => validate_required_text("title", value, NAME_MAX_CHARS)?,
+                    None => current.title.clone(),
+                };
+                let description = match &patch.description {
+                    Some(value) => {
+                        validate_long_text("description", value, DESCRIPTION_MAX_CHARS)?;
+                        value.clone()
+                    }
+                    None => current.description.clone(),
+                };
+                let type_key = match &patch.type_key {
+                    Some(new_key) => {
+                        let type_check: Option<(i64,)> = sqlx::query_as(
+                            "SELECT archived FROM task_types \
+                             WHERE project_id = ?1 AND key = ?2",
+                        )
+                        .bind(project.to_string())
+                        .bind(new_key)
+                        .fetch_optional(&mut **tx)
+                        .await?;
+                        match type_check {
+                            None => {
+                                return Err(DomainError::Validation {
+                                    field: "type_key",
+                                    message: format!("task type '{new_key}' does not exist"),
+                                });
+                            }
+                            Some((1,)) => {
+                                return Err(DomainError::Validation {
+                                    field: "type_key",
+                                    message: format!("task type '{new_key}' is archived"),
+                                });
+                            }
+                            _ => {}
+                        }
+                        new_key.clone()
+                    }
+                    None => current.type_key.clone(),
+                };
+                let planning_required =
+                    patch.planning_required.unwrap_or(current.planning_required);
+                let plan_review = patch.plan_review.unwrap_or(current.plan_review);
+                let work_review = patch.work_review.unwrap_or(current.work_review);
+
+                // Enforce agent-cannot-lower on the resolved values.
+                let proj = project_row(tx, &project)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                policy::validate_policy_update(
+                    &proj.settings,
+                    actor.kind,
+                    planning_required,
+                    plan_review,
+                    work_review,
+                )?;
+
+                // Policy or description change resets phase; title/type alone do not.
+                let phase = if patch.has_policy_or_description_change() {
+                    policy::initial_phase(planning_required)
+                } else {
+                    current.phase
+                };
+
+                let next = current.revision.next();
+                sqlx::query(
+                    "UPDATE tasks SET revision = ?1, updated_at = ?2, title = ?3, \
+                     description = ?4, type_key = ?5, planning_required = ?6, \
+                     plan_review = ?7, work_review = ?8, phase = ?9, \
+                     selected_plan_revision_id = CASE WHEN ?10 THEN NULL \
+                        ELSE selected_plan_revision_id END, \
+                     accepted_plan_submission_id = CASE WHEN ?10 THEN NULL \
+                        ELSE accepted_plan_submission_id END \
+                     WHERE id = ?11",
+                )
+                .bind(next.value())
+                .bind(format_ts(&ctx.now))
+                .bind(&title)
+                .bind(&description)
+                .bind(&type_key)
+                .bind(i64::from(planning_required))
+                .bind(plan_review.as_str())
+                .bind(work_review.as_str())
+                .bind(phase.as_str())
+                .bind(patch.has_policy_or_description_change())
+                .bind(task.to_string())
+                .execute(&mut **tx)
+                .await?;
+                let events = append_events(
+                    tx,
+                    &project,
+                    &ctx,
+                    "updateTask",
+                    vec![PendingEvent::task(task, next)],
+                )
+                .await?;
+                let updated = find_task(tx, &project, &task)
+                    .await?
+                    .ok_or_else(|| missing_after_write("task"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn accept_task(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        task: TaskId,
+    ) -> Result<CommandResult<Task>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                require_owner(&actor)?;
+                let current = task_row(tx, &project, &task)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                if current.archived || project_archived(tx, &project).await? {
+                    return Err(DomainError::ArchivedScope);
+                }
+                // Epic must also not be terminal.
+                let epic_current = epic_row(tx, &project, &current.epic_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if epic_current.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                if current.status != crate::model::TaskStatus::Proposed {
+                    return Err(DomainError::InvalidState(format!(
+                        "task status is {} but must be proposed",
+                        current.status.as_str()
+                    )));
+                }
+                let next = current.revision.next();
+                sqlx::query(
+                    "UPDATE tasks SET revision = ?1, updated_at = ?2, status = 'open' \
+                     WHERE id = ?3",
+                )
+                .bind(next.value())
+                .bind(format_ts(&ctx.now))
+                .bind(task.to_string())
+                .execute(&mut **tx)
+                .await?;
+                let events = append_events(
+                    tx,
+                    &project,
+                    &ctx,
+                    "acceptTask",
+                    vec![PendingEvent::task(task, next)],
+                )
+                .await?;
+                let updated = find_task(tx, &project, &task)
+                    .await?
+                    .ok_or_else(|| missing_after_write("task"))?;
+                Ok(CommandResult {
+                    value: updated,
                     events,
                 })
             })

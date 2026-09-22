@@ -3,6 +3,7 @@ pub mod error;
 pub mod model;
 pub mod queries;
 pub mod storage;
+pub mod workflow;
 
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")

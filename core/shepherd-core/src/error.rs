@@ -21,6 +21,10 @@ pub enum DomainError {
     DuplicateTaskTypeKey { key: String },
     #[error("resource is archived")]
     ArchivedScope,
+    #[error("resource or scope is terminal")]
+    TerminalScope,
+    #[error("invalid state transition: {0}")]
+    InvalidState(String),
     #[error(transparent)]
     Storage(#[from] StorageError),
 }
@@ -44,6 +48,8 @@ impl DomainError {
             // Wire code undecided until step 015; plan/07's 409 list has no duplicate-key entry.
             DomainError::DuplicateTaskTypeKey { .. } => "validation_error",
             DomainError::ArchivedScope => "terminal",
+            DomainError::TerminalScope => "terminal",
+            DomainError::InvalidState(_) => "invalid_state",
             DomainError::Storage(StorageError::Corrupt(_)) => "integrity_failure",
             // SQLITE_BUSY arrives as the low byte of the sqlite extended code.
             DomainError::Storage(StorageError::Sqlx(sqlx::Error::Database(db)))

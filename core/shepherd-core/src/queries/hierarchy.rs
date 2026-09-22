@@ -10,8 +10,9 @@ use super::{
 };
 use crate::error::DomainError;
 use crate::model::{
-    ActorId, Counts, Goal, GoalId, LifecycleRecord, Project, ProjectId, Revision, TaskType,
-    TaskTypeId, goal_completed,
+    ActorId, Counts, Epic, EpicId, EpicStatus, Goal, GoalId, LifecycleRecord, Project, ProjectId,
+    ReviewPolicy, Revision, Task, TaskId, TaskPhase, TaskStatus, TaskType, TaskTypeId,
+    goal_completed,
 };
 use crate::storage::rows::{format_ts, parse_flag, parse_ts, parse_uuid};
 use crate::storage::{StorageError, Store};
@@ -22,6 +23,20 @@ const GOAL_COLUMNS: &str = "id, revision, created_at, updated_at, project_id, ti
      description, archived, archive_actor_id, archive_reason, archive_created_at";
 const TASK_TYPE_COLUMNS: &str =
     "id, revision, created_at, updated_at, project_id, key, label, archived, builtin";
+
+const EPIC_COLUMNS: &str = "id, revision, created_at, updated_at, project_id, goal_id, \
+     title, description, status, archived, \
+     block_actor_id, block_reason, block_created_at, \
+     archive_actor_id, archive_reason, archive_created_at, \
+     cancellation_actor_id, cancellation_reason, cancellation_created_at";
+
+const TASK_COLUMNS: &str = "id, revision, created_at, updated_at, project_id, epic_id, \
+     title, description, type_key, status, phase, planning_required, plan_review, work_review, \
+     archived, attempt_count, \
+     block_actor_id, block_reason, block_created_at, \
+     waiver_actor_id, waiver_reason, waiver_created_at, \
+     archive_actor_id, archive_reason, archive_created_at, \
+     cancellation_actor_id, cancellation_reason, cancellation_created_at";
 
 fn stored_revision(column: &str, value: i64) -> Result<Revision, DomainError> {
     Revision::from_stored(value)
@@ -107,6 +122,104 @@ pub(crate) fn task_type_from_row(row: &SqliteRow) -> Result<TaskType, DomainErro
     })
 }
 
+fn lifecycle_record(
+    table: &str,
+    prefix: &str,
+    row: &SqliteRow,
+) -> Result<Option<LifecycleRecord>, DomainError> {
+    let actor_col = format!("{prefix}_actor_id");
+    let reason_col = format!("{prefix}_reason");
+    let created_col = format!("{prefix}_created_at");
+    let actor_id: Option<String> = row.try_get(actor_col.as_str())?;
+    let Some(actor_id) = actor_id else {
+        return Ok(None);
+    };
+    let reason: Option<String> = row.try_get(reason_col.as_str())?;
+    let created_at: Option<String> = row.try_get(created_col.as_str())?;
+    let (Some(reason), Some(created_at)) = (reason, created_at) else {
+        return Err(StorageError::Corrupt(format!("{table}: partial {prefix} record")).into());
+    };
+    Ok(Some(LifecycleRecord {
+        actor_id: ActorId::from_uuid(parse_uuid(&actor_col, &actor_id)?),
+        reason,
+        created_at: parse_ts(&created_col, &created_at)?,
+    }))
+}
+
+pub(crate) fn epic_from_row(row: &SqliteRow) -> Result<Epic, DomainError> {
+    let id: String = row.try_get("id")?;
+    let project_id: String = row.try_get("project_id")?;
+    let goal_id: String = row.try_get("goal_id")?;
+    let created_at: String = row.try_get("created_at")?;
+    let updated_at: String = row.try_get("updated_at")?;
+    let status: String = row.try_get("status")?;
+    Ok(Epic {
+        id: EpicId::from_uuid(parse_uuid("epics.id", &id)?),
+        revision: stored_revision("epics.revision", row.try_get("revision")?)?,
+        created_at: parse_ts("epics.created_at", &created_at)?,
+        updated_at: parse_ts("epics.updated_at", &updated_at)?,
+        project_id: ProjectId::from_uuid(parse_uuid("epics.project_id", &project_id)?),
+        goal_id: GoalId::from_uuid(parse_uuid("epics.goal_id", &goal_id)?),
+        title: row.try_get("title")?,
+        description: row.try_get("description")?,
+        status: EpicStatus::parse(&status)
+            .ok_or_else(|| StorageError::Corrupt(format!("epics.status: {status:?}")))?,
+        archived: parse_flag("epics.archived", row.try_get("archived")?)?,
+        task_counts: Counts::ZERO,
+        block: lifecycle_record("epics", "block", row)?,
+        archive: lifecycle_record("epics", "archive", row)?,
+        cancellation: lifecycle_record("epics", "cancellation", row)?,
+    })
+}
+
+fn parse_review_policy(column: &str, value: &str) -> Result<ReviewPolicy, DomainError> {
+    match value {
+        "human" => Ok(ReviewPolicy::Human),
+        "agent" => Ok(ReviewPolicy::Agent),
+        "none" => Ok(ReviewPolicy::None),
+        other => Err(StorageError::Corrupt(format!("{column}: {other:?}")).into()),
+    }
+}
+
+pub(crate) fn task_from_row(row: &SqliteRow) -> Result<Task, DomainError> {
+    let id: String = row.try_get("id")?;
+    let project_id: String = row.try_get("project_id")?;
+    let epic_id: String = row.try_get("epic_id")?;
+    let created_at: String = row.try_get("created_at")?;
+    let updated_at: String = row.try_get("updated_at")?;
+    let status: String = row.try_get("status")?;
+    let phase: String = row.try_get("phase")?;
+    let plan_review: String = row.try_get("plan_review")?;
+    let work_review: String = row.try_get("work_review")?;
+    Ok(Task {
+        id: TaskId::from_uuid(parse_uuid("tasks.id", &id)?),
+        revision: stored_revision("tasks.revision", row.try_get("revision")?)?,
+        created_at: parse_ts("tasks.created_at", &created_at)?,
+        updated_at: parse_ts("tasks.updated_at", &updated_at)?,
+        project_id: ProjectId::from_uuid(parse_uuid("tasks.project_id", &project_id)?),
+        epic_id: EpicId::from_uuid(parse_uuid("tasks.epic_id", &epic_id)?),
+        title: row.try_get("title")?,
+        description: row.try_get("description")?,
+        type_key: row.try_get("type_key")?,
+        status: TaskStatus::parse(&status)
+            .ok_or_else(|| StorageError::Corrupt(format!("tasks.status: {status:?}")))?,
+        phase: TaskPhase::parse(&phase)
+            .ok_or_else(|| StorageError::Corrupt(format!("tasks.phase: {phase:?}")))?,
+        planning_required: parse_flag(
+            "tasks.planning_required",
+            row.try_get("planning_required")?,
+        )?,
+        plan_review: parse_review_policy("tasks.plan_review", &plan_review)?,
+        work_review: parse_review_policy("tasks.work_review", &work_review)?,
+        archived: parse_flag("tasks.archived", row.try_get("archived")?)?,
+        attempt_count: row.try_get("attempt_count")?,
+        block: lifecycle_record("tasks", "block", row)?,
+        waiver: lifecycle_record("tasks", "waiver", row)?,
+        archive: lifecycle_record("tasks", "archive", row)?,
+        cancellation: lifecycle_record("tasks", "cancellation", row)?,
+    })
+}
+
 // One batched GROUP BY per page (plan/05); never per-node queries.
 async fn epic_counts_by(
     conn: &mut SqliteConnection,
@@ -181,6 +294,88 @@ async fn attach_goal_counts(
             .copied()
             .unwrap_or(Counts::ZERO);
         goal.completed = goal_completed(&goal.epic_counts);
+    }
+    Ok(())
+}
+
+async fn task_counts_by(
+    conn: &mut SqliteConnection,
+    column: &str,
+    ids: &[Uuid],
+) -> Result<HashMap<Uuid, Counts>, DomainError> {
+    let mut map: HashMap<Uuid, Counts> = ids.iter().map(|id| (*id, Counts::ZERO)).collect();
+    if map.is_empty() {
+        return Ok(map);
+    }
+    // Two-pass: status counts, then waived count (cancelled with waiver).
+    let mut builder = QueryBuilder::<Sqlite>::new("SELECT ");
+    builder
+        .push(column)
+        .push(" AS scope, status, COUNT(*) AS n FROM tasks WHERE ")
+        .push(column)
+        .push(" IN (");
+    let mut separated = builder.separated(", ");
+    for id in ids {
+        separated.push_bind(id.to_string());
+    }
+    builder.push(") GROUP BY scope, status");
+    let rows = builder.build().fetch_all(&mut *conn).await?;
+    for row in rows {
+        let scope: String = row.try_get("scope")?;
+        let status: String = row.try_get("status")?;
+        let n: i64 = row.try_get("n")?;
+        let scope = parse_uuid("tasks.scope", &scope)?;
+        let counts = map
+            .get_mut(&scope)
+            .ok_or_else(|| StorageError::Corrupt(format!("tasks.{column}: {scope}")))?;
+        counts.total += n;
+        match status.as_str() {
+            "done" => counts.done += n,
+            "cancelled" => counts.cancelled += n,
+            "proposed" | "open" | "active" => {}
+            other => {
+                return Err(StorageError::Corrupt(format!("tasks.status: {other:?}")).into());
+            }
+        }
+    }
+
+    // Waived = cancelled tasks with a waiver record.
+    let mut waiver_builder = QueryBuilder::<Sqlite>::new("SELECT ");
+    waiver_builder
+        .push(column)
+        .push(" AS scope, COUNT(*) AS n FROM tasks WHERE ")
+        .push(column)
+        .push(" IN (");
+    let mut separated = waiver_builder.separated(", ");
+    for id in ids {
+        separated.push_bind(id.to_string());
+    }
+    waiver_builder
+        .push(") AND status = 'cancelled' AND waiver_actor_id IS NOT NULL GROUP BY scope");
+    let waiver_rows = waiver_builder.build().fetch_all(&mut *conn).await?;
+    for row in waiver_rows {
+        let scope: String = row.try_get("scope")?;
+        let n: i64 = row.try_get("n")?;
+        let scope = parse_uuid("tasks.scope", &scope)?;
+        if let Some(counts) = map.get_mut(&scope) {
+            counts.waived = n;
+        }
+    }
+
+    Ok(map)
+}
+
+async fn attach_epic_task_counts(
+    conn: &mut SqliteConnection,
+    epics: &mut [Epic],
+) -> Result<(), DomainError> {
+    let ids: Vec<Uuid> = epics.iter().map(|epic| epic.id.as_uuid()).collect();
+    let counts = task_counts_by(conn, "epic_id", &ids).await?;
+    for epic in epics {
+        epic.task_counts = counts
+            .get(&epic.id.as_uuid())
+            .copied()
+            .unwrap_or(Counts::ZERO);
     }
     Ok(())
 }
@@ -286,6 +481,90 @@ pub(crate) async fn find_task_type(
         .transpose()
 }
 
+pub(crate) async fn epic_row(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    epic: &EpicId,
+) -> Result<Option<Epic>, DomainError> {
+    let query = AssertSqlSafe(format!(
+        "SELECT {EPIC_COLUMNS} FROM epics WHERE id = ?1 AND project_id = ?2"
+    ));
+    sqlx::query(query)
+        .bind(epic.to_string())
+        .bind(project.to_string())
+        .fetch_optional(&mut *conn)
+        .await?
+        .map(|row| epic_from_row(&row))
+        .transpose()
+}
+
+pub(crate) async fn find_epic(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    epic: &EpicId,
+) -> Result<Option<Epic>, DomainError> {
+    let Some(mut epic) = epic_row(conn, project, epic).await? else {
+        return Ok(None);
+    };
+    attach_epic_task_counts(conn, std::slice::from_mut(&mut epic)).await?;
+    Ok(Some(epic))
+}
+
+pub(crate) async fn task_row(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    task: &TaskId,
+) -> Result<Option<Task>, DomainError> {
+    let query = AssertSqlSafe(format!(
+        "SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1 AND project_id = ?2"
+    ));
+    sqlx::query(query)
+        .bind(task.to_string())
+        .bind(project.to_string())
+        .fetch_optional(&mut *conn)
+        .await?
+        .map(|row| task_from_row(&row))
+        .transpose()
+}
+
+pub(crate) async fn find_task(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    task: &TaskId,
+) -> Result<Option<Task>, DomainError> {
+    task_row(conn, project, task).await
+}
+
+pub(crate) async fn goal_exists(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    goal: &GoalId,
+) -> Result<bool, DomainError> {
+    Ok(
+        sqlx::query("SELECT 1 FROM goals WHERE id = ?1 AND project_id = ?2")
+            .bind(goal.to_string())
+            .bind(project.to_string())
+            .fetch_optional(&mut *conn)
+            .await?
+            .is_some(),
+    )
+}
+
+pub(crate) async fn epic_exists(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    epic: &EpicId,
+) -> Result<bool, DomainError> {
+    Ok(
+        sqlx::query("SELECT 1 FROM epics WHERE id = ?1 AND project_id = ?2")
+            .bind(epic.to_string())
+            .bind(project.to_string())
+            .fetch_optional(&mut *conn)
+            .await?
+            .is_some(),
+    )
+}
+
 pub(crate) async fn list_projects(
     conn: &mut SqliteConnection,
     params: &ListParams,
@@ -385,6 +664,113 @@ pub(crate) async fn list_task_types(
     }))
 }
 
+pub(crate) async fn list_epics(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    goal: &GoalId,
+    params: &ListParams,
+) -> Result<Page<Epic>, DomainError> {
+    let limit = effective_limit(params)?;
+    if !goal_exists(conn, project, goal).await? {
+        return Err(DomainError::NotFound);
+    }
+    let filter = format!(
+        "project={project}&goal={goal}&include_archived={}",
+        params.include_archived
+    );
+    let after = decode_after(params, "listEpics", &filter)?;
+    let mut builder = QueryBuilder::<Sqlite>::new(format!("SELECT {EPIC_COLUMNS} FROM epics"));
+    // Goal-scoped: filter by goal_id within project.
+    builder
+        .push(" WHERE project_id = ")
+        .push_bind(project.to_string())
+        .push(" AND goal_id = ")
+        .push_bind(goal.to_string());
+    if !params.include_archived {
+        builder.push(" AND archived = 0");
+    }
+    if let Some((created_at, id)) = &after {
+        builder
+            .push(" AND (created_at > ")
+            .push_bind(created_at.clone())
+            .push(" OR (created_at = ")
+            .push_bind(created_at.clone())
+            .push(" AND id > ")
+            .push_bind(id.clone())
+            .push("))");
+    }
+    builder
+        .push(" ORDER BY created_at ASC, id ASC LIMIT ")
+        .push_bind(limit + 1);
+    let rows = builder.build().fetch_all(&mut *conn).await?;
+    let items = rows
+        .iter()
+        .map(epic_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut page = split_page(items, limit, |epic: &Epic| {
+        encode_cursor(
+            "listEpics",
+            &filter,
+            &format_ts(&epic.created_at),
+            &epic.id.to_string(),
+        )
+    });
+    attach_epic_task_counts(conn, &mut page.items).await?;
+    Ok(page)
+}
+
+pub(crate) async fn list_tasks(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    epic: &EpicId,
+    params: &ListParams,
+) -> Result<Page<Task>, DomainError> {
+    let limit = effective_limit(params)?;
+    if !epic_exists(conn, project, epic).await? {
+        return Err(DomainError::NotFound);
+    }
+    let filter = format!(
+        "project={project}&epic={epic}&include_archived={}",
+        params.include_archived
+    );
+    let after = decode_after(params, "listTasks", &filter)?;
+    let mut builder = QueryBuilder::<Sqlite>::new(format!("SELECT {TASK_COLUMNS} FROM tasks"));
+    builder
+        .push(" WHERE project_id = ")
+        .push_bind(project.to_string())
+        .push(" AND epic_id = ")
+        .push_bind(epic.to_string());
+    if !params.include_archived {
+        builder.push(" AND archived = 0");
+    }
+    if let Some((created_at, id)) = &after {
+        builder
+            .push(" AND (created_at > ")
+            .push_bind(created_at.clone())
+            .push(" OR (created_at = ")
+            .push_bind(created_at.clone())
+            .push(" AND id > ")
+            .push_bind(id.clone())
+            .push("))");
+    }
+    builder
+        .push(" ORDER BY created_at ASC, id ASC LIMIT ")
+        .push_bind(limit + 1);
+    let rows = builder.build().fetch_all(&mut *conn).await?;
+    let items = rows
+        .iter()
+        .map(task_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(split_page(items, limit, |task: &Task| {
+        encode_cursor(
+            "listTasks",
+            &filter,
+            &format_ts(&task.created_at),
+            &task.id.to_string(),
+        )
+    }))
+}
+
 // Public read surface; downstream never touches the pool directly. Each read runs
 // in a deferred read transaction so the entity row and its counts share one snapshot.
 impl Store {
@@ -427,6 +813,44 @@ impl Store {
     ) -> Result<Page<TaskType>, DomainError> {
         let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
         let page = list_task_types(&mut tx, project, params).await?;
+        tx.commit().await.map_err(StorageError::from)?;
+        Ok(page)
+    }
+
+    pub async fn get_epic(&self, project: &ProjectId, epic: &EpicId) -> Result<Epic, DomainError> {
+        let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
+        let found = find_epic(&mut tx, project, epic).await?;
+        tx.commit().await.map_err(StorageError::from)?;
+        found.ok_or(DomainError::NotFound)
+    }
+
+    pub async fn get_task(&self, project: &ProjectId, task: &TaskId) -> Result<Task, DomainError> {
+        let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
+        let found = find_task(&mut tx, project, task).await?;
+        tx.commit().await.map_err(StorageError::from)?;
+        found.ok_or(DomainError::NotFound)
+    }
+
+    pub async fn list_epics(
+        &self,
+        project: &ProjectId,
+        goal: &GoalId,
+        params: &ListParams,
+    ) -> Result<Page<Epic>, DomainError> {
+        let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
+        let page = list_epics(&mut tx, project, goal, params).await?;
+        tx.commit().await.map_err(StorageError::from)?;
+        Ok(page)
+    }
+
+    pub async fn list_tasks(
+        &self,
+        project: &ProjectId,
+        epic: &EpicId,
+        params: &ListParams,
+    ) -> Result<Page<Task>, DomainError> {
+        let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
+        let page = list_tasks(&mut tx, project, epic, params).await?;
         tx.commit().await.map_err(StorageError::from)?;
         Ok(page)
     }
