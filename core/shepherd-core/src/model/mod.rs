@@ -1,3 +1,15 @@
+mod goal;
+mod project;
+
+pub use goal::{Goal, GoalCreate, GoalId, TextPatch, goal_completed};
+pub use project::{
+    BUILTIN_TASK_TYPES, Project, ProjectCreate, ProjectId, ProjectPatch, ProjectSettings,
+    ReviewPolicy, TaskType, TaskTypeCreate, TaskTypeId, TaskTypePatch,
+};
+pub(crate) use project::{
+    DESCRIPTION_MAX_CHARS, NAME_MAX_CHARS, validate_type_key, validate_type_label,
+};
+
 use std::fmt;
 use std::str::FromStr;
 use std::sync::LazyLock;
@@ -6,6 +18,8 @@ use chrono::{DateTime, SubsecRound, Utc};
 use uuid::timestamp::context::ContextV7;
 use uuid::{Timestamp, Uuid};
 
+use crate::error::DomainError;
+
 macro_rules! typed_uuid {
     ($name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -13,7 +27,7 @@ macro_rules! typed_uuid {
 
         impl $name {
             pub fn generate(now: DateTime<Utc>) -> Self {
-                Self(new_v7(now))
+                Self(crate::model::new_v7(now))
             }
 
             pub fn from_uuid(value: Uuid) -> Self {
@@ -41,6 +55,8 @@ macro_rules! typed_uuid {
     };
 }
 
+pub(crate) use typed_uuid;
+
 typed_uuid!(ActorId);
 typed_uuid!(CommandId);
 
@@ -48,7 +64,7 @@ typed_uuid!(CommandId);
 static V7_CONTEXT: LazyLock<std::sync::Mutex<ContextV7>> =
     LazyLock::new(|| std::sync::Mutex::new(ContextV7::new()));
 
-fn new_v7(now: DateTime<Utc>) -> Uuid {
+pub(crate) fn new_v7(now: DateTime<Utc>) -> Uuid {
     let seconds = u64::try_from(now.timestamp()).unwrap_or(0);
     let context = V7_CONTEXT.lock().unwrap();
     Uuid::new_v7(Timestamp::from_unix(
@@ -107,6 +123,69 @@ pub struct Actor {
     pub label: String,
     pub revoked: bool,
     pub created_at: DateTime<Utc>,
+}
+
+/// events.id is the SQLite rowid.
+pub type EventId = i64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Counts {
+    pub total: i64,
+    pub done: i64,
+    pub cancelled: i64,
+    pub waived: i64,
+}
+
+impl Counts {
+    pub const ZERO: Counts = Counts {
+        total: 0,
+        done: 0,
+        cancelled: 0,
+        waived: 0,
+    };
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LifecycleRecord {
+    pub actor_id: ActorId,
+    pub reason: String,
+    pub created_at: DateTime<Utc>,
+}
+
+// Contract maxLength counts code points, so validators count chars, not bytes.
+pub(crate) fn validate_required_text(
+    field: &'static str,
+    value: &str,
+    max_chars: usize,
+) -> Result<String, DomainError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(DomainError::Validation {
+            field,
+            message: "must not be blank".into(),
+        });
+    }
+    if trimmed.chars().count() > max_chars {
+        return Err(DomainError::Validation {
+            field,
+            message: format!("must be at most {max_chars} characters"),
+        });
+    }
+    Ok(trimmed.to_string())
+}
+
+pub(crate) fn validate_long_text(
+    field: &'static str,
+    value: &str,
+    max_chars: usize,
+) -> Result<(), DomainError> {
+    if value.chars().count() > max_chars {
+        return Err(DomainError::Validation {
+            field,
+            message: format!("must be at most {max_chars} characters"),
+        });
+    }
+    Ok(())
 }
 
 pub trait Clock: Send + Sync {

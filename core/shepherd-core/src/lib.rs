@@ -1,4 +1,7 @@
+pub mod commands;
+pub mod error;
 pub mod model;
+pub mod queries;
 pub mod storage;
 
 pub fn version() -> &'static str {
