@@ -1,3 +1,4 @@
+mod dependencies;
 mod hierarchy;
 
 use std::future::Future;
@@ -9,8 +10,8 @@ use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{
-    Actor, ActorId, ActorKind, CommandId, EpicId, EventId, GoalId, ProjectId, Revision, TaskId,
-    TaskTypeId,
+    Actor, ActorId, ActorKind, CommandId, DependencyId, EpicId, EventId, GoalId, ProjectId,
+    Revision, TaskId, TaskTypeId,
 };
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store, rows};
@@ -83,6 +84,54 @@ pub(crate) fn require_revision(expected: Option<i64>, actual: Revision) -> Resul
     }
 }
 
+// Unexpired active claim or pending submission blocks mutations on the
+// resource; the epic level checks every descendant task (plan/03, plan/04
+// FLOW-03).
+// Single source for "active work on task alias `t`": an unexpired active claim
+// or a pending submission (plan/03, plan/04 FLOW-03).
+pub(crate) fn active_work_predicate(now_placeholder: &str) -> String {
+    format!(
+        "(EXISTS (SELECT 1 FROM claims c WHERE c.task_id = t.id \
+         AND c.status = 'active' AND c.expires_at > {now_placeholder}) \
+         OR EXISTS (SELECT 1 FROM submissions s WHERE s.task_id = t.id \
+         AND s.status = 'pending'))"
+    )
+}
+
+async fn has_active_work_by(
+    conn: &mut SqliteConnection,
+    column: &'static str,
+    resource: Uuid,
+    now: &str,
+) -> Result<bool, DomainError> {
+    let query = sqlx::AssertSqlSafe(format!(
+        "SELECT 1 FROM tasks t WHERE t.{column} = ?1 AND {} LIMIT 1",
+        active_work_predicate("?2")
+    ));
+    Ok(sqlx::query(query)
+        .bind(resource.to_string())
+        .bind(now)
+        .fetch_optional(&mut *conn)
+        .await?
+        .is_some())
+}
+
+pub(crate) async fn task_has_active_work(
+    conn: &mut SqliteConnection,
+    task: TaskId,
+    now: &str,
+) -> Result<bool, DomainError> {
+    has_active_work_by(conn, "id", task.as_uuid(), now).await
+}
+
+pub(crate) async fn epic_has_active_work(
+    conn: &mut SqliteConnection,
+    epic: EpicId,
+    now: &str,
+) -> Result<bool, DomainError> {
+    has_active_work_by(conn, "epic_id", epic.as_uuid(), now).await
+}
+
 pub(crate) struct PendingEvent {
     event_type: &'static str,
     // Ownership order (project, goal, epic, task, registry) for deterministic event rows.
@@ -113,23 +162,24 @@ impl PendingEvent {
         }
     }
 
-    pub(crate) fn epic(id: EpicId, revision: Revision) -> Self {
+    // epic/task changes carry the owning goal/epic id in affected_ids (plan/08).
+    pub(crate) fn epic(id: EpicId, revision: Revision, goal: GoalId) -> Self {
         Self {
             event_type: "epic.changed",
             kind_rank: 2,
             resource_id: id.as_uuid(),
             resource_revision: revision.value(),
-            affected_ids: Vec::new(),
+            affected_ids: vec![goal.as_uuid()],
         }
     }
 
-    pub(crate) fn task(id: TaskId, revision: Revision) -> Self {
+    pub(crate) fn task(id: TaskId, revision: Revision, epic: EpicId) -> Self {
         Self {
             event_type: "task.changed",
             kind_rank: 3,
             resource_id: id.as_uuid(),
             resource_revision: revision.value(),
-            affected_ids: Vec::new(),
+            affected_ids: vec![epic.as_uuid()],
         }
     }
 
@@ -140,6 +190,18 @@ impl PendingEvent {
             resource_id: id.as_uuid(),
             resource_revision: revision.value(),
             affected_ids: Vec::new(),
+        }
+    }
+
+    // affected carries [dependent, prerequisite, scope] (plan/08: both endpoints
+    // and affected scope).
+    pub(crate) fn dependency(id: DependencyId, revision: Revision, affected: Vec<Uuid>) -> Self {
+        Self {
+            event_type: "dependency.changed",
+            kind_rank: 5,
+            resource_id: id.as_uuid(),
+            resource_revision: revision.value(),
+            affected_ids: affected,
         }
     }
 }

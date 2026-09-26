@@ -105,6 +105,93 @@ pub(crate) use resource_status;
 
 typed_uuid!(ActorId);
 typed_uuid!(CommandId);
+typed_uuid!(DependencyId);
+
+// Graph nodes carry one shared status vocabulary across epic and task levels.
+resource_status!(EntityStatus);
+
+impl From<EpicStatus> for EntityStatus {
+    fn from(status: EpicStatus) -> Self {
+        match status {
+            EpicStatus::Proposed => EntityStatus::Proposed,
+            EpicStatus::Open => EntityStatus::Open,
+            EpicStatus::Active => EntityStatus::Active,
+            EpicStatus::Done => EntityStatus::Done,
+            EpicStatus::Cancelled => EntityStatus::Cancelled,
+        }
+    }
+}
+
+impl From<TaskStatus> for EntityStatus {
+    fn from(status: TaskStatus) -> Self {
+        match status {
+            TaskStatus::Proposed => EntityStatus::Proposed,
+            TaskStatus::Open => EntityStatus::Open,
+            TaskStatus::Active => EntityStatus::Active,
+            TaskStatus::Done => EntityStatus::Done,
+            TaskStatus::Cancelled => EntityStatus::Cancelled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependencyLevel {
+    Epic,
+    Task,
+}
+
+impl DependencyLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DependencyLevel::Epic => "epic",
+            DependencyLevel::Task => "task",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "epic" => Some(DependencyLevel::Epic),
+            "task" => Some(DependencyLevel::Task),
+            _ => None,
+        }
+    }
+}
+
+// Endpoints stay untyped Uuids: the wire model is level-discriminated; typed
+// safety lives in DependencyCreate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dependency {
+    pub id: DependencyId,
+    pub revision: Revision,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub project_id: ProjectId,
+    pub level: DependencyLevel,
+    pub dependent_id: Uuid,
+    pub prerequisite_id: Uuid,
+}
+
+/// One typed command payload over the two dependency tables (plan/03).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependencyCreate {
+    Epic {
+        dependent_id: EpicId,
+        prerequisite_id: EpicId,
+    },
+    Task {
+        dependent_id: TaskId,
+        prerequisite_id: TaskId,
+    },
+}
+
+impl DependencyCreate {
+    pub fn level(&self) -> DependencyLevel {
+        match self {
+            DependencyCreate::Epic { .. } => DependencyLevel::Epic,
+            DependencyCreate::Task { .. } => DependencyLevel::Task,
+        }
+    }
+}
 
 // ContextV7 is not Sync; the shared context keeps same-millisecond IDs monotonic.
 static V7_CONTEXT: LazyLock<std::sync::Mutex<ContextV7>> =
@@ -323,6 +410,55 @@ mod tests {
         );
         assert_eq!(Revision::from_stored(0), None);
         assert_eq!(Revision::from_stored(-1), None);
+    }
+
+    #[test]
+    fn dependency_level_round_trips_stored_strings() {
+        for level in [DependencyLevel::Epic, DependencyLevel::Task] {
+            assert_eq!(DependencyLevel::parse(level.as_str()), Some(level));
+        }
+        assert_eq!(DependencyLevel::parse("goal"), None);
+    }
+
+    #[test]
+    fn dependency_create_reports_its_level() {
+        let now = ts("2026-09-14T00:00:00Z");
+        let epic_link = DependencyCreate::Epic {
+            dependent_id: EpicId::generate(now),
+            prerequisite_id: EpicId::generate(now),
+        };
+        assert_eq!(epic_link.level(), DependencyLevel::Epic);
+        let task_link = DependencyCreate::Task {
+            dependent_id: TaskId::generate(now),
+            prerequisite_id: TaskId::generate(now),
+        };
+        assert_eq!(task_link.level(), DependencyLevel::Task);
+    }
+
+    #[test]
+    fn entity_status_converts_from_both_levels() {
+        assert_eq!(
+            EntityStatus::from(EpicStatus::Proposed).as_str(),
+            "proposed"
+        );
+        assert_eq!(EntityStatus::from(EpicStatus::Open).as_str(), "open");
+        assert_eq!(EntityStatus::from(EpicStatus::Active).as_str(), "active");
+        assert_eq!(EntityStatus::from(EpicStatus::Done).as_str(), "done");
+        assert_eq!(
+            EntityStatus::from(EpicStatus::Cancelled).as_str(),
+            "cancelled"
+        );
+        assert_eq!(
+            EntityStatus::from(TaskStatus::Proposed).as_str(),
+            "proposed"
+        );
+        assert_eq!(EntityStatus::from(TaskStatus::Open).as_str(), "open");
+        assert_eq!(EntityStatus::from(TaskStatus::Active).as_str(), "active");
+        assert_eq!(EntityStatus::from(TaskStatus::Done).as_str(), "done");
+        assert_eq!(
+            EntityStatus::from(TaskStatus::Cancelled).as_str(),
+            "cancelled"
+        );
     }
 
     #[test]

@@ -24,13 +24,13 @@ const GOAL_COLUMNS: &str = "id, revision, created_at, updated_at, project_id, ti
 const TASK_TYPE_COLUMNS: &str =
     "id, revision, created_at, updated_at, project_id, key, label, archived, builtin";
 
-const EPIC_COLUMNS: &str = "id, revision, created_at, updated_at, project_id, goal_id, \
+pub(crate) const EPIC_COLUMNS: &str = "id, revision, created_at, updated_at, project_id, goal_id, \
      title, description, status, archived, \
      block_actor_id, block_reason, block_created_at, \
      archive_actor_id, archive_reason, archive_created_at, \
      cancellation_actor_id, cancellation_reason, cancellation_created_at";
 
-const TASK_COLUMNS: &str = "id, revision, created_at, updated_at, project_id, epic_id, \
+pub(crate) const TASK_COLUMNS: &str = "id, revision, created_at, updated_at, project_id, epic_id, \
      title, description, type_key, status, phase, planning_required, plan_review, work_review, \
      archived, attempt_count, \
      block_actor_id, block_reason, block_created_at, \
@@ -152,7 +152,7 @@ pub(crate) fn epic_from_row(row: &SqliteRow) -> Result<Epic, DomainError> {
     })
 }
 
-fn parse_review_policy(column: &str, value: &str) -> Result<ReviewPolicy, DomainError> {
+pub(crate) fn parse_review_policy(column: &str, value: &str) -> Result<ReviewPolicy, DomainError> {
     match value {
         "human" => Ok(ReviewPolicy::Human),
         "agent" => Ok(ReviewPolicy::Agent),
@@ -202,7 +202,7 @@ pub(crate) fn task_from_row(row: &SqliteRow) -> Result<Task, DomainError> {
 
 // Column parameter for batched count queries. Using an enum instead of &str
 // prevents any future caller from passing user-controlled column names.
-enum CountScope {
+pub(crate) enum CountScope {
     Project,
     Goal,
     Epic,
@@ -298,7 +298,7 @@ async fn attach_goal_counts(
 }
 
 // Single-query task counts with conditional aggregation for waivers.
-async fn task_counts_by(
+pub(crate) async fn task_counts_by(
     conn: &mut SqliteConnection,
     scope: CountScope,
     ids: &[Uuid],
@@ -668,7 +668,7 @@ pub struct TaskListFilters {
 
 // Absent filters render "none"; present values are prefixed so a value literally
 // named "none" (a legal type key) cannot collide with the absent token.
-fn filter_token(value: Option<impl std::fmt::Display>) -> String {
+pub(crate) fn filter_token(value: Option<impl std::fmt::Display>) -> String {
     value.map_or_else(|| "none".to_string(), |v| format!("some:{v}"))
 }
 

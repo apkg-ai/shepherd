@@ -298,6 +298,8 @@ CREATE INDEX goals_project ON goals(project_id,created_at,id);
 
 CREATE INDEX epics_goal ON epics(goal_id,status,created_at,id);
 
+CREATE INDEX epics_project ON epics(project_id,created_at,id);
+
 CREATE INDEX tasks_epic ON tasks(epic_id,status,phase,created_at,id);
 
 CREATE INDEX tasks_project ON tasks(project_id,status,phase,created_at,id);
@@ -316,4 +318,8 @@ CREATE INDEX events_resource ON events(project_id,resource_id,id);
 
 CREATE INDEX task_deps_reverse ON task_dependencies(prerequisite_id);
 
+CREATE INDEX task_deps_project ON task_dependencies(project_id,created_at,id);
+
 CREATE INDEX epic_deps_reverse ON epic_dependencies(prerequisite_id);
+
+CREATE INDEX epic_deps_project ON epic_dependencies(project_id,created_at,id);
