@@ -1,6 +1,6 @@
 # 005 — Scoped dependencies and pure eligibility
 
-Status: not started. Requirements: DEP-01 FLOW-02.
+Status: implemented on branch `v1-005-dependencies-and-eligibility` (PR pending). Requirements: DEP-01 FLOW-02.
 
 ## Objective and prerequisites
 
@@ -68,4 +68,35 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Implementation handoff record
 
-Fill when implementing, not during planning: commit/branch; files changed; test commands and results; any reproduced limitation; temporary interfaces; next eligible step IDs. If an acceptance criterion cannot pass, leave this step incomplete and explain the concrete blocker. Do not mark complete for code that merely compiles.
+Branch `v1-005-dependencies-and-eligibility` (PR pending).
+
+### Files changed
+
+- New: `core/shepherd-core/src/{dag.rs, workflow/eligibility.rs, commands/dependencies.rs, queries/graph.rs, queries/work.rs}`, `core/shepherd-core/tests/v1_dependencies_and_eligibility.rs`.
+- Amended: `lib.rs` (`mod dag`), `workflow/mod.rs` (declare eligibility), `commands/mod.rs` (`mod dependencies`, `PendingEvent::dependency` — first non-empty `affected_ids`), `queries/mod.rs` (declarations + re-exports), `queries/hierarchy.rs` (pub(crate) widenings only: `TASK_COLUMNS`/`EPIC_COLUMNS`/`parse_review_policy`/`CountScope`/`task_counts_by`/`filter_token`), `model/mod.rs` (`DependencyId`, `DependencyLevel`, `Dependency`, `DependencyCreate`, `EntityStatus` + From impls), `error.rs` (`ActiveWork`/`DependencyCycle`/`ScopeMismatch`/`GraphTooLarge` + `code()` arms).
+- No new crate dependencies and no migration: `epic_dependencies`/`task_dependencies` and the `dependency.changed` event type ship in the baseline schema.
+
+### What was built
+
+`dag::would_create_cycle` recovered from git history (`5619c7c`), reduced to the cycle traversal only (single-parent/ancestor/downstream/GraphRole stayed removed) and made generic over the id type for epic/task reuse; commands load the scoped edge list inside the serialized write transaction. `create_dependency` is the one typed command over both tables (`DependencyCreate::{Epic,Task}`): membership on both endpoints (404) → archived chain → terminal dependent (done prerequisite allowed and immediately satisfied; cancelled stays unmet) → active-work on the dependent (unexpired claim or pending submission; epic level checks every descendant task) → agent-adds-to-accepted-dependent guard → non-self → same-goal/same-epic scope (`scope_mismatch`) → duplicate pair → acyclicity (`dependency_cycle`) → insert (revision 1) → both endpoint revisions bump (plan/03 "affected tasks/epics"; descendants untouched — derived eligibility needs no stored revision) → `dependency.changed` with `affected_ids=[dependent, prerequisite, scope]` plus both endpoint `.changed` events. `delete_dependency` is human-only with If-Match on the dependency revision and the same archived/terminal/active-work guards. `workflow::eligibility`: complete 15-code `GateCode` in contract order, pure `evaluate_task`/`evaluate_epic` over `TaskSnapshot`/`EpicSnapshot` per the plan/04 pseudocode (terminal/archived early exit; strict `== Done` prerequisites; claim expiry `<= now`; plan_ok = selected revision ∈ accepted submission's document_revision_ids; review policy + producer exclusion), deterministic reasons with blocking resource ids, and `allowed_actions` as the full REST-operationId vocabulary ∩ plan/12 capability matrix; batch snapshot loaders with constant query counts (no per-node queries). `queries::work::list_work`: eligible-only, caller+phase scoped, oldest first; SQL prefilter (superset) → batch snapshots → evaluator filter → refill loop keyset over candidates while the emitted cursor anchors the last returned item. `queries::graph`: `get_goal_graph`/`get_epic_graph` (bounds first — >2000 nodes/>4000 edges → `graph_too_large`, all-or-nothing; archived nodes included with their `archived` gate; counts via the batched GROUP BY; eligibility via loaders + evaluators with the query clock) and `list_dependencies` (UNION ALL over both tables, level/scope_id filters, shared keyset cursors).
+
+### Test commands and results (Rust 1.98.1)
+
+- From `core/`: `cargo fmt --check` — clean; `cargo test --workspace` — 292 green (exit code checked directly, never piped); `cargo clippy --all-targets -- -D warnings` — clean; `cargo test --workspace --doc` — clean.
+- Coverage via the CI llvm-cov commands + `node scripts/coverage-report.ts --dir core/coverage --report core`: Unit 97.9% (≥95) ✅, Integration 100.0% (≥70) ✅, union 97.9% (≥92) ✅.
+- `python3 plan/validate.py` — PASS (29 step DAG, 70 operations), rerun after this document update.
+- Every acceptance sentence has a named regression test in `tests/v1_dependencies_and_eligibility.rs`: `cross_goal_epic_link_is_scope_mismatch`, `cross_epic_task_link_is_scope_mismatch`, `valid_branch_and_join_passes` (diamond at both levels; revision bumps and `affected_ids` asserted), `candidate_with_zero_prerequisites_is_eligible`, `candidate_waits_until_every_prerequisite_done` (incl. cancelled-and-waived prerequisite staying unmet), `early_planning_ignores_dependency_waits_but_not_proposal_or_manual_blocks`, `cycle_race_yields_at_most_one_accepted_edge` (two independent pools on one file-backed database; exactly one edge, one `dependency.changed`, loser sees `dependency_cycle`), `failed_removal_leaves_revision_and_history_unchanged`. Persisted-state checks use an independent read-only connection.
+- In-module suites: 26 pure evaluator tests (contract reason order, expiry boundary `expires_at == now`, strict-done, plan gate, review policies, action matrices), 13 command tests (guards, agent rules, expired claims unblock, epic descendant checks), 7 list_work tests (actor-bound cursors, keyset across ineligible rows, review caller-dependence, clock-flipped claim expiry), 6 graph tests (scoping, archived nodes, 2001-node all-or-nothing bound, union paging).
+
+### Limitations and temporary interfaces
+
+- `ClaimSnapshot.phase` and `SubmissionSnapshot.kind` carry raw stored strings ('plan'/'execute'/'review', 'plan'/'work'); the typed claim/submission models land in steps 009/011, when `queries::work::WorkPhase` should unify with claim phases.
+- Claims, submissions, blocks, completion and archive states are seeded via direct SQL in tests with step-ownership comments (commands land in 006/009/010/011); the loaders read the baseline tables today.
+- `graph_too_large` appears only in plan/05 (not plan/07 §API-02's 422 row) — wire mapping to be settled at step 015; likewise the agent-links-proposed guard returns `InvalidState` (`invalid_state`) pending a 015 decision.
+- `allowed_actions` emits the full final operationId vocabulary now (decision: stable strings through 006–012); claimant-scoped extras (renew/release/report, agent `reviewSubmission`) slot in at 009 via an additional snapshot input without renaming.
+- `list_work`'s refill loop can scan the whole prefiltered candidate set when few rows are eligible — accepted for local v1 scale.
+- listWork cursors bind the caller's actor id into the filter fingerprint (deliberate deviation from other lists: review results are caller-dependent; cross-actor replay → `invalid_cursor`).
+- Epic snapshots bake the descendant active-work aggregate with the load-time clock; task-level claim expiry stays raw for the pure evaluator.
+- Decisions confirmed with the owner during planning: `delete_dependency` ships in 005; dependency mutations bump both endpoint revisions; `listDependencies` ships here; graphs include archived nodes; the agent accepted-work guard applies to the dependent only; `DomainError::ActiveWork` added now.
+
+Next eligible step: [006](006-completion-and-blocking.md).

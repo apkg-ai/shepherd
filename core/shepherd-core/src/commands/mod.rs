@@ -1,3 +1,4 @@
+mod dependencies;
 mod hierarchy;
 
 use std::future::Future;
@@ -9,8 +10,8 @@ use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{
-    Actor, ActorId, ActorKind, CommandId, EpicId, EventId, GoalId, ProjectId, Revision, TaskId,
-    TaskTypeId,
+    Actor, ActorId, ActorKind, CommandId, DependencyId, EpicId, EventId, GoalId, ProjectId,
+    Revision, TaskId, TaskTypeId,
 };
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store, rows};
@@ -140,6 +141,18 @@ impl PendingEvent {
             resource_id: id.as_uuid(),
             resource_revision: revision.value(),
             affected_ids: Vec::new(),
+        }
+    }
+
+    // affected carries [dependent, prerequisite, scope] (plan/08: both endpoints
+    // and affected scope).
+    pub(crate) fn dependency(id: DependencyId, revision: Revision, affected: Vec<Uuid>) -> Self {
+        Self {
+            event_type: "dependency.changed",
+            kind_rank: 5,
+            resource_id: id.as_uuid(),
+            resource_revision: revision.value(),
+            affected_ids: affected,
         }
     }
 }

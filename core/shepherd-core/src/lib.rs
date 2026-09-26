@@ -1,4 +1,5 @@
 pub mod commands;
+mod dag;
 pub mod error;
 pub mod model;
 pub mod queries;

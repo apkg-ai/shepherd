@@ -1,6 +1,10 @@
+pub(crate) mod graph;
 pub(crate) mod hierarchy;
+pub(crate) mod work;
 
+pub use graph::{DependencyListFilters, GRAPH_MAX_DEPENDENCIES, GRAPH_MAX_NODES, Graph, GraphNode};
 pub use hierarchy::{EpicListFilters, TaskListFilters};
+pub use work::{WorkFilters, WorkItem, WorkPhase};
 
 use std::sync::OnceLock;
 
