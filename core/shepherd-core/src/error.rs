@@ -23,6 +23,14 @@ pub enum DomainError {
     ArchivedScope,
     #[error("resource or scope is terminal")]
     TerminalScope,
+    #[error("resource has active work: {0}")]
+    ActiveWork(String),
+    #[error("dependency would create a cycle")]
+    DependencyCycle,
+    #[error("dependency endpoints are out of scope: {0}")]
+    ScopeMismatch(String),
+    #[error("graph exceeds contract bounds: {nodes} nodes, {dependencies} dependencies")]
+    GraphTooLarge { nodes: i64, dependencies: i64 },
     #[error("invalid state transition: {0}")]
     InvalidState(String),
     #[error(transparent)]
@@ -49,6 +57,11 @@ impl DomainError {
             DomainError::DuplicateTaskTypeKey { .. } => "validation_error",
             DomainError::ArchivedScope => "terminal",
             DomainError::TerminalScope => "terminal",
+            DomainError::ActiveWork(_) => "active_work",
+            DomainError::DependencyCycle => "dependency_cycle",
+            DomainError::ScopeMismatch(_) => "scope_mismatch",
+            // 422 per plan/05; plan/07's API-02 table omits it — recorded in the step handoff.
+            DomainError::GraphTooLarge { .. } => "graph_too_large",
             DomainError::InvalidState(_) => "invalid_state",
             DomainError::Storage(StorageError::Corrupt(_)) => "integrity_failure",
             // SQLITE_BUSY arrives as the low byte of the sqlite extended code.
@@ -106,6 +119,23 @@ mod tests {
         );
         assert_eq!(DomainError::ArchivedScope.code(), "terminal");
         assert_eq!(DomainError::TerminalScope.code(), "terminal");
+        assert_eq!(
+            DomainError::ActiveWork("claimed".into()).code(),
+            "active_work"
+        );
+        assert_eq!(DomainError::DependencyCycle.code(), "dependency_cycle");
+        assert_eq!(
+            DomainError::ScopeMismatch("cross-goal".into()).code(),
+            "scope_mismatch"
+        );
+        assert_eq!(
+            DomainError::GraphTooLarge {
+                nodes: 2001,
+                dependencies: 0
+            }
+            .code(),
+            "graph_too_large"
+        );
         assert_eq!(
             DomainError::InvalidState("wrong".into()).code(),
             "invalid_state"

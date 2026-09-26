@@ -1,6 +1,10 @@
+pub(crate) mod graph;
 pub(crate) mod hierarchy;
+pub(crate) mod work;
 
+pub use graph::{DependencyListFilters, GRAPH_MAX_DEPENDENCIES, GRAPH_MAX_NODES, Graph, GraphNode};
 pub use hierarchy::{EpicListFilters, TaskListFilters};
+pub use work::{WorkFilters, WorkItem, WorkPhase};
 
 use std::sync::OnceLock;
 
@@ -158,21 +162,32 @@ fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
 // base64url JSON of sort tuple, endpoint, filter fingerprint and MAC (plan/07).
 #[derive(Serialize)]
 struct CursorBody {
+    /// Cursor format version.
     v: u8,
+    /// Endpoint name bound into the MAC.
     e: String,
+    /// Filter fingerprint bound into the MAC.
     f: String,
+    /// Keyset sort column value (created_at).
     c: String,
+    /// Keyset tiebreaker value (id).
     i: String,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CursorPayload {
+    /// Cursor format version.
     v: u8,
+    /// Endpoint name bound into the MAC.
     e: String,
+    /// Filter fingerprint bound into the MAC.
     f: String,
+    /// Keyset sort column value (created_at).
     c: String,
+    /// Keyset tiebreaker value (id).
     i: String,
+    /// HMAC over the other fields.
     m: String,
 }
 

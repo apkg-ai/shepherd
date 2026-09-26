@@ -1,14 +1,14 @@
 use super::{
-    CommandContext, CommandResult, PendingEvent, append_events, live_actor, require_owner,
-    require_revision,
+    CommandContext, CommandResult, PendingEvent, append_events, has_active_work, live_actor,
+    require_owner, require_revision,
 };
 use crate::error::DomainError;
 use crate::model::{
-    BUILTIN_TASK_TYPES, DESCRIPTION_MAX_CHARS, Epic, EpicCreate, EpicId, EpicStatus, Goal,
-    GoalCreate, GoalId, NAME_MAX_CHARS, Project, ProjectCreate, ProjectId, ProjectPatch,
-    ProjectSettings, Revision, Task, TaskCreate, TaskId, TaskPatch, TaskType, TaskTypeCreate,
-    TaskTypeId, TaskTypePatch, TextPatch, validate_long_text, validate_required_text,
-    validate_type_key, validate_type_label,
+    BUILTIN_TASK_TYPES, DESCRIPTION_MAX_CHARS, DependencyLevel, Epic, EpicCreate, EpicId,
+    EpicStatus, Goal, GoalCreate, GoalId, NAME_MAX_CHARS, Project, ProjectCreate, ProjectId,
+    ProjectPatch, ProjectSettings, Revision, Task, TaskCreate, TaskId, TaskPatch, TaskType,
+    TaskTypeCreate, TaskTypeId, TaskTypePatch, TextPatch, validate_long_text,
+    validate_required_text, validate_type_key, validate_type_label,
 };
 use crate::queries::hierarchy::{
     epic_row, find_epic, find_goal, find_project, find_task, find_task_type, goal_row,
@@ -385,7 +385,7 @@ impl Store {
                     &project,
                     &ctx,
                     "createEpic",
-                    vec![PendingEvent::epic(id, Revision::INITIAL)],
+                    vec![PendingEvent::epic(id, Revision::INITIAL, goal)],
                 )
                 .await?;
                 let epic = find_epic(tx, &project, &id)
@@ -461,7 +461,7 @@ impl Store {
                     &project,
                     &ctx,
                     "updateEpic",
-                    vec![PendingEvent::epic(epic, next)],
+                    vec![PendingEvent::epic(epic, next, current.goal_id)],
                 )
                 .await?;
                 let updated = find_epic(tx, &project, &epic)
@@ -522,7 +522,7 @@ impl Store {
                     &project,
                     &ctx,
                     "acceptEpic",
-                    vec![PendingEvent::epic(epic, next)],
+                    vec![PendingEvent::epic(epic, next, current.goal_id)],
                 )
                 .await?;
                 let updated = find_epic(tx, &project, &epic)
@@ -631,7 +631,7 @@ impl Store {
                     &project,
                     &ctx,
                     "createTask",
-                    vec![PendingEvent::task(id, Revision::INITIAL)],
+                    vec![PendingEvent::task(id, Revision::INITIAL, epic)],
                 )
                 .await?;
                 let task = find_task(tx, &project, &id)
@@ -685,6 +685,13 @@ impl Store {
                 }
                 if current.status.is_terminal() || epic_current.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
+                }
+                // No edit while a claim is held or a review is pending (plan/03).
+                let now_text = format_ts(&ctx.now);
+                if has_active_work(tx, DependencyLevel::Task, task.as_uuid(), &now_text).await? {
+                    return Err(DomainError::ActiveWork(
+                        "task has an active claim or pending submission".into(),
+                    ));
                 }
                 if patch.is_empty() {
                     return Err(DomainError::Validation {
@@ -790,7 +797,7 @@ impl Store {
                     &project,
                     &ctx,
                     "updateTask",
-                    vec![PendingEvent::task(task, next)],
+                    vec![PendingEvent::task(task, next, current.epic_id)],
                 )
                 .await?;
                 let updated = find_task(tx, &project, &task)
@@ -858,7 +865,7 @@ impl Store {
                     &project,
                     &ctx,
                     "acceptTask",
-                    vec![PendingEvent::task(task, next)],
+                    vec![PendingEvent::task(task, next, current.epic_id)],
                 )
                 .await?;
                 let updated = find_task(tx, &project, &task)
@@ -2284,5 +2291,57 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, DomainError::Forbidden(_)));
+    }
+
+    #[tokio::test]
+    async fn update_task_rejects_active_claims_and_pending_reviews() {
+        let f = fixture().await;
+        let project = project(&f, "P").await;
+        let goal = goal(&f, project.id, "G").await;
+        let e = epic(&f, project.id, goal.id, "E").await;
+        let t = task(&f, project.id, e.id, "T").await;
+        let patch = TaskPatch {
+            title: Some("Renamed".to_string()),
+            ..Default::default()
+        };
+        // Direct-SQL fixture: claim and submission commands land in steps 009/011.
+        sqlx::query(
+            "INSERT INTO claims (id, task_id, actor_id, phase, acquired_at, expires_at, \
+             status, task_revision, lease_hash) VALUES (?1, ?2, ?3, 'execute', ?4, ?5, \
+             'active', 1, 'hash')",
+        )
+        .bind(Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string())
+        .bind(t.id.to_string())
+        .bind(f.owner.id.to_string())
+        .bind(format_ts(&f.clock.now()))
+        .bind(format_ts(&(f.clock.now() + chrono::Duration::minutes(30))))
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+        let err = f
+            .store
+            .update_task(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project.id,
+                t.id,
+                patch.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ActiveWork(_)));
+
+        // Expiring exactly now is inactive (plan/04): the edit goes through.
+        sqlx::query("UPDATE claims SET expires_at = ?1 WHERE task_id = ?2")
+            .bind(format_ts(&f.clock.now()))
+            .bind(t.id.to_string())
+            .execute(f.store.pool())
+            .await
+            .unwrap();
+        let updated = f
+            .store
+            .update_task(ctx(&f.owner, &f.clock, Some(1)), project.id, t.id, patch)
+            .await
+            .unwrap();
+        assert_eq!(updated.value.title, "Renamed");
     }
 }
