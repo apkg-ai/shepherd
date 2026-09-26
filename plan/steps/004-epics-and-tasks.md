@@ -1,6 +1,6 @@
 # 004 — Separate epic and task resources
 
-Status: not started. Requirements: HIER-01 FLOW-01.
+Status: implemented and merged (PR #85, squash commit f0722bb). Requirements: HIER-01 FLOW-01.
 
 ## Objective and prerequisites
 
@@ -58,13 +58,39 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Completion checklist
 
-- [ ] Referenced requirements and every acceptance sentence implemented.
-- [ ] Schemas, permissions, transitions and clients remain consistent.
-- [ ] Success and rejection behavior verified at the public boundary.
-- [ ] Required commands pass; material environmental limitation recorded accurately.
-- [ ] Temporary code and next-step dependencies documented.
-- [ ] Handoff below completed; next eligible step linked.
+- [x] Referenced requirements and every acceptance sentence implemented.
+- [x] Schemas, permissions, transitions and clients remain consistent.
+- [x] Success and rejection behavior verified at the public boundary.
+- [x] Required commands pass; material environmental limitation recorded accurately.
+- [x] Temporary code and next-step dependencies documented.
+- [x] Handoff below completed; next eligible step linked.
 
 ## Implementation handoff record
 
-Fill when implementing, not during planning: commit/branch; files changed; test commands and results; any reproduced limitation; temporary interfaces; next eligible step IDs. If an acceptance criterion cannot pass, leave this step incomplete and explain the concrete blocker. Do not mark complete for code that merely compiles.
+Branch `v1-004-epics-and-tasks`, squash-merged as f0722bb (PR #85). This record was back-filled from the merge commit and tree during the step-005 full review; the step shipped before its handoff was written.
+
+### Files changed
+
+- New: `core/shepherd-core/src/model/{epic,task}.rs`, `core/shepherd-core/src/workflow/{mod,policy}.rs`, `core/shepherd-core/tests/v1_epics_and_tasks.rs`.
+- Amended: `commands/hierarchy.rs` (epic/task create/get/list/update/accept commands), `queries/hierarchy.rs` (row converters, batched counts, scoping), `commands/mod.rs`, `error.rs`, `model/{mod,project}.rs`, `lib.rs`, `queries/mod.rs`.
+
+### What was built
+
+Separate `Epic`/`Task` models with distinct status enums (`resource_status!` macro) and the five-phase task workflow (planning → plan_review → execution → work_review → complete). Commands: create/get/list/update/accept for both resources, scoped membership (404 across projects), owner-only accept, immutable ownership, task-type registry validation (`^[a-z][a-z0-9_]{0,39}$`), policy snapshots from project defaults at creation, agent-cannot-lower policy enforcement (`enforce_agent_floor`, only when the patch touches policy fields), terminal-edit and archived-chain guards (including the epic terminal status on task mutations), phase reset on actual (not merely present) policy/description change with plan-acceptance clearing, and batched task-count aggregation with waived counting in one conditional-aggregation query. No status PATCH exists (accept is the only proposed → open transition).
+
+### Test commands and results (Rust 1.98.1)
+
+- From `core/`: `cargo fmt --check` — clean; `cargo clippy --all-targets -- -D warnings` — clean; `cargo test --workspace` — 214 green at merge (159 → 187 → 192 → 214 across the PR's fix cycles, per the squash-commit message); unit coverage raised from 80.6% to 93.4% (CI-measured) with the in-module suites added during review.
+- Every acceptance sentence has a named regression test in `tests/v1_epics_and_tasks.rs`: `task_without_epic_fails`, `wrong_project_epic_fails`, `epic_is_never_a_task_type_or_claimable`, `changing_defaults_affects_only_future_tasks`, `agent_cannot_lower_inherited_requirements`, `no_status_patch_is_accepted` — all verified against the current tree by the step-005 review.
+
+### Limitations and temporary interfaces
+
+- Archive/cancel/complete commands land in step 006; archived/terminal states in tests are direct-SQL fixtures with step-ownership comments.
+- The recompute cascade is a stub (full cascade logic lands with completion in 006).
+- Cross-entity counts (`Goal.completed` derivation) read the batched GROUP BY; no per-node queries.
+
+### Review follow-ups (PR review, pre-merge)
+
+Per the squash-commit message: archived-scope gaps fixed (update/accept epic and task now check the owning goal/epic archived chain), failure precedence corrected (capability before revision in `update_task`), no-op phase reset fixed (value comparison instead of field presence), and the compliance review's PR-scoped findings addressed (SEC-01 boundary documentation, SEC-04 `CountScope` enum, SEC-05 validated type_key echo, PERF-02 single-query counts, QUAL-04 status macro, QUAL-05/06 cleanups). The full findings register lives in `review/004-compliance-review.md` (working tree, untracked by convention).
+
+Next eligible step: [005](005-dependencies-and-eligibility.md).
