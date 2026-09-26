@@ -662,9 +662,12 @@ pub struct TaskListFilters {
     pub type_key: Option<String>,
 }
 
-// "none" keeps the fingerprint deterministic for absent filters.
+// Absent filters render "none"; present values are prefixed so a value literally
+// named "none" (a legal type key) cannot collide with the absent token.
+// Absent filters render "none"; present values are prefixed so a value literally
+// named "none" (a legal type key) cannot collide with the absent token.
 fn filter_token(value: Option<impl std::fmt::Display>) -> String {
-    value.map_or_else(|| "none".to_string(), |v| v.to_string())
+    value.map_or_else(|| "none".to_string(), |v| format!("some:{v}"))
 }
 
 fn epics_filter(project: &ProjectId, filters: &EpicListFilters, include_archived: bool) -> String {

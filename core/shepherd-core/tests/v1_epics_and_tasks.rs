@@ -7,7 +7,8 @@ use shepherd_core::error::DomainError;
 use shepherd_core::model::{
     Actor, ActorId, ActorKind, Clock, CommandId, Counts, Epic, EpicCreate, EpicId, EpicStatus,
     Goal, GoalCreate, GoalId, Project, ProjectCreate, ProjectId, ProjectPatch, ProjectSettings,
-    ReviewPolicy, Task, TaskCreate, TaskId, TaskPatch, TaskPhase, TaskStatus, TestClock, TextPatch,
+    ReviewPolicy, Task, TaskCreate, TaskId, TaskPatch, TaskPhase, TaskStatus, TaskTypeCreate,
+    TestClock, TextPatch,
 };
 use shepherd_core::queries::{EpicListFilters, ListParams, TaskListFilters};
 use shepherd_core::storage::rows::{format_ts, insert_actor};
@@ -3122,6 +3123,92 @@ async fn list_tasks_supports_epic_phase_and_type_filters_and_project_wide_pages(
                         .next_cursor
                         .unwrap(),
                 ),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::InvalidCursor(_)));
+}
+
+#[tokio::test]
+async fn type_key_none_does_not_collide_with_the_absent_filter_token() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    s.store
+        .create_task_type(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            TaskTypeCreate {
+                key: "none".to_string(),
+                label: "None".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let code = create_task(&s, project.id, epic.id, "code task").await;
+    let none = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "none task".to_string(),
+                type_key: "none".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+
+    // The "none" filter is a real, different result set.
+    let filtered = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                type_key: Some("none".to_string()),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        filtered.items.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![none.id]
+    );
+
+    // ...so the unfiltered page's cursor must not validate under it.
+    let page = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters::default(),
+            &ListParams {
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.items[0].id, code.id);
+    assert!(page.next_cursor.is_some());
+    let err = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                type_key: Some("none".to_string()),
+                ..Default::default()
+            },
+            &ListParams {
+                limit: Some(1),
+                cursor: page.next_cursor,
                 ..Default::default()
             },
         )
