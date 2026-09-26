@@ -70,6 +70,12 @@ pub struct GateReason {
     pub message: String,
 }
 
+/// Contract bound on Eligibility.reasons (openapi maxItems).
+pub const MAX_REASONS: usize = 1_000;
+/// Slots reserved for the bounded gate codes emitted around the prerequisite
+/// reasons: every GateCode variant except the two prerequisite codes.
+const PREREQ_REASON_BUDGET: usize = MAX_REASONS - 13;
+
 impl GateReason {
     fn new(code: GateCode, resource_id: Uuid, message: &str) -> Self {
         Self {
@@ -175,7 +181,22 @@ fn archived_task_resource(snapshot: &TaskSnapshot) -> Option<Uuid> {
 pub fn evaluate_task(snapshot: &TaskSnapshot, actor: &Actor, now: DateTime<Utc>) -> Eligibility {
     let task = &snapshot.task;
 
-    // Terminal/archived exits early with a single reason (plan/04).
+    // Archived/terminal exits early with a single reason (plan/04). Archival
+    // first: valid archived records are always terminal (plan/03), so the
+    // terminal gate would otherwise hide the archived one.
+    if let Some(resource) = archived_task_resource(snapshot) {
+        return Eligibility {
+            can_plan: false,
+            can_execute: false,
+            can_review: false,
+            reasons: vec![GateReason::new(
+                GateCode::Archived,
+                resource,
+                "resource is archived",
+            )],
+            allowed_actions: allowed_task_actions(snapshot, actor, now, &NO_FLAGS),
+        };
+    }
     if task.status.is_terminal() || snapshot.epic_status.is_terminal() {
         let resource = if task.status.is_terminal() {
             task.id.as_uuid()
@@ -190,19 +211,6 @@ pub fn evaluate_task(snapshot: &TaskSnapshot, actor: &Actor, now: DateTime<Utc>)
                 GateCode::Terminal,
                 resource,
                 "resource is terminal",
-            )],
-            allowed_actions: allowed_task_actions(snapshot, actor, now, &NO_FLAGS),
-        };
-    }
-    if let Some(resource) = archived_task_resource(snapshot) {
-        return Eligibility {
-            can_plan: false,
-            can_execute: false,
-            can_review: false,
-            reasons: vec![GateReason::new(
-                GateCode::Archived,
-                resource,
-                "resource is archived",
             )],
             allowed_actions: allowed_task_actions(snapshot, actor, now, &NO_FLAGS),
         };
@@ -295,19 +303,31 @@ pub fn evaluate_task(snapshot: &TaskSnapshot, actor: &Actor, now: DateTime<Utc>)
             "owning epic is explicitly blocked",
         ));
     }
+    // Prerequisite reasons are the only unbounded set — nothing caps stored
+    // links — so the emitted list stays inside the contract bound while the
+    // flags above still consider every prerequisite.
+    let mut prereq_reasons = 0;
     for id in &unmet_epic {
+        if prereq_reasons == PREREQ_REASON_BUDGET {
+            break;
+        }
         reasons.push(GateReason::new(
             GateCode::EpicPrerequisite,
             id.as_uuid(),
             "epic prerequisite is not done",
         ));
+        prereq_reasons += 1;
     }
     for id in &unmet_task {
+        if prereq_reasons == PREREQ_REASON_BUDGET {
+            break;
+        }
         reasons.push(GateReason::new(
             GateCode::TaskPrerequisite,
             id.as_uuid(),
             "task prerequisite is not done",
         ));
+        prereq_reasons += 1;
     }
     if task.planning_required
         && !plan_ok
@@ -443,11 +463,15 @@ fn allowed_task_actions(
     if flags.can_review && owner {
         actions.push("reviewSubmission");
     }
+    // Agents may only link accepted dependents (plan/03): a proposed epic
+    // rejects them in create_dependency just like a proposed task does.
     if !terminal
         && epic_live
         && unclaimed
         && !pending
-        && (owner || task.status != TaskStatus::Proposed)
+        && (owner
+            || (task.status != TaskStatus::Proposed
+                && snapshot.epic_status != EpicStatus::Proposed))
     {
         actions.push("createDependency");
     }
@@ -458,19 +482,6 @@ pub fn evaluate_epic(snapshot: &EpicSnapshot, actor: &Actor, _now: DateTime<Utc>
     let epic = &snapshot.epic;
     let allowed_actions = allowed_epic_actions(snapshot, actor);
 
-    if epic.status.is_terminal() {
-        return Eligibility {
-            can_plan: false,
-            can_execute: false,
-            can_review: false,
-            reasons: vec![GateReason::new(
-                GateCode::Terminal,
-                epic.id.as_uuid(),
-                "resource is terminal",
-            )],
-            allowed_actions,
-        };
-    }
     if epic.archived || snapshot.goal_archived || snapshot.project_archived {
         let resource = if epic.archived {
             epic.id.as_uuid()
@@ -487,6 +498,19 @@ pub fn evaluate_epic(snapshot: &EpicSnapshot, actor: &Actor, _now: DateTime<Utc>
                 GateCode::Archived,
                 resource,
                 "resource is archived",
+            )],
+            allowed_actions,
+        };
+    }
+    if epic.status.is_terminal() {
+        return Eligibility {
+            can_plan: false,
+            can_execute: false,
+            can_review: false,
+            reasons: vec![GateReason::new(
+                GateCode::Terminal,
+                epic.id.as_uuid(),
+                "resource is terminal",
             )],
             allowed_actions,
         };
@@ -516,7 +540,8 @@ pub fn evaluate_epic(snapshot: &EpicSnapshot, actor: &Actor, _now: DateTime<Utc>
             "epic is explicitly blocked",
         ));
     }
-    for id in &unmet {
+    // Same contract-bound cap as evaluate_task; see the note there.
+    for id in unmet.iter().take(PREREQ_REASON_BUDGET) {
         reasons.push(GateReason::new(
             GateCode::EpicPrerequisite,
             id.as_uuid(),
@@ -1158,6 +1183,28 @@ mod tests {
     }
 
     #[test]
+    fn archived_terminal_records_report_the_archived_gate() {
+        // Valid archived records are always terminal (plan/03); the archived
+        // gate must win so archived and live terminal work stay distinct.
+        let mut task = task();
+        task.status = TaskStatus::Done;
+        task.phase = TaskPhase::Complete;
+        task.archived = true;
+        let snapshot = snapshot(task);
+        let expected = snapshot.task.id.as_uuid();
+        let verdict = evaluate_task(&snapshot, &person(ActorKind::Human), now());
+        assert_eq!(codes(&verdict), vec!["archived"]);
+        assert_eq!(verdict.reasons[0].resource_id, expected);
+        assert!(verdict.allowed_actions.is_empty());
+
+        let mut epic = epic();
+        epic.status = EpicStatus::Done;
+        epic.archived = true;
+        let verdict = evaluate_epic(&epic_snapshot(epic), &person(ActorKind::Human), now());
+        assert_eq!(codes(&verdict), vec!["archived"]);
+    }
+
+    #[test]
     fn gates_report_in_contract_order() {
         let mut task = task();
         task.status = TaskStatus::Proposed;
@@ -1196,6 +1243,40 @@ mod tests {
         assert_eq!(verdict.reasons[0].resource_id, first.as_uuid());
         assert_eq!(verdict.reasons[1].resource_id, second.as_uuid());
         assert!(!verdict.can_execute);
+    }
+
+    #[test]
+    fn prerequisite_reasons_stay_within_the_contract_bound() {
+        // Nothing caps stored links, so unmet prerequisites are capped at
+        // emit time to keep Eligibility.reasons inside the openapi maxItems.
+        let mut snapshot = snapshot(task());
+        snapshot.task_prereqs = (0..MAX_REASONS as i64 + 200)
+            .map(|i| {
+                (
+                    TaskId::generate(ts("2026-09-15T00:00:00Z") + chrono::Duration::seconds(i)),
+                    TaskStatus::Open,
+                )
+            })
+            .collect();
+        let verdict = evaluate_task(&snapshot, &person(ActorKind::Human), now());
+        assert!(!verdict.can_execute);
+        assert!(verdict.reasons.len() <= MAX_REASONS);
+        assert_eq!(verdict.reasons.len(), PREREQ_REASON_BUDGET);
+        assert!(
+            verdict
+                .reasons
+                .iter()
+                .all(|reason| reason.code == GateCode::TaskPrerequisite)
+        );
+
+        let mut epic_snapshot = epic_snapshot(epic());
+        epic_snapshot.epic_prereqs = snapshot
+            .task_prereqs
+            .iter()
+            .map(|(id, _)| (EpicId::from_uuid(id.as_uuid()), EpicStatus::Open))
+            .collect();
+        let verdict = evaluate_epic(&epic_snapshot, &person(ActorKind::Human), now());
+        assert_eq!(verdict.reasons.len(), PREREQ_REASON_BUDGET);
     }
 
     #[test]
@@ -1409,6 +1490,18 @@ mod tests {
         let verdict = evaluate_task(&snapshot, &person(ActorKind::Human), now());
         assert!(verdict.allowed_actions.contains(&"createDependency"));
         assert!(verdict.allowed_actions.contains(&"acceptTask"));
+    }
+
+    #[test]
+    fn agents_cannot_link_dependents_under_proposed_epics() {
+        // create_dependency rejects agents when the owning epic is proposed
+        // (task_endpoint), so the action must not be advertised either.
+        let mut snapshot = snapshot(task());
+        snapshot.epic_status = EpicStatus::Proposed;
+        let verdict = evaluate_task(&snapshot, &person(ActorKind::Agent), now());
+        assert!(!verdict.allowed_actions.contains(&"createDependency"));
+        let verdict = evaluate_task(&snapshot, &person(ActorKind::Human), now());
+        assert!(verdict.allowed_actions.contains(&"createDependency"));
     }
 
     #[test]
