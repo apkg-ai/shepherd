@@ -400,6 +400,7 @@ impl Store {
         .await
     }
 
+    // No require_owner: writers (agents included) edit nonterminal epics (plan/12).
     pub async fn update_epic(
         &self,
         ctx: CommandContext,
@@ -409,11 +410,10 @@ impl Store {
     ) -> Result<CommandResult<Epic>, DomainError> {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                live_actor(tx, &ctx.actor.id).await?;
                 let current = epic_row(tx, &project, &epic)
                     .await?
                     .ok_or(DomainError::NotFound)?;
-                require_owner(&actor)?;
                 require_revision(ctx.expected_revision, current.revision)?;
                 let goal_current = goal_row(tx, &project, &current.goal_id)
                     .await?
@@ -485,10 +485,11 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                require_owner(&actor)?;
+                // Membership precedes capability (plan/04): a missing or foreign epic is 404.
                 let current = epic_row(tx, &project, &epic)
                     .await?
                     .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
                 require_revision(ctx.expected_revision, current.revision)?;
                 let goal_current = goal_row(tx, &project, &current.goal_id)
                     .await?
@@ -557,6 +558,12 @@ impl Store {
                     .await?
                     .ok_or(DomainError::NotFound)?;
                 if epic_current.archived {
+                    return Err(DomainError::ArchivedScope);
+                }
+                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if goal_current.archived {
                     return Err(DomainError::ArchivedScope);
                 }
                 if epic_current.status.is_terminal() {
@@ -664,7 +671,14 @@ impl Store {
                 let epic_current = epic_row(tx, &project, &current.epic_id)
                     .await?
                     .ok_or(DomainError::NotFound)?;
-                if current.archived || epic_current.archived || proj.archived {
+                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || epic_current.archived
+                    || goal_current.archived
+                    || proj.archived
+                {
                     return Err(DomainError::ArchivedScope);
                 }
                 if current.status.is_terminal() || epic_current.status.is_terminal() {
@@ -797,16 +811,21 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                require_owner(&actor)?;
+                // Membership precedes capability (plan/04): a missing or foreign task is 404.
                 let current = task_row(tx, &project, &task)
                     .await?
                     .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
                 require_revision(ctx.expected_revision, current.revision)?;
                 let epic_current = epic_row(tx, &project, &current.epic_id)
                     .await?
                     .ok_or(DomainError::NotFound)?;
+                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
                 if current.archived
                     || epic_current.archived
+                    || goal_current.archived
                     || project_archived(tx, &project).await?
                 {
                     return Err(DomainError::ArchivedScope);

@@ -9,7 +9,7 @@ use shepherd_core::model::{
     Goal, GoalCreate, GoalId, Project, ProjectCreate, ProjectId, ProjectPatch, ProjectSettings,
     ReviewPolicy, Task, TaskCreate, TaskId, TaskPatch, TaskPhase, TaskStatus, TestClock, TextPatch,
 };
-use shepherd_core::queries::ListParams;
+use shepherd_core::queries::{EpicListFilters, ListParams, TaskListFilters};
 use shepherd_core::storage::rows::{format_ts, insert_actor};
 use shepherd_core::storage::{Store, open, testing};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -161,6 +161,54 @@ async fn create_task(s: &Setup, project: ProjectId, epic: EpicId, title: &str) -
         .await
         .unwrap()
         .value
+}
+
+// Minimal plan fixture: documents and document_revisions reference each other under
+// deferred FKs, so both rows plus the task link commit in one transaction.
+async fn seed_selected_plan(s: &Setup, project: ProjectId, task: TaskId) {
+    let now = format_ts(&s.clock.now());
+    let document_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+    let revision_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+    let mut tx = s.store.pool().begin().await.unwrap();
+    sqlx::query(
+        "INSERT INTO documents (id, revision, created_at, updated_at, project_id, \
+         owner_kind, owner_id, kind, title, latest_revision_id) \
+         VALUES (?1, 1, ?2, ?2, ?3, 'task', ?4, 'plan', 'Plan', ?5)",
+    )
+    .bind(&document_id)
+    .bind(&now)
+    .bind(project.to_string())
+    .bind(task.to_string())
+    .bind(&revision_id)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO document_revisions (id, document_id, number, body, links, actor_id, \
+         created_at) VALUES (?1, ?2, 1, '# Plan', '[]', ?3, ?4)",
+    )
+    .bind(&revision_id)
+    .bind(&document_id)
+    .bind(s.owner.id.to_string())
+    .bind(&now)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE tasks SET selected_plan_revision_id = ?1 WHERE id = ?2")
+        .bind(&revision_id)
+        .bind(task.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+}
+
+async fn selected_plan_revision_id(s: &Setup, task: TaskId) -> Option<String> {
+    sqlx::query_scalar("SELECT selected_plan_revision_id FROM tasks WHERE id = ?1")
+        .bind(task.to_string())
+        .fetch_one(s.store.pool())
+        .await
+        .unwrap()
 }
 
 async fn table_count(conn: &mut SqliteConnection, table: &str) -> i64 {
@@ -950,7 +998,10 @@ async fn list_epics_pages_under_goal() {
         .store
         .list_epics(
             &project.id,
-            &goal.id,
+            &EpicListFilters {
+                goal_id: Some(goal.id),
+                ..Default::default()
+            },
             &ListParams {
                 limit: Some(2),
                 ..Default::default()
@@ -968,7 +1019,10 @@ async fn list_epics_pages_under_goal() {
         .store
         .list_epics(
             &project.id,
-            &goal.id,
+            &EpicListFilters {
+                goal_id: Some(goal.id),
+                ..Default::default()
+            },
             &ListParams {
                 limit: Some(2),
                 cursor: page1.next_cursor,
@@ -996,7 +1050,10 @@ async fn list_tasks_pages_under_epic() {
         .store
         .list_tasks(
             &project.id,
-            &epic.id,
+            &TaskListFilters {
+                epic_id: Some(epic.id),
+                ..Default::default()
+            },
             &ListParams {
                 limit: Some(2),
                 ..Default::default()
@@ -1013,7 +1070,10 @@ async fn list_tasks_pages_under_epic() {
         .store
         .list_tasks(
             &project.id,
-            &epic.id,
+            &TaskListFilters {
+                epic_id: Some(epic.id),
+                ..Default::default()
+            },
             &ListParams {
                 limit: Some(2),
                 cursor: page1.next_cursor,
@@ -1944,6 +2004,15 @@ async fn update_task_type_key_change() {
     assert_eq!(task.type_key, "code");
     assert_eq!(task.phase, TaskPhase::Planning);
 
+    // Off the initial phase with an accepted plan: a type-only change must keep both.
+    sqlx::query("UPDATE tasks SET phase = 'execution', status = 'active' WHERE id = ?1")
+        .bind(task.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+    seed_selected_plan(&s, project.id, task.id).await;
+    let plan_before = selected_plan_revision_id(&s, task.id).await;
+
     s.clock.advance(TimeDelta::seconds(1));
     let updated = s
         .store
@@ -1960,7 +2029,8 @@ async fn update_task_type_key_change() {
         .unwrap()
         .value;
     assert_eq!(updated.type_key, "research");
-    assert_eq!(updated.phase, TaskPhase::Planning);
+    assert_eq!(updated.phase, TaskPhase::Execution);
+    assert_eq!(selected_plan_revision_id(&s, task.id).await, plan_before);
 }
 
 #[tokio::test]
@@ -1988,6 +2058,7 @@ async fn update_task_description_change_triggers_phase_recomputation() {
         .execute(s.store.pool())
         .await
         .unwrap();
+    seed_selected_plan(&s, project.id, task.id).await;
 
     s.clock.advance(TimeDelta::seconds(1));
     let updated = s
@@ -2005,8 +2076,10 @@ async fn update_task_description_change_triggers_phase_recomputation() {
         .unwrap()
         .value;
     assert_eq!(updated.description, "Scope changed");
-    // Description change resets phase back to planning (planning_required=true).
+    // Description change resets phase back to planning (planning_required=true) and
+    // invalidates the accepted plan.
     assert_eq!(updated.phase, TaskPhase::Planning);
+    assert_eq!(selected_plan_revision_id(&s, task.id).await, None);
 }
 
 #[tokio::test]
@@ -2033,9 +2106,11 @@ async fn update_task_same_policy_does_not_reset_phase() {
         .execute(s.store.pool())
         .await
         .unwrap();
+    seed_selected_plan(&s, project.id, task.id).await;
+    let plan_before = selected_plan_revision_id(&s, task.id).await;
 
     s.clock.advance(TimeDelta::seconds(1));
-    // Sending the same policy values must NOT trigger a phase reset.
+    // Sending the same policy values must NOT trigger a phase reset or plan invalidation.
     let updated = s
         .store
         .update_task(
@@ -2053,6 +2128,7 @@ async fn update_task_same_policy_does_not_reset_phase() {
         .value;
     assert_eq!(updated.phase, TaskPhase::Execution);
     assert!(updated.planning_required);
+    assert_eq!(selected_plan_revision_id(&s, task.id).await, plan_before);
 }
 
 #[tokio::test]
@@ -2089,7 +2165,14 @@ async fn list_epics_empty_goal_returns_empty_page() {
 
     let page = s
         .store
-        .list_epics(&project.id, &goal.id, &ListParams::default())
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                goal_id: Some(goal.id),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
         .await
         .unwrap();
     assert!(page.items.is_empty());
@@ -2104,7 +2187,14 @@ async fn list_tasks_nonexistent_epic_returns_not_found() {
 
     let err = s
         .store
-        .list_tasks(&project.id, &fake_epic, &ListParams::default())
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                epic_id: Some(fake_epic),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, DomainError::NotFound));
@@ -2312,7 +2402,14 @@ async fn archived_epics_are_hidden_unless_requested() {
 
     let visible = s
         .store
-        .list_epics(&project.id, &goal.id, &ListParams::default())
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                goal_id: Some(goal.id),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -2324,7 +2421,10 @@ async fn archived_epics_are_hidden_unless_requested() {
         .store
         .list_epics(
             &project.id,
-            &goal.id,
+            &EpicListFilters {
+                goal_id: Some(goal.id),
+                ..Default::default()
+            },
             &ListParams {
                 include_archived: true,
                 ..Default::default()
@@ -2367,7 +2467,14 @@ async fn archived_tasks_are_hidden_unless_requested() {
 
     let visible = s
         .store
-        .list_tasks(&project.id, &epic.id, &ListParams::default())
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                epic_id: Some(epic.id),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -2379,7 +2486,10 @@ async fn archived_tasks_are_hidden_unless_requested() {
         .store
         .list_tasks(
             &project.id,
-            &epic.id,
+            &TaskListFilters {
+                epic_id: Some(epic.id),
+                ..Default::default()
+            },
             &ListParams {
                 include_archived: true,
                 ..Default::default()
@@ -2488,4 +2598,534 @@ async fn update_task_beneath_terminal_epic_fails() {
         .await
         .unwrap_err();
     assert!(matches!(err, DomainError::TerminalScope));
+}
+
+// ── Writer edits and membership precedence ───────────────────────────
+
+#[tokio::test]
+async fn agent_edits_nonterminal_epic_description() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    s.clock.advance(TimeDelta::seconds(1));
+    let updated = s
+        .store
+        .update_epic(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            epic.id,
+            TextPatch {
+                title: Some("Agent title".to_string()),
+                description: Some("Agent description".to_string()),
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(updated.title, "Agent title");
+    assert_eq!(updated.description, "Agent description");
+    assert_eq!(updated.revision.value(), 2);
+
+    // Guards apply to writers as well.
+    sqlx::query("UPDATE epics SET status = 'done' WHERE id = ?1")
+        .bind(epic.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+    s.clock.advance(TimeDelta::seconds(1));
+    let err = s
+        .store
+        .update_epic(
+            ctx(&agent, s.clock.now(), Some(2)),
+            project.id,
+            epic.id,
+            TextPatch {
+                title: Some("Too late".to_string()),
+                description: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::TerminalScope));
+}
+
+#[tokio::test]
+async fn accept_epic_by_agent_missing_or_foreign_id_is_not_found() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let missing = s
+        .store
+        .accept_epic(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            EpicId::generate(s.clock.now()),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(missing, DomainError::NotFound));
+
+    let other_project = create_project(&s, "P2").await;
+    let other_goal = create_goal(&s, other_project.id, "G2").await;
+    let other_epic = create_epic(&s, other_project.id, other_goal.id, "E2").await;
+    let foreign = s
+        .store
+        .accept_epic(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            other_epic.id,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(foreign, DomainError::NotFound));
+}
+
+#[tokio::test]
+async fn accept_task_by_agent_missing_or_foreign_id_is_not_found() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let missing = s
+        .store
+        .accept_task(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            TaskId::generate(s.clock.now()),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(missing, DomainError::NotFound));
+
+    let other_project = create_project(&s, "P2").await;
+    let other_goal = create_goal(&s, other_project.id, "G2").await;
+    let other_epic = create_epic(&s, other_project.id, other_goal.id, "E2").await;
+    let other_task = create_task(&s, other_project.id, other_epic.id, "T2").await;
+    let foreign = s
+        .store
+        .accept_task(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            other_task.id,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(foreign, DomainError::NotFound));
+}
+
+// ── Archived-goal guards on task mutations ──────────────────────────
+
+async fn archive_goal(s: &Setup, goal: GoalId) {
+    sqlx::query(
+        "UPDATE goals SET archived = 1, archive_actor_id = ?1, \
+         archive_reason = 'done', archive_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(goal.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn create_task_under_archived_goal_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    archive_goal(&s, goal.id).await;
+
+    let err = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Late".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+}
+
+#[tokio::test]
+async fn update_task_beneath_archived_goal_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+    archive_goal(&s, goal.id).await;
+
+    let err = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                title: Some("Renamed".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+
+    let mut conn = independent_connection(&s.db_path()).await;
+    let revision: i64 = sqlx::query_scalar("SELECT revision FROM tasks WHERE id = ?1")
+        .bind(task.id.to_string())
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(revision, 1);
+}
+
+#[tokio::test]
+async fn accept_task_beneath_archived_goal_fails() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+    let task = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Proposed".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    archive_goal(&s, goal.id).await;
+
+    let err = s
+        .store
+        .accept_task(ctx(&s.owner, s.clock.now(), Some(1)), project.id, task.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+}
+
+// ── List filters and project-wide pagination ────────────────────────
+
+#[tokio::test]
+async fn list_epics_supports_goal_and_status_filters_and_project_wide_pages() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let g1 = create_goal(&s, project.id, "G1").await;
+    let g2 = create_goal(&s, project.id, "G2").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let open = create_epic(&s, project.id, g1.id, "open").await;
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let proposed = s
+        .store
+        .create_epic(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            g1.id,
+            EpicCreate {
+                title: "Proposed".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let other_goal_epic = create_epic(&s, project.id, g2.id, "other").await;
+
+    // Project-wide: every epic across goals, one page at a time.
+    let page1 = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters::default(),
+            &ListParams {
+                limit: Some(2),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        page1.items.iter().map(|e| e.id).collect::<Vec<_>>(),
+        vec![open.id, proposed.id]
+    );
+    let page2 = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters::default(),
+            &ListParams {
+                limit: Some(2),
+                cursor: page1.next_cursor.clone(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page2.items[0].id, other_goal_epic.id);
+    assert!(page2.next_cursor.is_none());
+
+    // Goal filter narrows to one goal's epics.
+    let scoped = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                goal_id: Some(g1.id),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        scoped.items.iter().map(|e| e.id).collect::<Vec<_>>(),
+        vec![open.id, proposed.id]
+    );
+
+    // Status filter narrows further.
+    let proposed_only = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                status: Some(EpicStatus::Proposed),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        proposed_only.items.iter().map(|e| e.id).collect::<Vec<_>>(),
+        vec![proposed.id]
+    );
+
+    // Unknown project is 404, not an empty page.
+    let err = s
+        .store
+        .list_epics(
+            &ProjectId::generate(s.clock.now()),
+            &EpicListFilters::default(),
+            &ListParams::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+
+    // A cursor minted under one filter set is invalid under another.
+    let err = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                goal_id: Some(g2.id),
+                ..Default::default()
+            },
+            &ListParams {
+                cursor: page1.next_cursor,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::InvalidCursor(_)));
+}
+
+#[tokio::test]
+async fn list_tasks_supports_epic_phase_and_type_filters_and_project_wide_pages() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let g1 = create_goal(&s, project.id, "G1").await;
+    let g2 = create_goal(&s, project.id, "G2").await;
+    let e1 = create_epic(&s, project.id, g1.id, "E1").await;
+    let e2 = create_epic(&s, project.id, g2.id, "E2").await;
+
+    let code_one = create_task(&s, project.id, e1.id, "code one").await;
+    let research = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            e1.id,
+            TaskCreate {
+                title: "research".to_string(),
+                type_key: "research".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let code_two = create_task(&s, project.id, e2.id, "code two").await;
+    sqlx::query("UPDATE tasks SET phase = 'planning', status = 'active' WHERE id = ?1")
+        .bind(research.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+
+    // Project-wide: tasks from both epics, cursor-walked one at a time.
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = s
+            .store
+            .list_tasks(
+                &project.id,
+                &TaskListFilters::default(),
+                &ListParams {
+                    limit: Some(1),
+                    cursor,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        seen.extend(page.items.iter().map(|t| t.id));
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(seen, vec![code_one.id, research.id, code_two.id]);
+
+    // Epic filter narrows to one epic's tasks.
+    let scoped = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                epic_id: Some(e1.id),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        scoped.items.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![code_one.id, research.id]
+    );
+
+    // Phase filter.
+    let planning = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                phase: Some(TaskPhase::Planning),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        planning.items.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![research.id]
+    );
+
+    // Type filter spans epics.
+    let code = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                type_key: Some("code".to_string()),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        code.items.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![code_one.id, code_two.id]
+    );
+
+    // Unknown project is 404.
+    let err = s
+        .store
+        .list_tasks(
+            &ProjectId::generate(s.clock.now()),
+            &TaskListFilters::default(),
+            &ListParams::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+
+    // A cursor minted under the project-wide filter is invalid under a type filter.
+    let err = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                type_key: Some("code".to_string()),
+                ..Default::default()
+            },
+            &ListParams {
+                limit: Some(1),
+                cursor: Some(
+                    s.store
+                        .list_tasks(
+                            &project.id,
+                            &TaskListFilters::default(),
+                            &ListParams {
+                                limit: Some(1),
+                                ..Default::default()
+                            },
+                        )
+                        .await
+                        .unwrap()
+                        .next_cursor
+                        .unwrap(),
+                ),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::InvalidCursor(_)));
 }

@@ -645,28 +645,74 @@ pub(crate) async fn list_task_types(
     }))
 }
 
+// Optional filters per the listEpics contract (plan/07); each narrows the SQL WHERE clause
+// and is hashed into the cursor fingerprint so cursors cannot cross filter sets.
+#[derive(Debug, Clone, Default)]
+pub struct EpicListFilters {
+    pub goal_id: Option<GoalId>,
+    pub status: Option<EpicStatus>,
+}
+
+// Optional filters per the listTasks contract (plan/07); same fingerprinting as epics.
+#[derive(Debug, Clone, Default)]
+pub struct TaskListFilters {
+    pub epic_id: Option<EpicId>,
+    pub status: Option<TaskStatus>,
+    pub phase: Option<TaskPhase>,
+    pub type_key: Option<String>,
+}
+
+// "none" keeps the fingerprint deterministic for absent filters.
+fn filter_token(value: Option<impl std::fmt::Display>) -> String {
+    value.map_or_else(|| "none".to_string(), |v| v.to_string())
+}
+
+fn epics_filter(project: &ProjectId, filters: &EpicListFilters, include_archived: bool) -> String {
+    format!(
+        "project={project}&goal={}&status={}&include_archived={include_archived}",
+        filter_token(filters.goal_id.as_ref()),
+        filter_token(filters.status.map(EpicStatus::as_str)),
+    )
+}
+
+fn tasks_filter(project: &ProjectId, filters: &TaskListFilters, include_archived: bool) -> String {
+    format!(
+        "project={project}&epic={}&status={}&phase={}&type_key={}&include_archived={include_archived}",
+        filter_token(filters.epic_id.as_ref()),
+        filter_token(filters.status.map(TaskStatus::as_str)),
+        filter_token(filters.phase.map(TaskPhase::as_str)),
+        filter_token(filters.type_key.as_deref()),
+    )
+}
+
 pub(crate) async fn list_epics(
     conn: &mut SqliteConnection,
     project: &ProjectId,
-    goal: &GoalId,
+    filters: &EpicListFilters,
     params: &ListParams,
 ) -> Result<Page<Epic>, DomainError> {
     let limit = effective_limit(params)?;
-    if !goal_exists(conn, project, goal).await? {
+    // Route membership before cursor validity (plan/04): unknown project or goal is 404.
+    if !project_exists(conn, project).await? {
         return Err(DomainError::NotFound);
     }
-    let filter = format!(
-        "project={project}&goal={goal}&include_archived={}",
-        params.include_archived
-    );
+    if let Some(goal) = filters.goal_id
+        && !goal_exists(conn, project, &goal).await?
+    {
+        return Err(DomainError::NotFound);
+    }
+    let filter = epics_filter(project, filters, params.include_archived);
     let after = decode_after(params, "listEpics", &filter)?;
     let mut builder = QueryBuilder::<Sqlite>::new(format!("SELECT {EPIC_COLUMNS} FROM epics"));
-    // Goal-scoped: filter by goal_id within project.
     builder
         .push(" WHERE project_id = ")
-        .push_bind(project.to_string())
-        .push(" AND goal_id = ")
-        .push_bind(goal.to_string());
+        .push_bind(project.to_string());
+    if let Some(goal) = filters.goal_id {
+        builder.push(" AND goal_id = ").push_bind(goal.to_string());
+    }
+    if let Some(status) = filters.status {
+        builder.push(" AND status = ").push_bind(status.as_str());
+    }
     if !params.include_archived {
         builder.push(" AND archived = 0");
     }
@@ -703,24 +749,37 @@ pub(crate) async fn list_epics(
 pub(crate) async fn list_tasks(
     conn: &mut SqliteConnection,
     project: &ProjectId,
-    epic: &EpicId,
+    filters: &TaskListFilters,
     params: &ListParams,
 ) -> Result<Page<Task>, DomainError> {
     let limit = effective_limit(params)?;
-    if !epic_exists(conn, project, epic).await? {
+    // Route membership before cursor validity (plan/04): unknown project or epic is 404.
+    if !project_exists(conn, project).await? {
         return Err(DomainError::NotFound);
     }
-    let filter = format!(
-        "project={project}&epic={epic}&include_archived={}",
-        params.include_archived
-    );
+    if let Some(epic) = filters.epic_id
+        && !epic_exists(conn, project, &epic).await?
+    {
+        return Err(DomainError::NotFound);
+    }
+    let filter = tasks_filter(project, filters, params.include_archived);
     let after = decode_after(params, "listTasks", &filter)?;
     let mut builder = QueryBuilder::<Sqlite>::new(format!("SELECT {TASK_COLUMNS} FROM tasks"));
     builder
         .push(" WHERE project_id = ")
-        .push_bind(project.to_string())
-        .push(" AND epic_id = ")
-        .push_bind(epic.to_string());
+        .push_bind(project.to_string());
+    if let Some(epic) = filters.epic_id {
+        builder.push(" AND epic_id = ").push_bind(epic.to_string());
+    }
+    if let Some(status) = filters.status {
+        builder.push(" AND status = ").push_bind(status.as_str());
+    }
+    if let Some(phase) = filters.phase {
+        builder.push(" AND phase = ").push_bind(phase.as_str());
+    }
+    if let Some(type_key) = &filters.type_key {
+        builder.push(" AND type_key = ").push_bind(type_key.clone());
+    }
     if !params.include_archived {
         builder.push(" AND archived = 0");
     }
@@ -815,11 +874,11 @@ impl Store {
     pub async fn list_epics(
         &self,
         project: &ProjectId,
-        goal: &GoalId,
+        filters: &EpicListFilters,
         params: &ListParams,
     ) -> Result<Page<Epic>, DomainError> {
         let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
-        let page = list_epics(&mut tx, project, goal, params).await?;
+        let page = list_epics(&mut tx, project, filters, params).await?;
         tx.commit().await.map_err(StorageError::from)?;
         Ok(page)
     }
@@ -827,11 +886,11 @@ impl Store {
     pub async fn list_tasks(
         &self,
         project: &ProjectId,
-        epic: &EpicId,
+        filters: &TaskListFilters,
         params: &ListParams,
     ) -> Result<Page<Task>, DomainError> {
         let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
-        let page = list_tasks(&mut tx, project, epic, params).await?;
+        let page = list_tasks(&mut tx, project, filters, params).await?;
         tx.commit().await.map_err(StorageError::from)?;
         Ok(page)
     }
@@ -1256,7 +1315,14 @@ mod integration_tests {
 
         let page = f
             .store
-            .list_epics(&project.id, &goal.id, &ListParams::default())
+            .list_epics(
+                &project.id,
+                &EpicListFilters {
+                    goal_id: Some(goal.id),
+                    ..Default::default()
+                },
+                &ListParams::default(),
+            )
             .await
             .unwrap();
         assert_eq!(page.items.len(), 1);
@@ -1277,7 +1343,14 @@ mod integration_tests {
 
         let page = f
             .store
-            .list_tasks(&project.id, &e.id, &ListParams::default())
+            .list_tasks(
+                &project.id,
+                &TaskListFilters {
+                    epic_id: Some(e.id),
+                    ..Default::default()
+                },
+                &ListParams::default(),
+            )
             .await
             .unwrap();
         assert_eq!(page.items.len(), 1);
@@ -1305,7 +1378,10 @@ mod integration_tests {
             f.store
                 .list_epics(
                     &project_a.id,
-                    &GoalId::generate(f.clock.now()),
+                    &EpicListFilters {
+                        goal_id: Some(GoalId::generate(f.clock.now())),
+                        ..Default::default()
+                    },
                     &ListParams::default()
                 )
                 .await
@@ -1316,7 +1392,10 @@ mod integration_tests {
             f.store
                 .list_tasks(
                     &project_a.id,
-                    &EpicId::generate(f.clock.now()),
+                    &TaskListFilters {
+                        epic_id: Some(EpicId::generate(f.clock.now())),
+                        ..Default::default()
+                    },
                     &ListParams::default()
                 )
                 .await
@@ -1387,7 +1466,10 @@ mod integration_tests {
             .store
             .list_epics(
                 &project.id,
-                &goal.id,
+                &EpicListFilters {
+                    goal_id: Some(goal.id),
+                    ..Default::default()
+                },
                 &ListParams {
                     limit: Some(2),
                     ..Default::default()
@@ -1405,7 +1487,10 @@ mod integration_tests {
             .store
             .list_epics(
                 &project.id,
-                &goal.id,
+                &EpicListFilters {
+                    goal_id: Some(goal.id),
+                    ..Default::default()
+                },
                 &ListParams {
                     limit: Some(2),
                     cursor: page1.next_cursor,
@@ -1434,7 +1519,10 @@ mod integration_tests {
             .store
             .list_tasks(
                 &project.id,
-                &e.id,
+                &TaskListFilters {
+                    epic_id: Some(e.id),
+                    ..Default::default()
+                },
                 &ListParams {
                     limit: Some(2),
                     ..Default::default()
@@ -1451,7 +1539,10 @@ mod integration_tests {
             .store
             .list_tasks(
                 &project.id,
-                &e.id,
+                &TaskListFilters {
+                    epic_id: Some(e.id),
+                    ..Default::default()
+                },
                 &ListParams {
                     limit: Some(2),
                     cursor: page1.next_cursor,
