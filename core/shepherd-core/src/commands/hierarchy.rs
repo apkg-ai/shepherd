@@ -76,7 +76,7 @@ impl Store {
                     pending.push(PendingEvent::task_type(type_id, Revision::INITIAL));
                 }
 
-                let events = append_events(tx, &id, &ctx, "createProject", pending).await?;
+                let events = append_events(tx, &id, &ctx, "createProject", "", pending).await?;
                 let project = find_project(tx, &id)
                     .await?
                     .ok_or_else(|| missing_after_write("project"))?;
@@ -142,6 +142,7 @@ impl Store {
                     &project,
                     &ctx,
                     "updateProject",
+                    "",
                     vec![PendingEvent::project(project, next)],
                 )
                 .await?;
@@ -192,6 +193,7 @@ impl Store {
                     &project,
                     &ctx,
                     "createGoal",
+                    "",
                     vec![PendingEvent::goal(id, Revision::INITIAL)],
                 )
                 .await?;
@@ -260,6 +262,7 @@ impl Store {
                     &project,
                     &ctx,
                     "updateGoal",
+                    "",
                     vec![PendingEvent::goal(goal, next)],
                 )
                 .await?;
@@ -319,6 +322,7 @@ impl Store {
                     &project,
                     &ctx,
                     "createTaskType",
+                    "",
                     vec![PendingEvent::task_type(id, Revision::INITIAL)],
                 )
                 .await?;
@@ -385,6 +389,7 @@ impl Store {
                     &project,
                     &ctx,
                     "createEpic",
+                    "",
                     vec![PendingEvent::epic(id, Revision::INITIAL, goal)],
                 )
                 .await?;
@@ -461,6 +466,7 @@ impl Store {
                     &project,
                     &ctx,
                     "updateEpic",
+                    "",
                     vec![PendingEvent::epic(epic, next, current.goal_id)],
                 )
                 .await?;
@@ -522,6 +528,7 @@ impl Store {
                     &project,
                     &ctx,
                     "acceptEpic",
+                    "",
                     vec![PendingEvent::epic(epic, next, current.goal_id)],
                 )
                 .await?;
@@ -631,6 +638,7 @@ impl Store {
                     &project,
                     &ctx,
                     "createTask",
+                    "",
                     vec![PendingEvent::task(id, Revision::INITIAL, epic)],
                 )
                 .await?;
@@ -797,6 +805,7 @@ impl Store {
                     &project,
                     &ctx,
                     "updateTask",
+                    "",
                     vec![PendingEvent::task(task, next, current.epic_id)],
                 )
                 .await?;
@@ -865,6 +874,7 @@ impl Store {
                     &project,
                     &ctx,
                     "acceptTask",
+                    "",
                     vec![PendingEvent::task(task, next, current.epic_id)],
                 )
                 .await?;
@@ -925,6 +935,7 @@ impl Store {
                     &project,
                     &ctx,
                     "updateTaskType",
+                    "",
                     vec![PendingEvent::task_type(task_type, next)],
                 )
                 .await?;

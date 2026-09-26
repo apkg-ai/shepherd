@@ -324,7 +324,8 @@ impl Store {
                     &prerequisite,
                     prerequisite_next,
                 ));
-                let events = append_events(tx, &project, &ctx, "createDependency", pending).await?;
+                let events =
+                    append_events(tx, &project, &ctx, "createDependency", "", pending).await?;
                 let created = find_dependency(tx, &project, &id)
                     .await?
                     .ok_or_else(|| missing_after_write("dependency"))?;
@@ -383,7 +384,8 @@ impl Store {
                     &prerequisite,
                     prerequisite_next,
                 ));
-                let events = append_events(tx, &project, &ctx, "deleteDependency", pending).await?;
+                let events =
+                    append_events(tx, &project, &ctx, "deleteDependency", "", pending).await?;
                 Ok(CommandResult { value: (), events })
             })
         })
