@@ -1,0 +1,776 @@
+use super::{
+    CommandContext, CommandResult, PendingEvent, append_events, epic_has_active_work, live_actor,
+    require_owner, require_revision, task_has_active_work,
+};
+use crate::error::DomainError;
+use crate::model::{
+    Epic, EpicId, Goal, GoalId, Project, ProjectId, REASON_MAX_CHARS, Revision, Task, TaskId,
+    validate_required_text,
+};
+use crate::queries::hierarchy::{
+    epic_row, find_epic, find_goal, find_project, find_task, goal_row, project_archived,
+    project_row, task_row,
+};
+use crate::storage::rows::format_ts;
+use crate::storage::{StorageError, Store};
+use sqlx::{AssertSqlSafe, SqliteConnection};
+
+fn missing_after_write(what: &'static str) -> DomainError {
+    StorageError::Corrupt(format!("{what} missing after write")).into()
+}
+
+// Archive is visibility only (plan/03): owner-only, one-way in v1, requires
+// terminal work, never touches dependency rows and never changes counts.
+
+async fn set_archived(
+    conn: &mut SqliteConnection,
+    table: &'static str,
+    id: &str,
+    revision: Revision,
+    ctx: &CommandContext,
+    reason: &str,
+) -> Result<(), DomainError> {
+    let query = AssertSqlSafe(format!(
+        "UPDATE {table} SET revision = ?1, updated_at = ?2, archived = 1, \
+         archive_actor_id = ?3, archive_reason = ?4, archive_created_at = ?2 WHERE id = ?5"
+    ));
+    sqlx::query(query)
+        .bind(revision.value())
+        .bind(format_ts(&ctx.now))
+        .bind(ctx.actor.id.to_string())
+        .bind(reason)
+        .bind(id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+// Goal/project archive requires only terminal contained work; empty is allowed
+// (plan/03). Tasks are checked besides epics so fixture-seeded inconsistencies
+// cannot slip a live task under an archived scope.
+async fn scope_has_nonterminal_work(
+    conn: &mut SqliteConnection,
+    scope_column: &'static str,
+    scope: &str,
+) -> Result<bool, DomainError> {
+    let epics = AssertSqlSafe(format!(
+        "SELECT 1 FROM epics WHERE {scope_column} = ?1 \
+         AND status NOT IN ('done', 'cancelled') LIMIT 1"
+    ));
+    if sqlx::query(epics)
+        .bind(scope)
+        .fetch_optional(&mut *conn)
+        .await?
+        .is_some()
+    {
+        return Ok(true);
+    }
+    let tasks = AssertSqlSafe(format!(
+        "SELECT 1 FROM tasks WHERE epic_id IN (SELECT id FROM epics WHERE {scope_column} = ?1) \
+         AND status NOT IN ('done', 'cancelled') LIMIT 1"
+    ));
+    Ok(sqlx::query(tasks)
+        .bind(scope)
+        .fetch_optional(&mut *conn)
+        .await?
+        .is_some())
+}
+
+impl Store {
+    pub async fn archive_project(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        reason: String,
+    ) -> Result<CommandResult<Project>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = project_row(tx, &project)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                if current.archived {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if scope_has_nonterminal_work(tx, "project_id", &project.to_string()).await? {
+                    return Err(DomainError::InvalidState(
+                        "project contains nonterminal work".into(),
+                    ));
+                }
+                let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
+                let next = current.revision.next();
+                set_archived(tx, "projects", &project.to_string(), next, &ctx, &reason).await?;
+                let events = append_events(
+                    tx,
+                    &project,
+                    &ctx,
+                    "archiveProject",
+                    &reason,
+                    vec![PendingEvent::project(project, next)],
+                )
+                .await?;
+                let updated = find_project(tx, &project)
+                    .await?
+                    .ok_or_else(|| missing_after_write("project"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn archive_goal(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        goal: GoalId,
+        reason: String,
+    ) -> Result<CommandResult<Goal>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = goal_row(tx, &project, &goal)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                if current.archived || project_archived(tx, &project).await? {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if scope_has_nonterminal_work(tx, "goal_id", &goal.to_string()).await? {
+                    return Err(DomainError::InvalidState(
+                        "goal contains nonterminal work".into(),
+                    ));
+                }
+                let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
+                let next = current.revision.next();
+                set_archived(tx, "goals", &goal.to_string(), next, &ctx, &reason).await?;
+                let events = append_events(
+                    tx,
+                    &project,
+                    &ctx,
+                    "archiveGoal",
+                    &reason,
+                    vec![PendingEvent::goal(goal, next)],
+                )
+                .await?;
+                let updated = find_goal(tx, &project, &goal)
+                    .await?
+                    .ok_or_else(|| missing_after_write("goal"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn archive_epic(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        epic: EpicId,
+        reason: String,
+    ) -> Result<CommandResult<Epic>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = epic_row(tx, &project, &epic)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                let goal_current = goal_row(tx, &project, &current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if !current.status.is_terminal() {
+                    return Err(DomainError::InvalidState(
+                        "epic must be terminal before archive".into(),
+                    ));
+                }
+                if epic_has_active_work(tx, epic, &format_ts(&ctx.now)).await? {
+                    return Err(DomainError::ActiveWork(
+                        "a descendant task has an active claim or pending submission".into(),
+                    ));
+                }
+                let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
+                let next = current.revision.next();
+                set_archived(tx, "epics", &epic.to_string(), next, &ctx, &reason).await?;
+                let events = append_events(
+                    tx,
+                    &project,
+                    &ctx,
+                    "archiveEpic",
+                    &reason,
+                    vec![PendingEvent::epic(epic, next, current.goal_id)],
+                )
+                .await?;
+                let updated = find_epic(tx, &project, &epic)
+                    .await?
+                    .ok_or_else(|| missing_after_write("epic"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn archive_task(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        task: TaskId,
+        reason: String,
+    ) -> Result<CommandResult<Task>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = task_row(tx, &project, &task)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                let epic_current = epic_row(tx, &project, &current.epic_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || epic_current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if !current.status.is_terminal() {
+                    return Err(DomainError::InvalidState(
+                        "task must be terminal before archive".into(),
+                    ));
+                }
+                if task_has_active_work(tx, task, &format_ts(&ctx.now)).await? {
+                    return Err(DomainError::ActiveWork(
+                        "task has an active claim or pending submission".into(),
+                    ));
+                }
+                let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
+                let next = current.revision.next();
+                set_archived(tx, "tasks", &task.to_string(), next, &ctx, &reason).await?;
+                let events = append_events(
+                    tx,
+                    &project,
+                    &ctx,
+                    "archiveTask",
+                    &reason,
+                    vec![PendingEvent::task(task, next, current.epic_id)],
+                )
+                .await?;
+                let updated = find_task(tx, &project, &task)
+                    .await?
+                    .ok_or_else(|| missing_after_write("task"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::model::{
+        Actor, ActorKind, Clock, DependencyCreate, EpicCreate, GoalCreate, ProjectCreate,
+        TaskCreate, TestClock,
+    };
+    use crate::storage::open;
+    use crate::storage::rows::insert_actor;
+    use crate::storage::testing::{store_options, test_clock};
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        clock: Arc<TestClock>,
+        store: Store,
+        owner: Actor,
+    }
+
+    fn ctx(actor: &Actor, clock: &TestClock, expected_revision: Option<i64>) -> CommandContext {
+        CommandContext {
+            actor: actor.clone(),
+            command_id: crate::model::CommandId::generate(clock.now()),
+            idempotency_key: Uuid::nil(),
+            expected_revision,
+            now: clock.now(),
+        }
+    }
+
+    async fn fixture() -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = test_clock();
+        let store = open(store_options(dir.path(), "shepherd.db", clock.clone()))
+            .await
+            .unwrap();
+        let owner = Actor {
+            id: crate::model::ActorId::generate(clock.now()),
+            kind: ActorKind::Human,
+            label: "owner".to_string(),
+            revoked: false,
+            created_at: clock.now(),
+        };
+        let registered = owner.clone();
+        store
+            .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &registered).await }))
+            .await
+            .unwrap();
+        Fixture {
+            _dir: dir,
+            clock,
+            store,
+            owner,
+        }
+    }
+
+    struct Scope {
+        project: ProjectId,
+        goal: GoalId,
+        epic: EpicId,
+        task: TaskId,
+    }
+
+    async fn scope(f: &Fixture) -> Scope {
+        let project = f
+            .store
+            .create_project(
+                ctx(&f.owner, &f.clock, None),
+                ProjectCreate {
+                    name: "P".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let goal = f
+            .store
+            .create_goal(
+                ctx(&f.owner, &f.clock, None),
+                project,
+                GoalCreate {
+                    title: "G".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let epic = f
+            .store
+            .create_epic(
+                ctx(&f.owner, &f.clock, None),
+                project,
+                goal,
+                EpicCreate {
+                    title: "E".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let task = f
+            .store
+            .create_task(
+                ctx(&f.owner, &f.clock, None),
+                project,
+                epic,
+                TaskCreate {
+                    title: "T".to_string(),
+                    description: None,
+                    type_key: "code".to_string(),
+                    planning_required: None,
+                    plan_review: None,
+                    work_review: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        Scope {
+            project,
+            goal,
+            epic,
+            task,
+        }
+    }
+
+    // Direct-SQL fixture: sessions/submissions get commands in steps 010/011.
+    async fn seed_pending_submission(f: &Fixture, task: TaskId) -> String {
+        let now = format_ts(&f.clock.now());
+        let session = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+        let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+        let mut tx = f.store.pool().begin().await.unwrap();
+        sqlx::query(
+            "INSERT INTO sessions (id, task_id, claim_id, actor_id, phase, started_at, \
+             ended_at, outcome, summary, failure_reason, document_revision_ids, links) \
+             VALUES (?1, ?2, 'claim', ?3, 'execute', ?4, ?4, 'succeeded', '', '', '[]', '[]')",
+        )
+        .bind(&session)
+        .bind(task.to_string())
+        .bind(f.owner.id.to_string())
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO submissions (id, revision, created_at, updated_at, task_id, kind, \
+             producer_id, document_revision_ids, session_id, policy, status, \
+             created_context_revision) VALUES (?1, 1, ?2, ?2, ?3, 'work', ?4, '[]', ?5, \
+             'human', 'pending', 1)",
+        )
+        .bind(&id)
+        .bind(&now)
+        .bind(task.to_string())
+        .bind(f.owner.id.to_string())
+        .bind(&session)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        id
+    }
+
+    async fn complete_task(f: &Fixture, project: ProjectId, task: TaskId, revision: i64) {
+        f.store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(revision)), project, task)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn archive_task_needs_owner_terminal_state_and_quiet_work() {
+        let f = fixture().await;
+        let s = scope(&f).await;
+        let agent = Actor {
+            id: crate::model::ActorId::generate(f.clock.now()),
+            kind: ActorKind::Agent,
+            label: "agent".to_string(),
+            revoked: false,
+            created_at: f.clock.now(),
+        };
+        let registered = agent.clone();
+        f.store
+            .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &registered).await }))
+            .await
+            .unwrap();
+
+        let err = f
+            .store
+            .archive_task(
+                ctx(&agent, &f.clock, Some(1)),
+                s.project,
+                s.task,
+                "old".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)));
+
+        let err = f
+            .store
+            .archive_task(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.task,
+                "old".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+
+        complete_task(&f, s.project, s.task, 1).await;
+        let submission = seed_pending_submission(&f, s.task).await;
+        let err = f
+            .store
+            .archive_task(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.task,
+                "old".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ActiveWork(_)));
+
+        sqlx::query("UPDATE submissions SET status = 'accepted' WHERE id = ?1")
+            .bind(&submission)
+            .execute(f.store.pool())
+            .await
+            .unwrap();
+        let err = f
+            .store
+            .archive_task(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.task,
+                "  ".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "reason",
+                ..
+            }
+        ));
+
+        let archived = f
+            .store
+            .archive_task(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.task,
+                "old".into(),
+            )
+            .await
+            .unwrap();
+        assert!(archived.value.archived);
+        assert_eq!(archived.value.archive.expect("record").reason, "old");
+        assert_eq!(archived.value.revision.value(), 3);
+        let reason: String = sqlx::query_scalar("SELECT reason FROM events WHERE id = ?1")
+            .bind(archived.events[0])
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(reason, "old");
+
+        // Archive is one-way and freezes the scope beneath it.
+        let err = f
+            .store
+            .archive_task(
+                ctx(&f.owner, &f.clock, Some(3)),
+                s.project,
+                s.task,
+                "twice".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
+        let err = f
+            .store
+            .waive_task(
+                ctx(&f.owner, &f.clock, Some(3)),
+                s.project,
+                s.task,
+                "late".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
+    }
+
+    #[tokio::test]
+    async fn archive_epic_requires_terminal_epic_and_no_descendant_work() {
+        let f = fixture().await;
+        let s = scope(&f).await;
+
+        let err = f
+            .store
+            .archive_epic(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.epic,
+                "done".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+
+        complete_task(&f, s.project, s.task, 1).await;
+        // The cascade completed the epic; a pending submission still blocks.
+        let submission = seed_pending_submission(&f, s.task).await;
+        let err = f
+            .store
+            .archive_epic(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.epic,
+                "done".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ActiveWork(_)));
+
+        sqlx::query("UPDATE submissions SET status = 'accepted' WHERE id = ?1")
+            .bind(&submission)
+            .execute(f.store.pool())
+            .await
+            .unwrap();
+        let archived = f
+            .store
+            .archive_epic(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.epic,
+                "done".into(),
+            )
+            .await
+            .unwrap();
+        assert!(archived.value.archived);
+        // Counts are unaffected by archive (plan/03).
+        assert_eq!(archived.value.task_counts.total, 1);
+        assert_eq!(archived.value.task_counts.done, 1);
+
+        let err = f
+            .store
+            .block_task(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.task,
+                "beneath".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
+    }
+
+    #[tokio::test]
+    async fn goal_and_project_archive_require_only_terminal_work() {
+        let f = fixture().await;
+        let s = scope(&f).await;
+
+        for (goal_attempt, project_attempt) in [(true, false), (false, true)] {
+            let err = if goal_attempt {
+                f.store
+                    .archive_goal(
+                        ctx(&f.owner, &f.clock, Some(1)),
+                        s.project,
+                        s.goal,
+                        "x".into(),
+                    )
+                    .await
+                    .unwrap_err()
+            } else {
+                debug_assert!(project_attempt);
+                f.store
+                    .archive_project(ctx(&f.owner, &f.clock, Some(1)), s.project, "x".into())
+                    .await
+                    .unwrap_err()
+            };
+            assert!(matches!(err, DomainError::InvalidState(_)));
+        }
+
+        f.store
+            .cancel_epic(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.epic,
+                "descoped".into(),
+            )
+            .await
+            .unwrap();
+        let archived_goal = f
+            .store
+            .archive_goal(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.goal,
+                "wrapped".into(),
+            )
+            .await
+            .unwrap();
+        assert!(archived_goal.value.archived);
+
+        let archived_project = f
+            .store
+            .archive_project(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                "wrapped".into(),
+            )
+            .await
+            .unwrap();
+        assert!(archived_project.value.archived);
+
+        let err = f
+            .store
+            .archive_goal(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.goal,
+                "twice".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
+    }
+
+    #[tokio::test]
+    async fn archive_never_removes_dependency_edges() {
+        let f = fixture().await;
+        let s = scope(&f).await;
+        let other = f
+            .store
+            .create_epic(
+                ctx(&f.owner, &f.clock, None),
+                s.project,
+                s.goal,
+                EpicCreate {
+                    title: "Other".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        f.store
+            .create_dependency(
+                ctx(&f.owner, &f.clock, None),
+                s.project,
+                DependencyCreate::Epic {
+                    dependent_id: other.id,
+                    prerequisite_id: s.epic,
+                },
+            )
+            .await
+            .unwrap();
+        complete_task(&f, s.project, s.task, 1).await;
+        f.store
+            .archive_epic(
+                ctx(&f.owner, &f.clock, Some(3)),
+                s.project,
+                s.epic,
+                "done".into(),
+            )
+            .await
+            .unwrap();
+        let edges: i64 = sqlx::query_scalar("SELECT count(*) FROM epic_dependencies")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(edges, 1);
+    }
+}
