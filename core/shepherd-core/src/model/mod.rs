@@ -61,6 +61,48 @@ macro_rules! typed_uuid {
 
 pub(crate) use typed_uuid;
 
+macro_rules! resource_status {
+    ($name:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum $name {
+            Proposed,
+            Open,
+            Active,
+            Done,
+            Cancelled,
+        }
+
+        impl $name {
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $name::Proposed => "proposed",
+                    $name::Open => "open",
+                    $name::Active => "active",
+                    $name::Done => "done",
+                    $name::Cancelled => "cancelled",
+                }
+            }
+
+            pub fn parse(value: &str) -> Option<Self> {
+                match value {
+                    "proposed" => Some($name::Proposed),
+                    "open" => Some($name::Open),
+                    "active" => Some($name::Active),
+                    "done" => Some($name::Done),
+                    "cancelled" => Some($name::Cancelled),
+                    _ => None,
+                }
+            }
+
+            pub fn is_terminal(self) -> bool {
+                matches!(self, $name::Done | $name::Cancelled)
+            }
+        }
+    };
+}
+
+pub(crate) use resource_status;
+
 typed_uuid!(ActorId);
 typed_uuid!(CommandId);
 

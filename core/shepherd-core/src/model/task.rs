@@ -5,45 +5,10 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::project::ReviewPolicy;
-use super::{EpicId, LifecycleRecord, ProjectId, Revision, typed_uuid};
+use super::{EpicId, LifecycleRecord, ProjectId, Revision, resource_status, typed_uuid};
 
 typed_uuid!(TaskId);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TaskStatus {
-    Proposed,
-    Open,
-    Active,
-    Done,
-    Cancelled,
-}
-
-impl TaskStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            TaskStatus::Proposed => "proposed",
-            TaskStatus::Open => "open",
-            TaskStatus::Active => "active",
-            TaskStatus::Done => "done",
-            TaskStatus::Cancelled => "cancelled",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "proposed" => Some(TaskStatus::Proposed),
-            "open" => Some(TaskStatus::Open),
-            "active" => Some(TaskStatus::Active),
-            "done" => Some(TaskStatus::Done),
-            "cancelled" => Some(TaskStatus::Cancelled),
-            _ => None,
-        }
-    }
-
-    pub fn is_terminal(self) -> bool {
-        matches!(self, TaskStatus::Done | TaskStatus::Cancelled)
-    }
-}
+resource_status!(TaskStatus);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskPhase {

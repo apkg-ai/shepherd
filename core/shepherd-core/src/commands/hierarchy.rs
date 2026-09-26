@@ -570,34 +570,36 @@ impl Store {
                     return Err(DomainError::TerminalScope);
                 }
                 let title = validate_required_text("title", &input.title, NAME_MAX_CHARS)?;
-                let description = input.description.clone().unwrap_or_default();
-                validate_long_text("description", &description, DESCRIPTION_MAX_CHARS)?;
 
-                // Validate type_key exists and is not archived.
+                // Validate format before DB lookup; safe to echo in errors after this.
+                let validated_key = validate_type_key(&input.type_key)?;
                 let type_check: Option<(i64,)> = sqlx::query_as(
                     "SELECT archived FROM task_types WHERE project_id = ?1 AND key = ?2",
                 )
                 .bind(project.to_string())
-                .bind(&input.type_key)
+                .bind(&validated_key)
                 .fetch_optional(&mut **tx)
                 .await?;
                 match type_check {
                     None => {
                         return Err(DomainError::Validation {
                             field: "type_key",
-                            message: format!("task type '{}' does not exist", input.type_key),
+                            message: format!("task type '{validated_key}' does not exist"),
                         });
                     }
                     Some((1,)) => {
                         return Err(DomainError::Validation {
                             field: "type_key",
-                            message: format!("task type '{}' is archived", input.type_key),
+                            message: format!("task type '{validated_key}' is archived"),
                         });
                     }
                     _ => {}
                 }
 
                 let resolved = policy::resolve_task_policy(&proj.settings, actor.kind, &input)?;
+                // Extract description after policy resolution to avoid cloning input.
+                let description = input.description.unwrap_or_default();
+                validate_long_text("description", &description, DESCRIPTION_MAX_CHARS)?;
                 let phase = policy::initial_phase(resolved.planning_required);
                 let status = policy::initial_status(actor.kind, proj.settings.proposal_gate);
 
@@ -616,7 +618,7 @@ impl Store {
                 .bind(epic.to_string())
                 .bind(&title)
                 .bind(&description)
-                .bind(&input.type_key)
+                .bind(&validated_key)
                 .bind(status.as_str())
                 .bind(phase.as_str())
                 .bind(i64::from(resolved.planning_required))
@@ -704,30 +706,31 @@ impl Store {
                 };
                 let type_key = match &patch.type_key {
                     Some(new_key) => {
+                        let validated = validate_type_key(new_key)?;
                         let type_check: Option<(i64,)> = sqlx::query_as(
                             "SELECT archived FROM task_types \
                              WHERE project_id = ?1 AND key = ?2",
                         )
                         .bind(project.to_string())
-                        .bind(new_key)
+                        .bind(&validated)
                         .fetch_optional(&mut **tx)
                         .await?;
                         match type_check {
                             None => {
                                 return Err(DomainError::Validation {
                                     field: "type_key",
-                                    message: format!("task type '{new_key}' does not exist"),
+                                    message: format!("task type '{validated}' does not exist"),
                                 });
                             }
                             Some((1,)) => {
                                 return Err(DomainError::Validation {
                                     field: "type_key",
-                                    message: format!("task type '{new_key}' is archived"),
+                                    message: format!("task type '{validated}' is archived"),
                                 });
                             }
                             _ => {}
                         }
-                        new_key.clone()
+                        validated
                     }
                     None => current.type_key.clone(),
                 };

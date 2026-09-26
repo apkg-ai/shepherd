@@ -4,45 +4,10 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::{Counts, GoalId, LifecycleRecord, ProjectId, Revision, typed_uuid};
+use super::{Counts, GoalId, LifecycleRecord, ProjectId, Revision, resource_status, typed_uuid};
 
 typed_uuid!(EpicId);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EpicStatus {
-    Proposed,
-    Open,
-    Active,
-    Done,
-    Cancelled,
-}
-
-impl EpicStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            EpicStatus::Proposed => "proposed",
-            EpicStatus::Open => "open",
-            EpicStatus::Active => "active",
-            EpicStatus::Done => "done",
-            EpicStatus::Cancelled => "cancelled",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "proposed" => Some(EpicStatus::Proposed),
-            "open" => Some(EpicStatus::Open),
-            "active" => Some(EpicStatus::Active),
-            "done" => Some(EpicStatus::Done),
-            "cancelled" => Some(EpicStatus::Cancelled),
-            _ => None,
-        }
-    }
-
-    pub fn is_terminal(self) -> bool {
-        matches!(self, EpicStatus::Done | EpicStatus::Cancelled)
-    }
-}
+resource_status!(EpicStatus);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Epic {

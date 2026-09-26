@@ -200,12 +200,31 @@ pub(crate) fn task_from_row(row: &SqliteRow) -> Result<Task, DomainError> {
     })
 }
 
+// Column parameter for batched count queries. Using an enum instead of &str
+// prevents any future caller from passing user-controlled column names.
+enum CountScope {
+    Project,
+    Goal,
+    Epic,
+}
+
+impl CountScope {
+    fn column(&self) -> &'static str {
+        match self {
+            CountScope::Project => "project_id",
+            CountScope::Goal => "goal_id",
+            CountScope::Epic => "epic_id",
+        }
+    }
+}
+
 // One batched GROUP BY per page (plan/05); never per-node queries.
 async fn epic_counts_by(
     conn: &mut SqliteConnection,
-    column: &str,
+    scope: CountScope,
     ids: &[Uuid],
 ) -> Result<HashMap<Uuid, Counts>, DomainError> {
+    let column = scope.column();
     let mut map: HashMap<Uuid, Counts> = ids.iter().map(|id| (*id, Counts::ZERO)).collect();
     if map.is_empty() {
         return Ok(map);
@@ -252,7 +271,7 @@ async fn attach_project_counts(
         .iter()
         .map(|project| project.id.as_uuid())
         .collect();
-    let counts = epic_counts_by(conn, "project_id", &ids).await?;
+    let counts = epic_counts_by(conn, CountScope::Project, &ids).await?;
     for project in projects {
         project.epic_counts = counts
             .get(&project.id.as_uuid())
@@ -267,7 +286,7 @@ async fn attach_goal_counts(
     goals: &mut [Goal],
 ) -> Result<(), DomainError> {
     let ids: Vec<Uuid> = goals.iter().map(|goal| goal.id.as_uuid()).collect();
-    let counts = epic_counts_by(conn, "goal_id", &ids).await?;
+    let counts = epic_counts_by(conn, CountScope::Goal, &ids).await?;
     for goal in goals {
         goal.epic_counts = counts
             .get(&goal.id.as_uuid())
@@ -278,20 +297,25 @@ async fn attach_goal_counts(
     Ok(())
 }
 
+// Single-query task counts with conditional aggregation for waivers.
 async fn task_counts_by(
     conn: &mut SqliteConnection,
-    column: &str,
+    scope: CountScope,
     ids: &[Uuid],
 ) -> Result<HashMap<Uuid, Counts>, DomainError> {
+    let column = scope.column();
     let mut map: HashMap<Uuid, Counts> = ids.iter().map(|id| (*id, Counts::ZERO)).collect();
     if map.is_empty() {
         return Ok(map);
     }
-    // Two-pass: status counts, then waived count (cancelled with waiver).
     let mut builder = QueryBuilder::<Sqlite>::new("SELECT ");
     builder
         .push(column)
-        .push(" AS scope, status, COUNT(*) AS n FROM tasks WHERE ")
+        .push(
+            " AS scope, status, COUNT(*) AS n, \
+             SUM(CASE WHEN waiver_actor_id IS NOT NULL THEN 1 ELSE 0 END) AS waived \
+             FROM tasks WHERE ",
+        )
         .push(column)
         .push(" IN (");
     let mut separated = builder.separated(", ");
@@ -301,47 +325,27 @@ async fn task_counts_by(
     builder.push(") GROUP BY scope, status");
     let rows = builder.build().fetch_all(&mut *conn).await?;
     for row in rows {
-        let scope: String = row.try_get("scope")?;
+        let scope_val: String = row.try_get("scope")?;
         let status: String = row.try_get("status")?;
         let n: i64 = row.try_get("n")?;
-        let scope = parse_uuid("tasks.scope", &scope)?;
+        let waived: i64 = row.try_get("waived")?;
+        let scope_val = parse_uuid("tasks.scope", &scope_val)?;
         let counts = map
-            .get_mut(&scope)
-            .ok_or_else(|| StorageError::Corrupt(format!("tasks.{column}: {scope}")))?;
+            .get_mut(&scope_val)
+            .ok_or_else(|| StorageError::Corrupt(format!("tasks.{column}: {scope_val}")))?;
         counts.total += n;
         match status.as_str() {
             "done" => counts.done += n,
-            "cancelled" => counts.cancelled += n,
+            "cancelled" => {
+                counts.cancelled += n;
+                counts.waived += waived;
+            }
             "proposed" | "open" | "active" => {}
             other => {
                 return Err(StorageError::Corrupt(format!("tasks.status: {other:?}")).into());
             }
         }
     }
-
-    // Waived = cancelled tasks with a waiver record.
-    let mut waiver_builder = QueryBuilder::<Sqlite>::new("SELECT ");
-    waiver_builder
-        .push(column)
-        .push(" AS scope, COUNT(*) AS n FROM tasks WHERE ")
-        .push(column)
-        .push(" IN (");
-    let mut separated = waiver_builder.separated(", ");
-    for id in ids {
-        separated.push_bind(id.to_string());
-    }
-    waiver_builder
-        .push(") AND status = 'cancelled' AND waiver_actor_id IS NOT NULL GROUP BY scope");
-    let waiver_rows = waiver_builder.build().fetch_all(&mut *conn).await?;
-    for row in waiver_rows {
-        let scope: String = row.try_get("scope")?;
-        let n: i64 = row.try_get("n")?;
-        let scope = parse_uuid("tasks.scope", &scope)?;
-        if let Some(counts) = map.get_mut(&scope) {
-            counts.waived = n;
-        }
-    }
-
     Ok(map)
 }
 
@@ -350,7 +354,7 @@ async fn attach_epic_task_counts(
     epics: &mut [Epic],
 ) -> Result<(), DomainError> {
     let ids: Vec<Uuid> = epics.iter().map(|epic| epic.id.as_uuid()).collect();
-    let counts = task_counts_by(conn, "epic_id", &ids).await?;
+    let counts = task_counts_by(conn, CountScope::Epic, &ids).await?;
     for epic in epics {
         epic.task_counts = counts
             .get(&epic.id.as_uuid())
@@ -664,8 +668,6 @@ pub struct TaskListFilters {
 
 // Absent filters render "none"; present values are prefixed so a value literally
 // named "none" (a legal type key) cannot collide with the absent token.
-// Absent filters render "none"; present values are prefixed so a value literally
-// named "none" (a legal type key) cannot collide with the absent token.
 fn filter_token(value: Option<impl std::fmt::Display>) -> String {
     value.map_or_else(|| "none".to_string(), |v| format!("some:{v}"))
 }
@@ -816,6 +818,8 @@ pub(crate) async fn list_tasks(
 
 // Public read surface; downstream never touches the pool directly. Each read runs
 // in a deferred read transaction so the entity row and its counts share one snapshot.
+// Authentication is enforced by the server layer (step 015), not here; these methods
+// accept resource IDs only and assume the caller is authorized.
 impl Store {
     pub async fn get_project(&self, id: &ProjectId) -> Result<Project, DomainError> {
         let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
