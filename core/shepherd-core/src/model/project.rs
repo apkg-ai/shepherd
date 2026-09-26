@@ -24,6 +24,16 @@ pub enum ReviewPolicy {
     None,
 }
 
+impl ReviewPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReviewPolicy::Human => "human",
+            ReviewPolicy::Agent => "agent",
+            ReviewPolicy::None => "none",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectSettings {
@@ -203,6 +213,17 @@ mod tests {
         for (key, label) in BUILTIN_TASK_TYPES {
             assert_eq!(validate_type_key(key).unwrap(), key);
             assert_eq!(label.to_lowercase(), key);
+        }
+    }
+
+    #[test]
+    fn review_policy_as_str_matches_serde_names() {
+        assert_eq!(ReviewPolicy::Human.as_str(), "human");
+        assert_eq!(ReviewPolicy::Agent.as_str(), "agent");
+        assert_eq!(ReviewPolicy::None.as_str(), "none");
+        for policy in [ReviewPolicy::Human, ReviewPolicy::Agent, ReviewPolicy::None] {
+            let json = serde_json::to_string(&policy).unwrap();
+            assert_eq!(json, format!("\"{}\"", policy.as_str()));
         }
     }
 }

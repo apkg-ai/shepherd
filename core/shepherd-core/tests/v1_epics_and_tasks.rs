@@ -1,0 +1,3218 @@
+use std::path::Path;
+use std::sync::Arc;
+
+use chrono::{DateTime, TimeDelta, Utc};
+use shepherd_core::commands::CommandContext;
+use shepherd_core::error::DomainError;
+use shepherd_core::model::{
+    Actor, ActorId, ActorKind, Clock, CommandId, Counts, Epic, EpicCreate, EpicId, EpicStatus,
+    Goal, GoalCreate, GoalId, Project, ProjectCreate, ProjectId, ProjectPatch, ProjectSettings,
+    ReviewPolicy, Task, TaskCreate, TaskId, TaskPatch, TaskPhase, TaskStatus, TaskTypeCreate,
+    TestClock, TextPatch,
+};
+use shepherd_core::queries::{EpicListFilters, ListParams, TaskListFilters};
+use shepherd_core::storage::rows::{format_ts, insert_actor};
+use shepherd_core::storage::{Store, open, testing};
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{ConnectOptions, SqliteConnection};
+use uuid::Uuid;
+
+async fn open_store(dir: &tempfile::TempDir, clock: Arc<TestClock>) -> Store {
+    open(testing::store_options(dir.path(), "shepherd.db", clock))
+        .await
+        .unwrap()
+}
+
+async fn independent_connection(path: &Path) -> SqliteConnection {
+    SqliteConnectOptions::new()
+        .filename(path)
+        .read_only(true)
+        .connect()
+        .await
+        .unwrap()
+}
+
+fn actor(now: DateTime<Utc>, kind: ActorKind, label: &str) -> Actor {
+    Actor {
+        id: ActorId::generate(now),
+        kind,
+        label: label.to_string(),
+        revoked: false,
+        created_at: now,
+    }
+}
+
+async fn register(store: &Store, actor: &Actor) {
+    let inserted = actor.clone();
+    store
+        .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &inserted).await }))
+        .await
+        .unwrap();
+}
+
+fn ctx(actor: &Actor, now: DateTime<Utc>, expected_revision: Option<i64>) -> CommandContext {
+    CommandContext {
+        actor: actor.clone(),
+        command_id: CommandId::generate(now),
+        idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+        expected_revision,
+        now,
+    }
+}
+
+struct Setup {
+    dir: tempfile::TempDir,
+    clock: Arc<TestClock>,
+    store: Store,
+    owner: Actor,
+}
+
+impl Setup {
+    fn db_path(&self) -> std::path::PathBuf {
+        self.dir.path().join("shepherd.db")
+    }
+}
+
+async fn setup() -> Setup {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = testing::test_clock();
+    let store = open_store(&dir, clock.clone()).await;
+    let owner = actor(clock.now(), ActorKind::Human, "owner");
+    register(&store, &owner).await;
+    Setup {
+        dir,
+        clock,
+        store,
+        owner,
+    }
+}
+
+async fn create_project(s: &Setup, name: &str) -> Project {
+    s.store
+        .create_project(
+            ctx(&s.owner, s.clock.now(), None),
+            ProjectCreate {
+                name: name.to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value
+}
+
+async fn create_project_with_settings(s: &Setup, name: &str, settings: ProjectSettings) -> Project {
+    s.store
+        .create_project(
+            ctx(&s.owner, s.clock.now(), None),
+            ProjectCreate {
+                name: name.to_string(),
+                settings: Some(settings),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value
+}
+
+async fn create_goal(s: &Setup, project: ProjectId, title: &str) -> Goal {
+    s.store
+        .create_goal(
+            ctx(&s.owner, s.clock.now(), None),
+            project,
+            GoalCreate {
+                title: title.to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value
+}
+
+async fn create_epic(s: &Setup, project: ProjectId, goal: GoalId, title: &str) -> Epic {
+    s.store
+        .create_epic(
+            ctx(&s.owner, s.clock.now(), None),
+            project,
+            goal,
+            EpicCreate {
+                title: title.to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value
+}
+
+async fn create_task(s: &Setup, project: ProjectId, epic: EpicId, title: &str) -> Task {
+    s.store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project,
+            epic,
+            TaskCreate {
+                title: title.to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value
+}
+
+// Minimal plan fixture: documents and document_revisions reference each other under
+// deferred FKs, so both rows plus the task link commit in one transaction.
+async fn seed_selected_plan(s: &Setup, project: ProjectId, task: TaskId) {
+    let now = format_ts(&s.clock.now());
+    let document_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+    let revision_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+    let mut tx = s.store.pool().begin().await.unwrap();
+    sqlx::query(
+        "INSERT INTO documents (id, revision, created_at, updated_at, project_id, \
+         owner_kind, owner_id, kind, title, latest_revision_id) \
+         VALUES (?1, 1, ?2, ?2, ?3, 'task', ?4, 'plan', 'Plan', ?5)",
+    )
+    .bind(&document_id)
+    .bind(&now)
+    .bind(project.to_string())
+    .bind(task.to_string())
+    .bind(&revision_id)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO document_revisions (id, document_id, number, body, links, actor_id, \
+         created_at) VALUES (?1, ?2, 1, '# Plan', '[]', ?3, ?4)",
+    )
+    .bind(&revision_id)
+    .bind(&document_id)
+    .bind(s.owner.id.to_string())
+    .bind(&now)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE tasks SET selected_plan_revision_id = ?1 WHERE id = ?2")
+        .bind(&revision_id)
+        .bind(task.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+}
+
+async fn selected_plan_revision_id(s: &Setup, task: TaskId) -> Option<String> {
+    sqlx::query_scalar("SELECT selected_plan_revision_id FROM tasks WHERE id = ?1")
+        .bind(task.to_string())
+        .fetch_one(s.store.pool())
+        .await
+        .unwrap()
+}
+
+async fn table_count(conn: &mut SqliteConnection, table: &str) -> i64 {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {table}")))
+        .fetch_one(conn)
+        .await
+        .unwrap()
+}
+
+// ── Acceptance regression tests ──────────────────────────────────────
+
+#[tokio::test]
+async fn task_without_epic_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let _goal = create_goal(&s, project.id, "G").await;
+    let fake_epic = EpicId::generate(s.clock.now());
+
+    let err = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            fake_epic,
+            TaskCreate {
+                title: "Orphan".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+
+    let mut conn = independent_connection(&s.db_path()).await;
+    assert_eq!(table_count(&mut conn, "tasks").await, 0);
+}
+
+#[tokio::test]
+async fn wrong_project_epic_fails() {
+    let s = setup().await;
+    let project_a = create_project(&s, "A").await;
+    let goal_a = create_goal(&s, project_a.id, "GA").await;
+    let epic_a = create_epic(&s, project_a.id, goal_a.id, "EA").await;
+
+    let project_b = create_project(&s, "B").await;
+
+    let err = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project_b.id,
+            epic_a.id,
+            TaskCreate {
+                title: "Cross-project".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+
+    let mut conn = independent_connection(&s.db_path()).await;
+    assert_eq!(table_count(&mut conn, "tasks").await, 0);
+}
+
+#[tokio::test]
+async fn epic_is_never_a_task_type_or_claimable() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    // Epic key does not appear in task_types.
+    let types = s
+        .store
+        .list_task_types(&project.id, &ListParams::default())
+        .await
+        .unwrap();
+    assert!(
+        types.items.iter().all(|t| t.key != "epic"),
+        "no 'epic' key in the task type registry"
+    );
+
+    // Epic is a distinct struct with no claim-related fields.
+    assert_eq!(epic.status, EpicStatus::Open);
+    assert_eq!(epic.task_counts, Counts::ZERO);
+}
+
+#[tokio::test]
+async fn changing_defaults_affects_only_future_tasks() {
+    let s = setup().await;
+    let original_settings = ProjectSettings {
+        proposal_gate: false,
+        planning_required: true,
+        plan_review: ReviewPolicy::Human,
+        work_review: ReviewPolicy::Human,
+    };
+    let project = create_project_with_settings(&s, "P", original_settings).await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    let task_before = create_task(&s, project.id, epic.id, "Before").await;
+    assert!(task_before.planning_required);
+    assert_eq!(task_before.plan_review, ReviewPolicy::Human);
+    assert_eq!(task_before.work_review, ReviewPolicy::Human);
+
+    // Update project settings.
+    s.clock.advance(TimeDelta::seconds(1));
+    let new_settings = ProjectSettings {
+        proposal_gate: false,
+        planning_required: false,
+        plan_review: ReviewPolicy::None,
+        work_review: ReviewPolicy::Agent,
+    };
+    s.store
+        .update_project(
+            ctx(&s.owner, s.clock.now(), Some(project.revision.value())),
+            project.id,
+            ProjectPatch {
+                settings: Some(new_settings),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    // Existing task is unchanged.
+    let reloaded = s
+        .store
+        .get_task(&project.id, &task_before.id)
+        .await
+        .unwrap();
+    assert!(reloaded.planning_required);
+    assert_eq!(reloaded.plan_review, ReviewPolicy::Human);
+    assert_eq!(reloaded.work_review, ReviewPolicy::Human);
+
+    // New task gets new defaults.
+    let task_after = create_task(&s, project.id, epic.id, "After").await;
+    assert!(!task_after.planning_required);
+    assert_eq!(task_after.plan_review, ReviewPolicy::None);
+    assert_eq!(task_after.work_review, ReviewPolicy::Agent);
+}
+
+#[tokio::test]
+async fn agent_cannot_lower_inherited_requirements() {
+    let s = setup().await;
+    let strict_settings = ProjectSettings {
+        proposal_gate: true,
+        planning_required: true,
+        plan_review: ReviewPolicy::Human,
+        work_review: ReviewPolicy::Human,
+    };
+    let project = create_project_with_settings(&s, "P", strict_settings).await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    // Agent tries to lower plan_review.
+    let err = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Lowered".to_string(),
+                type_key: "code".to_string(),
+                plan_review: Some(ReviewPolicy::None),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::Forbidden(_)));
+
+    // Agent tries to lower planning_required.
+    let err = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Lowered".to_string(),
+                type_key: "code".to_string(),
+                planning_required: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::Forbidden(_)));
+
+    let mut conn = independent_connection(&s.db_path()).await;
+    assert_eq!(table_count(&mut conn, "tasks").await, 0);
+}
+
+#[tokio::test]
+async fn no_status_patch_is_accepted() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    // TaskPatch has no status or phase fields — verify structurally.
+    let updated = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(task.revision.value())),
+            project.id,
+            task.id,
+            TaskPatch {
+                title: Some("Renamed".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(updated.status, task.status);
+    assert_eq!(updated.phase, task.phase);
+    assert_eq!(updated.title, "Renamed");
+}
+
+// ── Epic domain tests ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn create_epic_under_valid_goal() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+
+    let created = s
+        .store
+        .create_epic(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "  Epic One  ".to_string(),
+                description: Some("Description".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+    let epic = created.value;
+    assert_eq!(epic.title, "Epic One");
+    assert_eq!(epic.description, "Description");
+    assert_eq!(epic.revision.value(), 1);
+    assert_eq!(epic.project_id, project.id);
+    assert_eq!(epic.goal_id, goal.id);
+    assert_eq!(epic.status, EpicStatus::Open);
+    assert!(!epic.archived);
+    assert_eq!(epic.task_counts, Counts::ZERO);
+    assert!(epic.block.is_none());
+    assert!(epic.archive.is_none());
+    assert!(epic.cancellation.is_none());
+    assert_eq!(created.events.len(), 1);
+}
+
+#[tokio::test]
+async fn create_epic_under_archived_project_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+
+    sqlx::query(
+        "UPDATE projects SET archived = 1, archive_actor_id = ?1, \
+         archive_reason = 'done', archive_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(project.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .create_epic(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "Late".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+}
+
+#[tokio::test]
+async fn create_epic_under_archived_goal_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+
+    sqlx::query(
+        "UPDATE goals SET archived = 1, archive_actor_id = ?1, \
+         archive_reason = 'done', archive_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(goal.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .create_epic(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "Late".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+}
+
+#[tokio::test]
+async fn agent_creates_proposed_epic_when_proposal_gate() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let epic = s
+        .store
+        .create_epic(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "Agent epic".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(epic.status, EpicStatus::Proposed);
+}
+
+#[tokio::test]
+async fn update_epic_enforces_revision_and_applies_patch() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    // Revision conflict.
+    let err = s
+        .store
+        .update_epic(
+            ctx(&s.owner, s.clock.now(), Some(9)),
+            project.id,
+            epic.id,
+            TextPatch {
+                title: Some("New".to_string()),
+                description: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::RevisionConflict { .. }));
+
+    // Successful update.
+    s.clock.advance(TimeDelta::seconds(1));
+    let updated = s
+        .store
+        .update_epic(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            epic.id,
+            TextPatch {
+                title: Some("Renamed".to_string()),
+                description: Some("New desc".to_string()),
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(updated.revision.value(), 2);
+    assert_eq!(updated.title, "Renamed");
+    assert_eq!(updated.description, "New desc");
+    assert_eq!(updated.updated_at, s.clock.now());
+}
+
+#[tokio::test]
+async fn update_terminal_epic_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    // Seed cancelled status.
+    sqlx::query(
+        "UPDATE epics SET status = 'cancelled', cancellation_actor_id = ?1, \
+         cancellation_reason = 'not needed', cancellation_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(epic.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .update_epic(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            epic.id,
+            TextPatch {
+                title: Some("Revived".to_string()),
+                description: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::TerminalScope));
+}
+
+#[tokio::test]
+async fn accept_epic_transitions_proposed_to_open() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let epic = s
+        .store
+        .create_epic(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "Proposed".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(epic.status, EpicStatus::Proposed);
+
+    s.clock.advance(TimeDelta::seconds(1));
+    let accepted = s
+        .store
+        .accept_epic(ctx(&s.owner, s.clock.now(), Some(1)), project.id, epic.id)
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(accepted.status, EpicStatus::Open);
+    assert_eq!(accepted.revision.value(), 2);
+}
+
+#[tokio::test]
+async fn accept_non_proposed_epic_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    assert_eq!(epic.status, EpicStatus::Open);
+
+    let err = s
+        .store
+        .accept_epic(ctx(&s.owner, s.clock.now(), Some(1)), project.id, epic.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::InvalidState(_)));
+}
+
+// ── Task domain tests ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn create_task_under_valid_epic() {
+    let s = setup().await;
+    let settings = ProjectSettings {
+        proposal_gate: false,
+        planning_required: true,
+        plan_review: ReviewPolicy::Agent,
+        work_review: ReviewPolicy::Human,
+    };
+    let project = create_project_with_settings(&s, "P", settings).await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    let task = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Task One".to_string(),
+                description: Some("Desc".to_string()),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(task.title, "Task One");
+    assert_eq!(task.description, "Desc");
+    assert_eq!(task.revision.value(), 1);
+    assert_eq!(task.project_id, project.id);
+    assert_eq!(task.epic_id, epic.id);
+    assert_eq!(task.type_key, "code");
+    assert_eq!(task.status, TaskStatus::Open);
+    assert_eq!(task.phase, TaskPhase::Planning);
+    assert!(task.planning_required);
+    assert_eq!(task.plan_review, ReviewPolicy::Agent);
+    assert_eq!(task.work_review, ReviewPolicy::Human);
+    assert_eq!(task.attempt_count, 0);
+    assert!(!task.archived);
+}
+
+#[tokio::test]
+async fn create_task_under_terminal_epic_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    // Seed done status.
+    sqlx::query("UPDATE epics SET status = 'done' WHERE id = ?1")
+        .bind(epic.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+
+    let err = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Late".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::TerminalScope));
+}
+
+#[tokio::test]
+async fn create_task_validates_type_key_exists() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    let err = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Bad type".to_string(),
+                type_key: "nonexistent".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "type_key",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn create_task_rejects_archived_type_key() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    sqlx::query("UPDATE task_types SET archived = 1 WHERE project_id = ?1 AND key = 'design'")
+        .bind(project.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+
+    let err = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Archived type".to_string(),
+                type_key: "design".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "type_key",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn accept_task_transitions_proposed_to_open() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            planning_required: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    // Accept the epic first (it's proposed too due to proposal_gate, but human created it).
+    // Actually human creates open, so no need to accept.
+
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let task = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Agent task".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(task.status, TaskStatus::Proposed);
+    assert_eq!(task.phase, TaskPhase::Planning);
+
+    s.clock.advance(TimeDelta::seconds(1));
+    let accepted = s
+        .store
+        .accept_task(ctx(&s.owner, s.clock.now(), Some(1)), project.id, task.id)
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(accepted.status, TaskStatus::Open);
+    assert_eq!(accepted.phase, TaskPhase::Planning);
+    assert_eq!(accepted.revision.value(), 2);
+}
+
+#[tokio::test]
+async fn update_task_policy_resets_phase() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            planning_required: false,
+            plan_review: ReviewPolicy::None,
+            work_review: ReviewPolicy::None,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+    assert_eq!(task.phase, TaskPhase::Execution);
+
+    s.clock.advance(TimeDelta::seconds(1));
+    let updated = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                planning_required: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(updated.phase, TaskPhase::Planning);
+    assert!(updated.planning_required);
+}
+
+#[tokio::test]
+async fn update_task_title_retains_phase() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            planning_required: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+    assert_eq!(task.phase, TaskPhase::Planning);
+
+    s.clock.advance(TimeDelta::seconds(1));
+    let updated = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                title: Some("Renamed only".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(updated.phase, TaskPhase::Planning);
+    assert_eq!(updated.title, "Renamed only");
+}
+
+// ── List and count tests ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn list_epics_pages_under_goal() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let e1 = create_epic(&s, project.id, goal.id, "e1").await;
+    let e2 = create_epic(&s, project.id, goal.id, "e2").await;
+    s.clock.advance(TimeDelta::milliseconds(3));
+    let e3 = create_epic(&s, project.id, goal.id, "e3").await;
+
+    let page1 = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                goal_id: Some(goal.id),
+                ..Default::default()
+            },
+            &ListParams {
+                limit: Some(2),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        page1.items.iter().map(|e| e.id).collect::<Vec<_>>(),
+        vec![e1.id, e2.id]
+    );
+    assert!(page1.next_cursor.is_some());
+
+    let page2 = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                goal_id: Some(goal.id),
+                ..Default::default()
+            },
+            &ListParams {
+                limit: Some(2),
+                cursor: page1.next_cursor,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page2.items[0].id, e3.id);
+    assert!(page2.next_cursor.is_none());
+}
+
+#[tokio::test]
+async fn list_tasks_pages_under_epic() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let t1 = create_task(&s, project.id, epic.id, "t1").await;
+    let t2 = create_task(&s, project.id, epic.id, "t2").await;
+    s.clock.advance(TimeDelta::milliseconds(3));
+    let t3 = create_task(&s, project.id, epic.id, "t3").await;
+
+    let page1 = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                epic_id: Some(epic.id),
+                ..Default::default()
+            },
+            &ListParams {
+                limit: Some(2),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        page1.items.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![t1.id, t2.id]
+    );
+
+    let page2 = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                epic_id: Some(epic.id),
+                ..Default::default()
+            },
+            &ListParams {
+                limit: Some(2),
+                cursor: page1.next_cursor,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page2.items[0].id, t3.id);
+    assert!(page2.next_cursor.is_none());
+}
+
+#[tokio::test]
+async fn task_counts_aggregate_statuses() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    // Seed tasks with various statuses directly.
+    // cancelled rows need cancellation_actor_id per CHECK constraint.
+    let now = format_ts(&s.clock.now());
+    let owner_id = s.owner.id.to_string();
+    for (i, (status, phase, cancelled, waiver)) in [
+        ("done", "complete", false, false),
+        ("done", "complete", false, false),
+        ("cancelled", "complete", true, false),
+        ("cancelled", "complete", true, true),
+        ("open", "execution", false, false),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let id = TaskId::generate(s.clock.now()).to_string();
+        sqlx::query(
+            "INSERT INTO tasks (id, revision, created_at, updated_at, project_id, epic_id, \
+             title, description, type_key, status, phase, planning_required, plan_review, \
+             work_review, archived, attempt_count, \
+             cancellation_actor_id, cancellation_reason, cancellation_created_at, \
+             waiver_actor_id, waiver_reason, waiver_created_at) \
+             VALUES (?1, 1, ?2, ?2, ?3, ?4, ?5, '', 'code', ?6, ?7, 0, 'none', 'none', 0, 0, \
+             ?8, ?9, ?10, ?11, ?12, ?13)",
+        )
+        .bind(&id)
+        .bind(&now)
+        .bind(project.id.to_string())
+        .bind(epic.id.to_string())
+        .bind(format!("task-{i}"))
+        .bind(status)
+        .bind(phase)
+        .bind(cancelled.then_some(&owner_id))
+        .bind(cancelled.then_some("not needed"))
+        .bind(cancelled.then_some(now.clone()))
+        .bind(waiver.then_some(&owner_id))
+        .bind(waiver.then_some("waived"))
+        .bind(waiver.then_some(now.clone()))
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+    }
+
+    let fetched = s.store.get_epic(&project.id, &epic.id).await.unwrap();
+    assert_eq!(
+        fetched.task_counts,
+        Counts {
+            total: 5,
+            done: 2,
+            cancelled: 2,
+            waived: 1,
+        }
+    );
+}
+
+#[tokio::test]
+async fn mutations_beneath_archived_epic_rejected() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    sqlx::query(
+        "UPDATE epics SET archived = 1, archive_actor_id = ?1, \
+         archive_reason = 'done', archive_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(epic.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Late".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+}
+
+// ── Archived-scope bug fixes ─────────────────────────────────────────
+
+#[tokio::test]
+async fn update_epic_beneath_archived_goal_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    sqlx::query(
+        "UPDATE goals SET archived = 1, archive_actor_id = ?1, \
+         archive_reason = 'done', archive_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(goal.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .update_epic(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            epic.id,
+            TextPatch {
+                title: Some("Renamed".to_string()),
+                description: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+
+    let mut conn = independent_connection(&s.db_path()).await;
+    let revision: i64 = sqlx::query_scalar("SELECT revision FROM epics WHERE id = ?1")
+        .bind(epic.id.to_string())
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(revision, 1);
+}
+
+#[tokio::test]
+async fn accept_epic_beneath_archived_goal_fails() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let epic = s
+        .store
+        .create_epic(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "Proposed".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(epic.status, EpicStatus::Proposed);
+
+    sqlx::query(
+        "UPDATE goals SET archived = 1, archive_actor_id = ?1, \
+         archive_reason = 'done', archive_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(goal.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .accept_epic(ctx(&s.owner, s.clock.now(), Some(1)), project.id, epic.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+}
+
+#[tokio::test]
+async fn update_task_beneath_archived_epic_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    sqlx::query(
+        "UPDATE epics SET archived = 1, archive_actor_id = ?1, \
+         archive_reason = 'done', archive_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(epic.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                title: Some("Renamed".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+
+    let mut conn = independent_connection(&s.db_path()).await;
+    let (revision, title): (i64, String) =
+        sqlx::query_as("SELECT revision, title FROM tasks WHERE id = ?1")
+            .bind(task.id.to_string())
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+    assert_eq!(revision, 1);
+    assert_eq!(title, "T");
+}
+
+#[tokio::test]
+async fn accept_task_beneath_archived_epic_fails() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let task = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Proposed".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(task.status, TaskStatus::Proposed);
+
+    sqlx::query(
+        "UPDATE epics SET archived = 1, archive_actor_id = ?1, \
+         archive_reason = 'done', archive_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(epic.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .accept_task(ctx(&s.owner, s.clock.now(), Some(1)), project.id, task.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+}
+
+// ── Cross-entity and permission tests ────────────────────────────────
+
+#[tokio::test]
+async fn create_epic_with_goal_from_wrong_project() {
+    let s = setup().await;
+    let project_a = create_project(&s, "A").await;
+    let goal_a = create_goal(&s, project_a.id, "GA").await;
+    let project_b = create_project(&s, "B").await;
+
+    let err = s
+        .store
+        .create_epic(
+            ctx(&s.owner, s.clock.now(), None),
+            project_b.id,
+            goal_a.id,
+            EpicCreate {
+                title: "Cross".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+
+    let mut conn = independent_connection(&s.db_path()).await;
+    assert_eq!(table_count(&mut conn, "epics").await, 0);
+}
+
+#[tokio::test]
+async fn accept_epic_by_agent_fails() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let epic = s
+        .store
+        .create_epic(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "Proposed".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+
+    let err = s
+        .store
+        .accept_epic(ctx(&agent, s.clock.now(), Some(1)), project.id, epic.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::Forbidden(_)));
+}
+
+#[tokio::test]
+async fn accept_task_by_agent_fails() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let task = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Proposed".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+
+    let err = s
+        .store
+        .accept_task(ctx(&agent, s.clock.now(), Some(1)), project.id, task.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::Forbidden(_)));
+}
+
+#[tokio::test]
+async fn accept_non_proposed_task_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+    assert_eq!(task.status, TaskStatus::Open);
+
+    let err = s
+        .store
+        .accept_task(ctx(&s.owner, s.clock.now(), Some(1)), project.id, task.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::InvalidState(_)));
+}
+
+#[tokio::test]
+async fn update_terminal_task_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    sqlx::query(
+        "UPDATE tasks SET status = 'cancelled', phase = 'complete', \
+         cancellation_actor_id = ?1, cancellation_reason = 'not needed', \
+         cancellation_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(task.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                title: Some("Revived".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::TerminalScope));
+
+    let mut conn = independent_connection(&s.db_path()).await;
+    let title: String = sqlx::query_scalar("SELECT title FROM tasks WHERE id = ?1")
+        .bind(task.id.to_string())
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(title, "T");
+}
+
+#[tokio::test]
+async fn update_task_agent_cannot_lower_policy() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            planning_required: true,
+            plan_review: ReviewPolicy::Human,
+            work_review: ReviewPolicy::Human,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let err = s
+        .store
+        .update_task(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                work_review: Some(ReviewPolicy::None),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::Forbidden(_)));
+}
+
+#[tokio::test]
+async fn accepting_task_under_terminal_epic_fails() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let task = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "T".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+
+    sqlx::query(
+        "UPDATE epics SET status = 'cancelled', cancellation_actor_id = ?1, \
+         cancellation_reason = 'done', cancellation_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(epic.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .accept_task(ctx(&s.owner, s.clock.now(), Some(1)), project.id, task.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::TerminalScope));
+}
+
+#[tokio::test]
+async fn accepting_epic_does_not_cascade_to_tasks() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let epic = s
+        .store
+        .create_epic(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "E".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    let task1 = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "T1".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    let task2 = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "T2".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+
+    s.clock.advance(TimeDelta::seconds(1));
+    let accepted = s
+        .store
+        .accept_epic(ctx(&s.owner, s.clock.now(), Some(1)), project.id, epic.id)
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(accepted.status, EpicStatus::Open);
+
+    let t1 = s.store.get_task(&project.id, &task1.id).await.unwrap();
+    let t2 = s.store.get_task(&project.id, &task2.id).await.unwrap();
+    assert_eq!(t1.status, TaskStatus::Proposed);
+    assert_eq!(t2.status, TaskStatus::Proposed);
+}
+
+// ── Input validation tests ───────────────────────────────────────────
+
+#[tokio::test]
+async fn create_epic_validates_title_and_description() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+
+    for title in ["   ", &"x".repeat(201)] {
+        let err = s
+            .store
+            .create_epic(
+                ctx(&s.owner, s.clock.now(), None),
+                project.id,
+                goal.id,
+                EpicCreate {
+                    title: title.to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::Validation { field: "title", .. }),
+            "expected title validation for {title:?}"
+        );
+    }
+
+    let err = s
+        .store
+        .create_epic(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "ok".to_string(),
+                description: Some("d".repeat(10_001)),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "description",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn create_task_validates_title_and_description() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    let err = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "   ".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation { field: "title", .. }
+    ));
+
+    let err = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "ok".to_string(),
+                type_key: "code".to_string(),
+                description: Some("d".repeat(10_001)),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "description",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn update_epic_empty_patch_rejected() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    let err = s
+        .store
+        .update_epic(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            epic.id,
+            TextPatch::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation { field: "patch", .. }
+    ));
+}
+
+#[tokio::test]
+async fn update_task_empty_patch_rejected() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    let err = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation { field: "patch", .. }
+    ));
+}
+
+#[tokio::test]
+async fn update_task_rejects_archived_type_key_on_update() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    sqlx::query("UPDATE task_types SET archived = 1 WHERE project_id = ?1 AND key = 'design'")
+        .bind(project.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+
+    let err = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                type_key: Some("design".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "type_key",
+            ..
+        }
+    ));
+}
+
+// ── Positive / edge case tests ───────────────────────────────────────
+
+#[tokio::test]
+async fn agent_creates_task_with_default_policy() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: false,
+            planning_required: true,
+            plan_review: ReviewPolicy::Agent,
+            work_review: ReviewPolicy::Agent,
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let task = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Agent task".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(task.status, TaskStatus::Open);
+    assert!(task.planning_required);
+    assert_eq!(task.plan_review, ReviewPolicy::Agent);
+    assert_eq!(task.work_review, ReviewPolicy::Agent);
+    assert_eq!(task.phase, TaskPhase::Planning);
+}
+
+#[tokio::test]
+async fn create_task_under_proposed_epic_succeeds() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let epic = s
+        .store
+        .create_epic(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "Proposed".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(epic.status, EpicStatus::Proposed);
+
+    let task = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Under proposed".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(task.epic_id, epic.id);
+    assert_eq!(task.status, TaskStatus::Proposed);
+}
+
+#[tokio::test]
+async fn update_task_type_key_change() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            planning_required: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+    assert_eq!(task.type_key, "code");
+    assert_eq!(task.phase, TaskPhase::Planning);
+
+    // Off the initial phase with an accepted plan: a type-only change must keep both.
+    sqlx::query("UPDATE tasks SET phase = 'execution', status = 'active' WHERE id = ?1")
+        .bind(task.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+    seed_selected_plan(&s, project.id, task.id).await;
+    let plan_before = selected_plan_revision_id(&s, task.id).await;
+
+    s.clock.advance(TimeDelta::seconds(1));
+    let updated = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                type_key: Some("research".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(updated.type_key, "research");
+    assert_eq!(updated.phase, TaskPhase::Execution);
+    assert_eq!(selected_plan_revision_id(&s, task.id).await, plan_before);
+}
+
+#[tokio::test]
+async fn update_task_description_change_triggers_phase_recomputation() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            planning_required: true,
+            plan_review: ReviewPolicy::Human,
+            work_review: ReviewPolicy::Human,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+    assert_eq!(task.phase, TaskPhase::Planning);
+
+    // Simulate a task that reached execution (normally via claims, seeded here).
+    sqlx::query("UPDATE tasks SET phase = 'execution', status = 'active' WHERE id = ?1")
+        .bind(task.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+    seed_selected_plan(&s, project.id, task.id).await;
+
+    s.clock.advance(TimeDelta::seconds(1));
+    let updated = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                description: Some("Scope changed".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(updated.description, "Scope changed");
+    // Description change resets phase back to planning (planning_required=true) and
+    // invalidates the accepted plan.
+    assert_eq!(updated.phase, TaskPhase::Planning);
+    assert_eq!(selected_plan_revision_id(&s, task.id).await, None);
+}
+
+#[tokio::test]
+async fn update_task_same_policy_does_not_reset_phase() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            planning_required: true,
+            plan_review: ReviewPolicy::Human,
+            work_review: ReviewPolicy::Human,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    // Move task to execution (simulating claim-driven advancement).
+    sqlx::query("UPDATE tasks SET phase = 'execution', status = 'active' WHERE id = ?1")
+        .bind(task.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+    seed_selected_plan(&s, project.id, task.id).await;
+    let plan_before = selected_plan_revision_id(&s, task.id).await;
+
+    s.clock.advance(TimeDelta::seconds(1));
+    // Sending the same policy values must NOT trigger a phase reset or plan invalidation.
+    let updated = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                planning_required: Some(true),
+                plan_review: Some(ReviewPolicy::Human),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(updated.phase, TaskPhase::Execution);
+    assert!(updated.planning_required);
+    assert_eq!(selected_plan_revision_id(&s, task.id).await, plan_before);
+}
+
+#[tokio::test]
+async fn task_counts_include_archived_descendants() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let _live = create_task(&s, project.id, epic.id, "live").await;
+    let archived = create_task(&s, project.id, epic.id, "archived").await;
+
+    sqlx::query(
+        "UPDATE tasks SET archived = 1, archive_actor_id = ?1, \
+         archive_reason = 'done', archive_created_at = ?2, \
+         status = 'done', phase = 'complete' WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(archived.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let fetched = s.store.get_epic(&project.id, &epic.id).await.unwrap();
+    assert_eq!(fetched.task_counts.total, 2);
+    assert_eq!(fetched.task_counts.done, 1);
+}
+
+#[tokio::test]
+async fn list_epics_empty_goal_returns_empty_page() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+
+    let page = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                goal_id: Some(goal.id),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert!(page.items.is_empty());
+    assert!(page.next_cursor.is_none());
+}
+
+#[tokio::test]
+async fn list_tasks_nonexistent_epic_returns_not_found() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let fake_epic = EpicId::generate(s.clock.now());
+
+    let err = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                epic_id: Some(fake_epic),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+}
+
+#[tokio::test]
+async fn get_epic_nonexistent_returns_not_found() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let fake_epic = EpicId::generate(s.clock.now());
+
+    let err = s.store.get_epic(&project.id, &fake_epic).await.unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+}
+
+#[tokio::test]
+async fn get_task_nonexistent_returns_not_found() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let fake_task = TaskId::generate(s.clock.now());
+
+    let err = s.store.get_task(&project.id, &fake_task).await.unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+}
+
+// ── Revision and precondition tests ──────────────────────────────────
+
+#[tokio::test]
+async fn revision_and_precondition_checks_on_epic_and_task_commands() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let epic = s
+        .store
+        .create_epic(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "E".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    let task = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "T".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+
+    // PreconditionRequired: expected_revision = None.
+    let err = s
+        .store
+        .update_epic(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TextPatch {
+                title: Some("X".to_string()),
+                description: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::PreconditionRequired));
+
+    let err = s
+        .store
+        .accept_epic(ctx(&s.owner, s.clock.now(), None), project.id, epic.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::PreconditionRequired));
+
+    let err = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            task.id,
+            TaskPatch {
+                title: Some("X".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::PreconditionRequired));
+
+    let err = s
+        .store
+        .accept_task(ctx(&s.owner, s.clock.now(), None), project.id, task.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::PreconditionRequired));
+
+    // RevisionConflict: wrong revision.
+    let err = s
+        .store
+        .accept_epic(ctx(&s.owner, s.clock.now(), Some(99)), project.id, epic.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::RevisionConflict { .. }));
+
+    let err = s
+        .store
+        .accept_task(ctx(&s.owner, s.clock.now(), Some(99)), project.id, task.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::RevisionConflict { .. }));
+}
+
+#[tokio::test]
+async fn update_epic_scopes_by_project() {
+    let s = setup().await;
+    let project_a = create_project(&s, "A").await;
+    let project_b = create_project(&s, "B").await;
+    let goal = create_goal(&s, project_a.id, "G").await;
+    let epic = create_epic(&s, project_a.id, goal.id, "E").await;
+
+    let err = s
+        .store
+        .update_epic(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project_b.id,
+            epic.id,
+            TextPatch {
+                title: Some("Moved".to_string()),
+                description: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+}
+
+#[tokio::test]
+async fn update_task_scopes_by_project() {
+    let s = setup().await;
+    let project_a = create_project(&s, "A").await;
+    let project_b = create_project(&s, "B").await;
+    let goal = create_goal(&s, project_a.id, "G").await;
+    let epic = create_epic(&s, project_a.id, goal.id, "E").await;
+    let task = create_task(&s, project_a.id, epic.id, "T").await;
+
+    let err = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project_b.id,
+            task.id,
+            TaskPatch {
+                title: Some("Moved".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+}
+
+// ── List archive visibility tests ────────────────────────────────────
+
+#[tokio::test]
+async fn archived_epics_are_hidden_unless_requested() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let live = create_epic(&s, project.id, goal.id, "live").await;
+    let archived = create_epic(&s, project.id, goal.id, "archived").await;
+
+    sqlx::query(
+        "UPDATE epics SET archived = 1, status = 'done', \
+         archive_actor_id = ?1, archive_reason = 'shelved', archive_created_at = ?2 \
+         WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(archived.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let visible = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                goal_id: Some(goal.id),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        visible.items.iter().map(|e| e.id).collect::<Vec<_>>(),
+        vec![live.id]
+    );
+
+    let all = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                goal_id: Some(goal.id),
+                ..Default::default()
+            },
+            &ListParams {
+                include_archived: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(all.items.len(), 2);
+    let archived_record = all
+        .items
+        .iter()
+        .find(|e| e.id == archived.id)
+        .unwrap()
+        .archive
+        .as_ref()
+        .unwrap();
+    assert_eq!(archived_record.reason, "shelved");
+}
+
+#[tokio::test]
+async fn archived_tasks_are_hidden_unless_requested() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let live = create_task(&s, project.id, epic.id, "live").await;
+    let archived = create_task(&s, project.id, epic.id, "archived").await;
+
+    sqlx::query(
+        "UPDATE tasks SET archived = 1, status = 'done', phase = 'complete', \
+         archive_actor_id = ?1, archive_reason = 'shelved', archive_created_at = ?2 \
+         WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(archived.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let visible = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                epic_id: Some(epic.id),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        visible.items.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![live.id]
+    );
+
+    let all = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                epic_id: Some(epic.id),
+                ..Default::default()
+            },
+            &ListParams {
+                include_archived: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(all.items.len(), 2);
+}
+
+// ── Agent-rename with lowered policy ─────────────────────────────────
+
+#[tokio::test]
+async fn agent_can_rename_task_with_human_lowered_policy() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            planning_required: true,
+            plan_review: ReviewPolicy::Human,
+            work_review: ReviewPolicy::Human,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+
+    // Owner creates task with lowered policy (below project defaults).
+    let task = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "T".to_string(),
+                type_key: "code".to_string(),
+                planning_required: Some(false),
+                plan_review: Some(ReviewPolicy::None),
+                work_review: Some(ReviewPolicy::None),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(task.plan_review, ReviewPolicy::None);
+
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    // Agent renames the task (title-only patch, no policy change) — must succeed.
+    s.clock.advance(TimeDelta::seconds(1));
+    let updated = s
+        .store
+        .update_task(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                title: Some("Renamed by agent".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(updated.title, "Renamed by agent");
+    assert_eq!(updated.plan_review, ReviewPolicy::None);
+}
+
+// ── Update task under terminal epic ──────────────────────────────────
+
+#[tokio::test]
+async fn update_task_beneath_terminal_epic_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    sqlx::query(
+        "UPDATE epics SET status = 'cancelled', cancellation_actor_id = ?1, \
+         cancellation_reason = 'scrapped', cancellation_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(epic.id.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+
+    let err = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                title: Some("Late rename".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::TerminalScope));
+}
+
+// ── Writer edits and membership precedence ───────────────────────────
+
+#[tokio::test]
+async fn agent_edits_nonterminal_epic_description() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    s.clock.advance(TimeDelta::seconds(1));
+    let updated = s
+        .store
+        .update_epic(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            epic.id,
+            TextPatch {
+                title: Some("Agent title".to_string()),
+                description: Some("Agent description".to_string()),
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(updated.title, "Agent title");
+    assert_eq!(updated.description, "Agent description");
+    assert_eq!(updated.revision.value(), 2);
+
+    // Guards apply to writers as well.
+    sqlx::query("UPDATE epics SET status = 'done' WHERE id = ?1")
+        .bind(epic.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+    s.clock.advance(TimeDelta::seconds(1));
+    let err = s
+        .store
+        .update_epic(
+            ctx(&agent, s.clock.now(), Some(2)),
+            project.id,
+            epic.id,
+            TextPatch {
+                title: Some("Too late".to_string()),
+                description: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::TerminalScope));
+}
+
+#[tokio::test]
+async fn accept_epic_by_agent_missing_or_foreign_id_is_not_found() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let missing = s
+        .store
+        .accept_epic(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            EpicId::generate(s.clock.now()),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(missing, DomainError::NotFound));
+
+    let other_project = create_project(&s, "P2").await;
+    let other_goal = create_goal(&s, other_project.id, "G2").await;
+    let other_epic = create_epic(&s, other_project.id, other_goal.id, "E2").await;
+    let foreign = s
+        .store
+        .accept_epic(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            other_epic.id,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(foreign, DomainError::NotFound));
+}
+
+#[tokio::test]
+async fn accept_task_by_agent_missing_or_foreign_id_is_not_found() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let missing = s
+        .store
+        .accept_task(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            TaskId::generate(s.clock.now()),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(missing, DomainError::NotFound));
+
+    let other_project = create_project(&s, "P2").await;
+    let other_goal = create_goal(&s, other_project.id, "G2").await;
+    let other_epic = create_epic(&s, other_project.id, other_goal.id, "E2").await;
+    let other_task = create_task(&s, other_project.id, other_epic.id, "T2").await;
+    let foreign = s
+        .store
+        .accept_task(
+            ctx(&agent, s.clock.now(), Some(1)),
+            project.id,
+            other_task.id,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(foreign, DomainError::NotFound));
+}
+
+// ── Archived-goal guards on task mutations ──────────────────────────
+
+async fn archive_goal(s: &Setup, goal: GoalId) {
+    sqlx::query(
+        "UPDATE goals SET archived = 1, archive_actor_id = ?1, \
+         archive_reason = 'done', archive_created_at = ?2 WHERE id = ?3",
+    )
+    .bind(s.owner.id.to_string())
+    .bind(format_ts(&s.clock.now()))
+    .bind(goal.to_string())
+    .execute(s.store.pool())
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn create_task_under_archived_goal_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    archive_goal(&s, goal.id).await;
+
+    let err = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Late".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+}
+
+#[tokio::test]
+async fn update_task_beneath_archived_goal_fails() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+    archive_goal(&s, goal.id).await;
+
+    let err = s
+        .store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            TaskPatch {
+                title: Some("Renamed".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+
+    let mut conn = independent_connection(&s.db_path()).await;
+    let revision: i64 = sqlx::query_scalar("SELECT revision FROM tasks WHERE id = ?1")
+        .bind(task.id.to_string())
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(revision, 1);
+}
+
+#[tokio::test]
+async fn accept_task_beneath_archived_goal_fails() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+    let task = s
+        .store
+        .create_task(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "Proposed".to_string(),
+                type_key: "code".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    archive_goal(&s, goal.id).await;
+
+    let err = s
+        .store
+        .accept_task(ctx(&s.owner, s.clock.now(), Some(1)), project.id, task.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::ArchivedScope));
+}
+
+// ── List filters and project-wide pagination ────────────────────────
+
+#[tokio::test]
+async fn list_epics_supports_goal_and_status_filters_and_project_wide_pages() {
+    let s = setup().await;
+    let project = create_project_with_settings(
+        &s,
+        "P",
+        ProjectSettings {
+            proposal_gate: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let g1 = create_goal(&s, project.id, "G1").await;
+    let g2 = create_goal(&s, project.id, "G2").await;
+    let agent = actor(s.clock.now(), ActorKind::Agent, "bot");
+    register(&s.store, &agent).await;
+
+    let open = create_epic(&s, project.id, g1.id, "open").await;
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let proposed = s
+        .store
+        .create_epic(
+            ctx(&agent, s.clock.now(), None),
+            project.id,
+            g1.id,
+            EpicCreate {
+                title: "Proposed".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let other_goal_epic = create_epic(&s, project.id, g2.id, "other").await;
+
+    // Project-wide: every epic across goals, one page at a time.
+    let page1 = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters::default(),
+            &ListParams {
+                limit: Some(2),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        page1.items.iter().map(|e| e.id).collect::<Vec<_>>(),
+        vec![open.id, proposed.id]
+    );
+    let page2 = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters::default(),
+            &ListParams {
+                limit: Some(2),
+                cursor: page1.next_cursor.clone(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page2.items[0].id, other_goal_epic.id);
+    assert!(page2.next_cursor.is_none());
+
+    // Goal filter narrows to one goal's epics.
+    let scoped = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                goal_id: Some(g1.id),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        scoped.items.iter().map(|e| e.id).collect::<Vec<_>>(),
+        vec![open.id, proposed.id]
+    );
+
+    // Status filter narrows further.
+    let proposed_only = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                status: Some(EpicStatus::Proposed),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        proposed_only.items.iter().map(|e| e.id).collect::<Vec<_>>(),
+        vec![proposed.id]
+    );
+
+    // Unknown project is 404, not an empty page.
+    let err = s
+        .store
+        .list_epics(
+            &ProjectId::generate(s.clock.now()),
+            &EpicListFilters::default(),
+            &ListParams::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+
+    // A cursor minted under one filter set is invalid under another.
+    let err = s
+        .store
+        .list_epics(
+            &project.id,
+            &EpicListFilters {
+                goal_id: Some(g2.id),
+                ..Default::default()
+            },
+            &ListParams {
+                cursor: page1.next_cursor,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::InvalidCursor(_)));
+}
+
+#[tokio::test]
+async fn list_tasks_supports_epic_phase_and_type_filters_and_project_wide_pages() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let g1 = create_goal(&s, project.id, "G1").await;
+    let g2 = create_goal(&s, project.id, "G2").await;
+    let e1 = create_epic(&s, project.id, g1.id, "E1").await;
+    let e2 = create_epic(&s, project.id, g2.id, "E2").await;
+
+    let code_one = create_task(&s, project.id, e1.id, "code one").await;
+    let research = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            e1.id,
+            TaskCreate {
+                title: "research".to_string(),
+                type_key: "research".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let code_two = create_task(&s, project.id, e2.id, "code two").await;
+    sqlx::query("UPDATE tasks SET phase = 'planning', status = 'active' WHERE id = ?1")
+        .bind(research.id.to_string())
+        .execute(s.store.pool())
+        .await
+        .unwrap();
+
+    // Project-wide: tasks from both epics, cursor-walked one at a time.
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = s
+            .store
+            .list_tasks(
+                &project.id,
+                &TaskListFilters::default(),
+                &ListParams {
+                    limit: Some(1),
+                    cursor,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        seen.extend(page.items.iter().map(|t| t.id));
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(seen, vec![code_one.id, research.id, code_two.id]);
+
+    // Epic filter narrows to one epic's tasks.
+    let scoped = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                epic_id: Some(e1.id),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        scoped.items.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![code_one.id, research.id]
+    );
+
+    // Phase filter.
+    let planning = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                phase: Some(TaskPhase::Planning),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        planning.items.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![research.id]
+    );
+
+    // Type filter spans epics.
+    let code = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                type_key: Some("code".to_string()),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        code.items.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![code_one.id, code_two.id]
+    );
+
+    // Unknown project is 404.
+    let err = s
+        .store
+        .list_tasks(
+            &ProjectId::generate(s.clock.now()),
+            &TaskListFilters::default(),
+            &ListParams::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+
+    // A cursor minted under the project-wide filter is invalid under a type filter.
+    let err = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                type_key: Some("code".to_string()),
+                ..Default::default()
+            },
+            &ListParams {
+                limit: Some(1),
+                cursor: Some(
+                    s.store
+                        .list_tasks(
+                            &project.id,
+                            &TaskListFilters::default(),
+                            &ListParams {
+                                limit: Some(1),
+                                ..Default::default()
+                            },
+                        )
+                        .await
+                        .unwrap()
+                        .next_cursor
+                        .unwrap(),
+                ),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::InvalidCursor(_)));
+}
+
+#[tokio::test]
+async fn type_key_none_does_not_collide_with_the_absent_filter_token() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    s.store
+        .create_task_type(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            TaskTypeCreate {
+                key: "none".to_string(),
+                label: "None".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let code = create_task(&s, project.id, epic.id, "code task").await;
+    let none = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "none task".to_string(),
+                type_key: "none".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+
+    // The "none" filter is a real, different result set.
+    let filtered = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                type_key: Some("none".to_string()),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        filtered.items.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![none.id]
+    );
+
+    // ...so the unfiltered page's cursor must not validate under it.
+    let page = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters::default(),
+            &ListParams {
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.items[0].id, code.id);
+    assert!(page.next_cursor.is_some());
+    let err = s
+        .store
+        .list_tasks(
+            &project.id,
+            &TaskListFilters {
+                type_key: Some("none".to_string()),
+                ..Default::default()
+            },
+            &ListParams {
+                limit: Some(1),
+                cursor: page.next_cursor,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::InvalidCursor(_)));
+}

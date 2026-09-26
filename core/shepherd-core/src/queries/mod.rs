@@ -1,5 +1,7 @@
 pub(crate) mod hierarchy;
 
+pub use hierarchy::{EpicListFilters, TaskListFilters};
+
 use std::sync::OnceLock;
 
 use base64::Engine;

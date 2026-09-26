@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{
-    Actor, ActorId, ActorKind, CommandId, EventId, GoalId, ProjectId, Revision, TaskTypeId,
+    Actor, ActorId, ActorKind, CommandId, EpicId, EventId, GoalId, ProjectId, Revision, TaskId,
+    TaskTypeId,
 };
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store, rows};
@@ -106,6 +107,26 @@ impl PendingEvent {
         Self {
             event_type: "goal.changed",
             kind_rank: 1,
+            resource_id: id.as_uuid(),
+            resource_revision: revision.value(),
+            affected_ids: Vec::new(),
+        }
+    }
+
+    pub(crate) fn epic(id: EpicId, revision: Revision) -> Self {
+        Self {
+            event_type: "epic.changed",
+            kind_rank: 2,
+            resource_id: id.as_uuid(),
+            resource_revision: revision.value(),
+            affected_ids: Vec::new(),
+        }
+    }
+
+    pub(crate) fn task(id: TaskId, revision: Revision) -> Self {
+        Self {
+            event_type: "task.changed",
+            kind_rank: 3,
             resource_id: id.as_uuid(),
             resource_revision: revision.value(),
             affected_ids: Vec::new(),
