@@ -1,6 +1,6 @@
 use super::{
-    CommandContext, CommandResult, PendingEvent, append_events, live_actor, require_owner,
-    require_revision, task_has_active_work,
+    CommandContext, CommandResult, PendingEvent, append_events, epic_scope, live_actor,
+    missing_after_write, require_owner, require_revision, task_has_active_work, task_scope,
 };
 use crate::error::DomainError;
 use crate::model::{
@@ -21,10 +21,6 @@ use crate::workflow::{self, AffectedScope, policy};
 fn settings_json(settings: &ProjectSettings) -> Result<String, DomainError> {
     serde_json::to_string(settings)
         .map_err(|err| StorageError::Corrupt(format!("settings: {err}")).into())
-}
-
-fn missing_after_write(what: &'static str) -> DomainError {
-    StorageError::Corrupt(format!("{what} missing after write")).into()
 }
 
 impl Store {
@@ -492,27 +488,17 @@ impl Store {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 // Membership precedes capability (plan/04): a missing or foreign epic is 404.
-                let current = epic_row(tx, &project, &epic)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope = epic_scope(tx, &project, &epic).await?;
                 require_owner(&actor)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let goal_current = goal_row(tx, &project, &current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                if current.status != EpicStatus::Proposed {
+                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                scope.ensure_unarchived()?;
+                if scope.epic.status != EpicStatus::Proposed {
                     return Err(DomainError::InvalidState(format!(
                         "epic status is {} but must be proposed",
-                        current.status.as_str()
+                        scope.epic.status.as_str()
                     )));
                 }
-                let next = current.revision.next();
+                let next = scope.epic.revision.next();
                 sqlx::query(
                     "UPDATE epics SET revision = ?1, updated_at = ?2, status = ?3 \
                      WHERE id = ?4",
@@ -524,7 +510,7 @@ impl Store {
                 .execute(&mut **tx)
                 .await?;
                 // Accept runs the cascade (plan/04): tasks may already be done.
-                let mut pending = vec![PendingEvent::epic(epic, next, current.goal_id)];
+                let mut pending = vec![PendingEvent::epic(epic, next, scope.epic.goal_id)];
                 workflow::recompute(
                     tx,
                     AffectedScope {
@@ -835,34 +821,20 @@ impl Store {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 // Membership precedes capability (plan/04): a missing or foreign task is 404.
-                let current = task_row(tx, &project, &task)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope = task_scope(tx, &project, &task).await?;
                 require_owner(&actor)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let epic_current = epic_row(tx, &project, &current.epic_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || epic_current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                if epic_current.status.is_terminal() {
+                require_revision(ctx.expected_revision, scope.task.revision)?;
+                scope.ensure_unarchived()?;
+                if scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
                 }
-                if current.status != crate::model::TaskStatus::Proposed {
+                if scope.task.status != crate::model::TaskStatus::Proposed {
                     return Err(DomainError::InvalidState(format!(
                         "task status is {} but must be proposed",
-                        current.status.as_str()
+                        scope.task.status.as_str()
                     )));
                 }
-                let next = current.revision.next();
+                let next = scope.task.revision.next();
                 sqlx::query(
                     "UPDATE tasks SET revision = ?1, updated_at = ?2, status = ?3 \
                      WHERE id = ?4",
@@ -873,12 +845,12 @@ impl Store {
                 .bind(task.to_string())
                 .execute(&mut **tx)
                 .await?;
-                let mut pending = vec![PendingEvent::task(task, next, current.epic_id)];
+                let mut pending = vec![PendingEvent::task(task, next, scope.task.epic_id)];
                 workflow::recompute(
                     tx,
                     AffectedScope {
                         project,
-                        epics: vec![current.epic_id],
+                        epics: vec![scope.task.epic_id],
                     },
                     &mut pending,
                     ctx.now,
@@ -908,32 +880,18 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 live_actor(tx, &ctx.actor.id).await?;
-                let current = task_row(tx, &project, &task)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let epic_current = epic_row(tx, &project, &current.epic_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || epic_current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                if current.status.is_terminal() || epic_current.status.is_terminal() {
+                let scope = task_scope(tx, &project, &task).await?;
+                require_revision(ctx.expected_revision, scope.task.revision)?;
+                scope.ensure_unarchived()?;
+                if scope.task.status.is_terminal() || scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
                 }
-                if current.block.is_some() {
+                if scope.task.block.is_some() {
                     return Err(DomainError::InvalidState("task is already blocked".into()));
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::task::block(tx, &ctx, &current, &reason, &mut pending).await?;
+                workflow::task::block(tx, &ctx, &scope.task, &reason, &mut pending).await?;
                 let events =
                     append_events(tx, &project, &ctx, "blockTask", &reason, pending).await?;
                 let updated = find_task(tx, &project, &task)
@@ -957,36 +915,22 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                let current = task_row(tx, &project, &task)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope = task_scope(tx, &project, &task).await?;
                 require_owner(&actor)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let epic_current = epic_row(tx, &project, &current.epic_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || epic_current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                let Some(block) = &current.block else {
+                require_revision(ctx.expected_revision, scope.task.revision)?;
+                scope.ensure_unarchived()?;
+                let Some(block) = &scope.task.block else {
                     return Err(DomainError::InvalidState("task is not blocked".into()));
                 };
                 // The unblock event preserves the cleared block reason (plan/08).
                 let cleared = block.reason.clone();
                 let mut pending = Vec::new();
-                workflow::task::unblock(tx, &ctx, &current, &mut pending).await?;
+                workflow::task::unblock(tx, &ctx, &scope.task, &mut pending).await?;
                 workflow::recompute(
                     tx,
                     AffectedScope {
                         project,
-                        epics: vec![current.epic_id],
+                        epics: vec![scope.task.epic_id],
                     },
                     &mut pending,
                     ctx.now,
@@ -1016,30 +960,16 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                let current = task_row(tx, &project, &task)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope = task_scope(tx, &project, &task).await?;
                 require_owner(&actor)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let epic_current = epic_row(tx, &project, &current.epic_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || epic_current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                if current.status.is_terminal() || epic_current.status.is_terminal() {
+                require_revision(ctx.expected_revision, scope.task.revision)?;
+                scope.ensure_unarchived()?;
+                if scope.task.status.is_terminal() || scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::task::cancel(tx, &ctx, &current, &reason, &mut pending).await?;
+                workflow::task::cancel(tx, &ctx, &scope.task, &reason, &mut pending).await?;
                 let events =
                     append_events(tx, &project, &ctx, "cancelTask", &reason, pending).await?;
                 let updated = find_task(tx, &project, &task)
@@ -1064,58 +994,44 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                let current = task_row(tx, &project, &task)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope = task_scope(tx, &project, &task).await?;
                 require_owner(&actor)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let epic_current = epic_row(tx, &project, &current.epic_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || epic_current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                if epic_current.status.is_terminal() {
+                require_revision(ctx.expected_revision, scope.task.revision)?;
+                scope.ensure_unarchived()?;
+                if scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
                 }
-                if current.status != TaskStatus::Cancelled {
+                if scope.task.status != TaskStatus::Cancelled {
                     return Err(DomainError::InvalidState(format!(
                         "task status is {} but must be cancelled",
-                        current.status.as_str()
+                        scope.task.status.as_str()
                     )));
                 }
-                if current.waiver.is_some() {
+                if scope.task.waiver.is_some() {
                     return Err(DomainError::InvalidState("task is already waived".into()));
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::task::waive(tx, &ctx, &current, &reason, &mut pending).await?;
+                workflow::task::waive(tx, &ctx, &scope.task, &reason, &mut pending).await?;
                 // The waiver changes the epic's completion denominator: bump it
                 // once here; the cascade reuses this revision if it completes.
-                let epic_next = epic_current.revision.next();
+                let epic_next = scope.epic.revision.next();
                 sqlx::query("UPDATE epics SET revision = ?1, updated_at = ?2 WHERE id = ?3")
                     .bind(epic_next.value())
                     .bind(format_ts(&ctx.now))
-                    .bind(current.epic_id.to_string())
+                    .bind(scope.task.epic_id.to_string())
                     .execute(&mut **tx)
                     .await?;
                 pending.push(PendingEvent::epic(
-                    current.epic_id,
+                    scope.task.epic_id,
                     epic_next,
-                    epic_current.goal_id,
+                    scope.epic.goal_id,
                 ));
                 workflow::recompute(
                     tx,
                     AffectedScope {
                         project,
-                        epics: vec![current.epic_id],
+                        epics: vec![scope.task.epic_id],
                     },
                     &mut pending,
                     ctx.now,
@@ -1146,28 +1062,18 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 live_actor(tx, &ctx.actor.id).await?;
-                let current = epic_row(tx, &project, &epic)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let goal_current = goal_row(tx, &project, &current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                if current.status.is_terminal() {
+                let scope = epic_scope(tx, &project, &epic).await?;
+                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                scope.ensure_unarchived()?;
+                if scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
                 }
-                if current.block.is_some() {
+                if scope.epic.block.is_some() {
                     return Err(DomainError::InvalidState("epic is already blocked".into()));
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::epic::block(tx, &ctx, &current, &reason, &mut pending).await?;
+                workflow::epic::block(tx, &ctx, &scope.epic, &reason, &mut pending).await?;
                 let events =
                     append_events(tx, &project, &ctx, "blockEpic", &reason, pending).await?;
                 let updated = find_epic(tx, &project, &epic)
@@ -1191,26 +1097,16 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                let current = epic_row(tx, &project, &epic)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope = epic_scope(tx, &project, &epic).await?;
                 require_owner(&actor)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let goal_current = goal_row(tx, &project, &current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                let Some(block) = &current.block else {
+                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                scope.ensure_unarchived()?;
+                let Some(block) = &scope.epic.block else {
                     return Err(DomainError::InvalidState("epic is not blocked".into()));
                 };
                 let cleared = block.reason.clone();
                 let mut pending = Vec::new();
-                workflow::epic::unblock(tx, &ctx, &current, &mut pending).await?;
+                workflow::epic::unblock(tx, &ctx, &scope.epic, &mut pending).await?;
                 // Unblocking re-evaluates children finished before the block.
                 workflow::recompute(
                     tx,
@@ -1246,26 +1142,16 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                let current = epic_row(tx, &project, &epic)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope = epic_scope(tx, &project, &epic).await?;
                 require_owner(&actor)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let goal_current = goal_row(tx, &project, &current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                if current.status.is_terminal() {
+                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                scope.ensure_unarchived()?;
+                if scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::epic::cancel(tx, &ctx, &current, &reason, &mut pending).await?;
+                workflow::epic::cancel(tx, &ctx, &scope.epic, &reason, &mut pending).await?;
                 let events =
                     append_events(tx, &project, &ctx, "cancelEpic", &reason, pending).await?;
                 let updated = find_epic(tx, &project, &epic)
@@ -1292,29 +1178,19 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                let current = epic_row(tx, &project, &epic)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope = epic_scope(tx, &project, &epic).await?;
                 require_owner(&actor)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let goal_current = goal_row(tx, &project, &current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                if current.status.is_terminal() {
+                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                scope.ensure_unarchived()?;
+                if scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
                 }
-                if current.status == EpicStatus::Proposed {
+                if scope.epic.status == EpicStatus::Proposed {
                     return Err(DomainError::InvalidState(
                         "epic is proposed and must be accepted first".into(),
                     ));
                 }
-                if current.block.is_some() {
+                if scope.epic.block.is_some() {
                     return Err(DomainError::InvalidState("epic is blocked".into()));
                 }
                 let snapshot =
@@ -1338,7 +1214,7 @@ impl Store {
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::epic::complete(tx, &ctx, &current, &mut pending).await?;
+                workflow::epic::complete(tx, &ctx, &scope.epic, &mut pending).await?;
                 let dependents = workflow::dependents_of(tx, &[epic]).await?;
                 workflow::recompute(
                     tx,
@@ -1376,33 +1252,25 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 live_actor(tx, &ctx.actor.id).await?;
-                let current = task_row(tx, &project, &task)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let epic_current = epic_row(tx, &project, &current.epic_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || epic_current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                if current.status.is_terminal() {
+                let scope = task_scope(tx, &project, &task).await?;
+                require_revision(ctx.expected_revision, scope.task.revision)?;
+                scope.ensure_unarchived()?;
+                if scope.task.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
                 }
+                // A blocked task can never report done in production; epic-level
+                // blocks stay permitted so tests can build the reachable
+                // children-done-before-block state.
+                if scope.task.block.is_some() {
+                    return Err(DomainError::InvalidState("task is blocked".into()));
+                }
                 let mut pending = Vec::new();
-                workflow::task::complete(tx, &ctx, &current, &mut pending).await?;
+                workflow::task::complete(tx, &ctx, &scope.task, &mut pending).await?;
                 workflow::recompute(
                     tx,
                     AffectedScope {
                         project,
-                        epics: vec![current.epic_id],
+                        epics: vec![scope.task.epic_id],
                     },
                     &mut pending,
                     ctx.now,
@@ -2890,58 +2758,27 @@ mod tests {
     }
 
     async fn seed_claim_row(f: &Fixture, task: TaskId) -> String {
-        let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-        // Direct-SQL fixture: no public command can claim until step 009.
-        sqlx::query(
-            "INSERT INTO claims (id, task_id, actor_id, phase, acquired_at, expires_at, \
-             status, task_revision, lease_hash) VALUES (?1, ?2, ?3, 'execute', ?4, ?5, \
-             'active', 1, 'hash')",
+        crate::storage::testing::seed_claim(
+            f.store.pool(),
+            task,
+            f.owner.id,
+            "execute",
+            "active",
+            &format_ts(&f.clock.now()),
+            &format_ts(&(f.clock.now() + chrono::Duration::minutes(30))),
         )
-        .bind(&id)
-        .bind(task.to_string())
-        .bind(f.owner.id.to_string())
-        .bind(format_ts(&f.clock.now()))
-        .bind(format_ts(&(f.clock.now() + chrono::Duration::minutes(30))))
-        .execute(f.store.pool())
         .await
-        .unwrap();
-        id
     }
 
-    // Direct-SQL fixture: sessions/submissions get commands in steps 010/011.
     async fn seed_submission_row(f: &Fixture, task: TaskId) -> String {
-        let now = format_ts(&f.clock.now());
-        let session = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-        let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-        let mut tx = f.store.pool().begin().await.unwrap();
-        sqlx::query(
-            "INSERT INTO sessions (id, task_id, claim_id, actor_id, phase, started_at, \
-             ended_at, outcome, summary, failure_reason, document_revision_ids, links) \
-             VALUES (?1, ?2, 'claim', ?3, 'execute', ?4, ?4, 'succeeded', '', '', '[]', '[]')",
+        crate::storage::testing::seed_submission(
+            f.store.pool(),
+            task,
+            f.owner.id,
+            "pending",
+            &format_ts(&f.clock.now()),
         )
-        .bind(&session)
-        .bind(task.to_string())
-        .bind(f.owner.id.to_string())
-        .bind(&now)
-        .execute(&mut *tx)
         .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO submissions (id, revision, created_at, updated_at, task_id, kind, \
-             producer_id, document_revision_ids, session_id, policy, status, \
-             created_context_revision) VALUES (?1, 1, ?2, ?2, ?3, 'work', ?4, '[]', ?5, \
-             'human', 'pending', 1)",
-        )
-        .bind(&id)
-        .bind(&now)
-        .bind(task.to_string())
-        .bind(f.owner.id.to_string())
-        .bind(&session)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
-        id
     }
 
     /// (type, resource_id, resource_revision, action, reason) per emitted event.
@@ -3763,6 +3600,28 @@ mod tests {
             .collect();
         assert_eq!(epic_events.len(), 1);
         assert_eq!(epic_events[0].2, 2);
+    }
+
+    #[tokio::test]
+    async fn test_driver_rejects_a_blocked_task() {
+        let f = fixture().await;
+        let s = lifecycle_scope(&f).await;
+        f.store
+            .block_task(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.task.id,
+                "hold".into(),
+            )
+            .await
+            .unwrap();
+        // A blocked task can never report done in production.
+        let err = f
+            .store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(2)), s.project, s.task.id)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
     }
 
     #[tokio::test]

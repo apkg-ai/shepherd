@@ -1,6 +1,7 @@
 use super::{
-    CommandContext, CommandResult, PendingEvent, append_events, epic_has_active_work, live_actor,
-    require_owner, require_revision, task_has_active_work,
+    CommandContext, CommandResult, PendingEvent, append_events, epic_has_active_work, epic_scope,
+    live_actor, missing_after_write, require_owner, require_revision, task_has_active_work,
+    task_scope,
 };
 use crate::error::DomainError;
 use crate::model::{
@@ -8,16 +9,11 @@ use crate::model::{
     validate_required_text,
 };
 use crate::queries::hierarchy::{
-    epic_row, find_epic, find_goal, find_project, find_task, goal_row, project_archived,
-    project_row, task_row,
+    find_epic, find_goal, find_project, find_task, goal_row, project_archived, project_row,
 };
+use crate::storage::Store;
 use crate::storage::rows::format_ts;
-use crate::storage::{StorageError, Store};
 use sqlx::{AssertSqlSafe, SqliteConnection};
-
-fn missing_after_write(what: &'static str) -> DomainError {
-    StorageError::Corrupt(format!("{what} missing after write")).into()
-}
 
 // Archive is visibility only (plan/03): owner-only, one-way in v1, requires
 // terminal work, never touches dependency rows and never changes counts.
@@ -76,6 +72,28 @@ async fn scope_has_nonterminal_work(
         .is_some())
 }
 
+// Same quiet-work rule the epic/task archives enforce: an unexpired active
+// claim or pending submission anywhere in scope must be settled first, or the
+// one-way archive would freeze it forever.
+async fn scope_has_active_work(
+    conn: &mut SqliteConnection,
+    scope_column: &'static str,
+    scope: &str,
+    now: &str,
+) -> Result<bool, DomainError> {
+    let query = AssertSqlSafe(format!(
+        "SELECT 1 FROM tasks t \
+         WHERE t.epic_id IN (SELECT id FROM epics WHERE {scope_column} = ?1) AND {} LIMIT 1",
+        super::active_work_predicate("?2")
+    ));
+    Ok(sqlx::query(query)
+        .bind(scope)
+        .bind(now)
+        .fetch_optional(&mut *conn)
+        .await?
+        .is_some())
+}
+
 impl Store {
     pub async fn archive_project(
         &self,
@@ -97,6 +115,18 @@ impl Store {
                 if scope_has_nonterminal_work(tx, "project_id", &project.to_string()).await? {
                     return Err(DomainError::InvalidState(
                         "project contains nonterminal work".into(),
+                    ));
+                }
+                if scope_has_active_work(
+                    tx,
+                    "project_id",
+                    &project.to_string(),
+                    &format_ts(&ctx.now),
+                )
+                .await?
+                {
+                    return Err(DomainError::ActiveWork(
+                        "a task in the project has an active claim or pending submission".into(),
                     ));
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
@@ -146,6 +176,13 @@ impl Store {
                         "goal contains nonterminal work".into(),
                     ));
                 }
+                if scope_has_active_work(tx, "goal_id", &goal.to_string(), &format_ts(&ctx.now))
+                    .await?
+                {
+                    return Err(DomainError::ActiveWork(
+                        "a task in the goal has an active claim or pending submission".into(),
+                    ));
+                }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let next = current.revision.next();
                 set_archived(tx, "goals", &goal.to_string(), next, &ctx, &reason).await?;
@@ -180,21 +217,11 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                let current = epic_row(tx, &project, &epic)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope = epic_scope(tx, &project, &epic).await?;
                 require_owner(&actor)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let goal_current = goal_row(tx, &project, &current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                if !current.status.is_terminal() {
+                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                scope.ensure_unarchived()?;
+                if !scope.epic.status.is_terminal() {
                     return Err(DomainError::InvalidState(
                         "epic must be terminal before archive".into(),
                     ));
@@ -205,7 +232,7 @@ impl Store {
                     ));
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
-                let next = current.revision.next();
+                let next = scope.epic.revision.next();
                 set_archived(tx, "epics", &epic.to_string(), next, &ctx, &reason).await?;
                 let events = append_events(
                     tx,
@@ -213,7 +240,7 @@ impl Store {
                     &ctx,
                     "archiveEpic",
                     &reason,
-                    vec![PendingEvent::epic(epic, next, current.goal_id)],
+                    vec![PendingEvent::epic(epic, next, scope.epic.goal_id)],
                 )
                 .await?;
                 let updated = find_epic(tx, &project, &epic)
@@ -238,25 +265,11 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                let current = task_row(tx, &project, &task)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
+                let scope = task_scope(tx, &project, &task).await?;
                 require_owner(&actor)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                let epic_current = epic_row(tx, &project, &current.epic_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                if current.archived
-                    || epic_current.archived
-                    || goal_current.archived
-                    || project_archived(tx, &project).await?
-                {
-                    return Err(DomainError::ArchivedScope);
-                }
-                if !current.status.is_terminal() {
+                require_revision(ctx.expected_revision, scope.task.revision)?;
+                scope.ensure_unarchived()?;
+                if !scope.task.status.is_terminal() {
                     return Err(DomainError::InvalidState(
                         "task must be terminal before archive".into(),
                     ));
@@ -267,7 +280,7 @@ impl Store {
                     ));
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
-                let next = current.revision.next();
+                let next = scope.task.revision.next();
                 set_archived(tx, "tasks", &task.to_string(), next, &ctx, &reason).await?;
                 let events = append_events(
                     tx,
@@ -275,7 +288,7 @@ impl Store {
                     &ctx,
                     "archiveTask",
                     &reason,
-                    vec![PendingEvent::task(task, next, current.epic_id)],
+                    vec![PendingEvent::task(task, next, scope.task.epic_id)],
                 )
                 .await?;
                 let updated = find_task(tx, &project, &task)
@@ -426,40 +439,15 @@ mod tests {
         }
     }
 
-    // Direct-SQL fixture: sessions/submissions get commands in steps 010/011.
     async fn seed_pending_submission(f: &Fixture, task: TaskId) -> String {
-        let now = format_ts(&f.clock.now());
-        let session = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-        let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-        let mut tx = f.store.pool().begin().await.unwrap();
-        sqlx::query(
-            "INSERT INTO sessions (id, task_id, claim_id, actor_id, phase, started_at, \
-             ended_at, outcome, summary, failure_reason, document_revision_ids, links) \
-             VALUES (?1, ?2, 'claim', ?3, 'execute', ?4, ?4, 'succeeded', '', '', '[]', '[]')",
+        crate::storage::testing::seed_submission(
+            f.store.pool(),
+            task,
+            f.owner.id,
+            "pending",
+            &format_ts(&f.clock.now()),
         )
-        .bind(&session)
-        .bind(task.to_string())
-        .bind(f.owner.id.to_string())
-        .bind(&now)
-        .execute(&mut *tx)
         .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO submissions (id, revision, created_at, updated_at, task_id, kind, \
-             producer_id, document_revision_ids, session_id, policy, status, \
-             created_context_revision) VALUES (?1, 1, ?2, ?2, ?3, 'work', ?4, '[]', ?5, \
-             'human', 'pending', 1)",
-        )
-        .bind(&id)
-        .bind(&now)
-        .bind(task.to_string())
-        .bind(f.owner.id.to_string())
-        .bind(&session)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
-        id
     }
 
     async fn complete_task(f: &Fixture, project: ProjectId, task: TaskId, revision: i64) {
@@ -726,6 +714,56 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, DomainError::ArchivedScope));
+    }
+
+    #[tokio::test]
+    async fn goal_and_project_archive_reject_pending_work_in_scope() {
+        let f = fixture().await;
+        let s = scope(&f).await;
+        f.store
+            .cancel_epic(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.epic,
+                "descoped".into(),
+            )
+            .await
+            .unwrap();
+        // Terminal work, but a pending submission is still unsettled: the
+        // one-way archive must not freeze it (same rule as epic/task archive).
+        let submission = seed_pending_submission(&f, s.task).await;
+        let err = f
+            .store
+            .archive_goal(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.goal,
+                "x".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ActiveWork(_)));
+        let err = f
+            .store
+            .archive_project(ctx(&f.owner, &f.clock, Some(1)), s.project, "x".into())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ActiveWork(_)));
+
+        sqlx::query("UPDATE submissions SET status = 'accepted' WHERE id = ?1")
+            .bind(&submission)
+            .execute(f.store.pool())
+            .await
+            .unwrap();
+        f.store
+            .archive_goal(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.goal,
+                "wrapped".into(),
+            )
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

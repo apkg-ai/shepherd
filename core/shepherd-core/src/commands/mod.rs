@@ -11,9 +11,10 @@ use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{
-    Actor, ActorId, ActorKind, CommandId, DependencyId, EpicId, EventId, GoalId, ProjectId,
-    Revision, TaskId, TaskTypeId,
+    Actor, ActorId, ActorKind, CommandId, DependencyId, Epic, EpicId, EventId, GoalId, ProjectId,
+    Revision, Task, TaskId, TaskTypeId,
 };
+use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store, rows};
 
@@ -65,6 +66,84 @@ pub(crate) async fn live_actor(
             "actor is not registered or is revoked".into(),
         )),
     }
+}
+
+// Shared scope loaders: membership first (404), archived-chain walk deferred
+// so commands keep the plan/04 precedence (capability and revision before
+// archived scope).
+pub(crate) struct TaskScope {
+    pub(crate) task: Task,
+    pub(crate) epic: Epic,
+    goal_archived: bool,
+    project_archived: bool,
+}
+
+pub(crate) struct EpicScope {
+    pub(crate) epic: Epic,
+    goal_archived: bool,
+    project_archived: bool,
+}
+
+impl TaskScope {
+    pub(crate) fn ensure_unarchived(&self) -> Result<(), DomainError> {
+        if self.task.archived || self.epic.archived || self.goal_archived || self.project_archived {
+            return Err(DomainError::ArchivedScope);
+        }
+        Ok(())
+    }
+}
+
+impl EpicScope {
+    pub(crate) fn ensure_unarchived(&self) -> Result<(), DomainError> {
+        if self.epic.archived || self.goal_archived || self.project_archived {
+            return Err(DomainError::ArchivedScope);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) async fn task_scope(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    task: &TaskId,
+) -> Result<TaskScope, DomainError> {
+    let task = task_row(conn, project, task)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    let epic = epic_row(conn, project, &task.epic_id)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    let goal = goal_row(conn, project, &epic.goal_id)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    Ok(TaskScope {
+        task,
+        epic,
+        goal_archived: goal.archived,
+        project_archived: project_archived(conn, project).await?,
+    })
+}
+
+pub(crate) async fn epic_scope(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    epic: &EpicId,
+) -> Result<EpicScope, DomainError> {
+    let epic = epic_row(conn, project, epic)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    let goal = goal_row(conn, project, &epic.goal_id)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    Ok(EpicScope {
+        epic,
+        goal_archived: goal.archived,
+        project_archived: project_archived(conn, project).await?,
+    })
+}
+
+pub(crate) fn missing_after_write(what: &'static str) -> DomainError {
+    StorageError::Corrupt(format!("{what} missing after write")).into()
 }
 
 pub(crate) fn require_owner(actor: &Actor) -> Result<(), DomainError> {
@@ -154,23 +233,58 @@ impl ClaimScope {
     }
 }
 
-pub(crate) struct RevokedClaim {
+pub(crate) struct ClosedClaim {
     pub(crate) id: Uuid,
     pub(crate) task_id: TaskId,
     pub(crate) task_revision: i64,
 }
 
-// Closes every active claim in scope regardless of expiry; expired-claim
-// reconciliation semantics land with the claim model in step 009.
+pub(crate) struct ClosedClaims {
+    // Reconciled leases: they were already inactive for reads, so their tasks
+    // did not change representation.
+    pub(crate) expired: Vec<ClosedClaim>,
+    pub(crate) revoked: Vec<ClosedClaim>,
+}
+
+impl ClosedClaims {
+    pub(crate) fn all(&self) -> impl Iterator<Item = &ClosedClaim> {
+        self.expired.iter().chain(self.revoked.iter())
+    }
+}
+
+// Plan/05 step 4: reconcile expired claims in the affected scope first, then
+// revoke the still-live ones with the command reason.
 pub(crate) async fn revoke_active_claims(
     conn: &mut SqliteConnection,
     scope: ClaimScope,
     now: &str,
     close_reason: &str,
-) -> Result<Vec<RevokedClaim>, DomainError> {
+) -> Result<ClosedClaims, DomainError> {
+    let expired = close_claims(conn, &scope, now, "expired", "expires_at <= ?2", "").await?;
+    let revoked = close_claims(
+        conn,
+        &scope,
+        now,
+        "revoked",
+        "expires_at > ?2",
+        close_reason,
+    )
+    .await?;
+    Ok(ClosedClaims { expired, revoked })
+}
+
+async fn close_claims(
+    conn: &mut SqliteConnection,
+    scope: &ClaimScope,
+    now: &str,
+    status: &'static str,
+    expiry_filter: &'static str,
+    close_reason: &str,
+) -> Result<Vec<ClosedClaim>, DomainError> {
     let query = sqlx::AssertSqlSafe(format!(
-        "UPDATE claims SET status = 'revoked', closed_at = ?2, close_reason = ?3 \
-         WHERE status = 'active' AND {} RETURNING id, task_id, task_revision",
+        "UPDATE claims SET status = '{status}', closed_at = ?2, close_reason = ?3 \
+         WHERE status = 'active' AND {expiry_filter} AND {} \
+         RETURNING id, task_id, task_revision",
         scope.task_filter()
     ));
     let rows: Vec<(String, String, i64)> = sqlx::query_as(query)
@@ -181,7 +295,7 @@ pub(crate) async fn revoke_active_claims(
         .await?;
     rows.into_iter()
         .map(|(id, task_id, task_revision)| {
-            Ok(RevokedClaim {
+            Ok(ClosedClaim {
                 id: rows::parse_uuid("claims.id", &id)?,
                 task_id: TaskId::from_uuid(rows::parse_uuid("claims.task_id", &task_id)?),
                 task_revision,
@@ -564,61 +678,28 @@ mod db_tests {
         }
     }
 
-    // Direct-SQL fixture: no public command can claim until step 009.
     async fn seed_claim(f: &Fixture, task: TaskId, status: &str, expires_at: &str) -> String {
-        let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-        sqlx::query(
-            "INSERT INTO claims (id, task_id, actor_id, phase, acquired_at, expires_at, \
-             status, task_revision, lease_hash) VALUES (?1, ?2, ?3, 'execute', ?4, ?5, ?6, \
-             1, 'hash')",
+        crate::storage::testing::seed_claim(
+            f.store.pool(),
+            task,
+            f.owner.id,
+            "execute",
+            status,
+            &format_ts(&f.clock.now()),
+            expires_at,
         )
-        .bind(&id)
-        .bind(task.to_string())
-        .bind(f.owner.id.to_string())
-        .bind(format_ts(&f.clock.now()))
-        .bind(expires_at)
-        .bind(status)
-        .execute(f.store.pool())
         .await
-        .unwrap();
-        id
     }
 
-    // Direct-SQL fixture: sessions/submissions get commands in steps 010/011.
     async fn seed_submission(f: &Fixture, task: TaskId, status: &str) -> String {
-        let now = format_ts(&f.clock.now());
-        let session_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-        let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-        let mut tx = f.store.pool().begin().await.unwrap();
-        sqlx::query(
-            "INSERT INTO sessions (id, task_id, claim_id, actor_id, phase, started_at, \
-             ended_at, outcome, summary, failure_reason, document_revision_ids, links) \
-             VALUES (?1, ?2, 'claim', ?3, 'execute', ?4, ?4, 'succeeded', '', '', '[]', '[]')",
+        crate::storage::testing::seed_submission(
+            f.store.pool(),
+            task,
+            f.owner.id,
+            status,
+            &format_ts(&f.clock.now()),
         )
-        .bind(&session_id)
-        .bind(task.to_string())
-        .bind(f.owner.id.to_string())
-        .bind(&now)
-        .execute(&mut *tx)
         .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO submissions (id, revision, created_at, updated_at, task_id, kind, \
-             producer_id, document_revision_ids, session_id, policy, status, \
-             created_context_revision) VALUES (?1, 1, ?2, ?2, ?3, 'work', ?4, '[]', ?5, \
-             'human', ?6, 1)",
-        )
-        .bind(&id)
-        .bind(&now)
-        .bind(task.to_string())
-        .bind(f.owner.id.to_string())
-        .bind(&session_id)
-        .bind(status)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
-        id
     }
 
     async fn claim_row(f: &Fixture, id: &str) -> (String, Option<String>, String) {
@@ -630,18 +711,17 @@ mod db_tests {
     }
 
     #[tokio::test]
-    async fn revoke_active_claims_scopes_to_task_or_epic_and_skips_closed_rows() {
+    async fn revoke_active_claims_scopes_reconciles_expiry_and_skips_closed_rows() {
         let f = fixture().await;
         let now = format_ts(&f.clock.now());
         let future = "2027-01-01T00:00:00.000Z";
         let active_a = seed_claim(&f, f.task_a, "active", future).await;
         let released_a = seed_claim(&f, f.task_a, "released", future).await;
-        // Active-but-expired rows are still revoked; reconciliation is step 009.
         let expired_b = seed_claim(&f, f.task_b, "active", "2020-01-01T00:00:00.000Z").await;
 
         let task_a = f.task_a;
         let stamp = now.clone();
-        let revoked = f
+        let closed = f
             .store
             .domain_transaction(move |tx| {
                 Box::pin(async move {
@@ -650,10 +730,11 @@ mod db_tests {
             })
             .await
             .unwrap();
-        assert_eq!(revoked.len(), 1);
-        assert_eq!(revoked[0].id.to_string(), active_a);
-        assert_eq!(revoked[0].task_id, f.task_a);
-        assert_eq!(revoked[0].task_revision, 1);
+        assert!(closed.expired.is_empty());
+        assert_eq!(closed.revoked.len(), 1);
+        assert_eq!(closed.revoked[0].id.to_string(), active_a);
+        assert_eq!(closed.revoked[0].task_id, f.task_a);
+        assert_eq!(closed.revoked[0].task_revision, 1);
         let (status, closed_at, close_reason) = claim_row(&f, &active_a).await;
         assert_eq!(
             (status.as_str(), close_reason.as_str()),
@@ -663,9 +744,11 @@ mod db_tests {
         assert_eq!(claim_row(&f, &released_a).await.0, "released");
         assert_eq!(claim_row(&f, &expired_b).await.0, "active");
 
+        // Plan/05 step 4: an already-expired lease is reconciled, never
+        // misattributed to the command reason.
         let epic = f.epic;
         let stamp = now.clone();
-        let revoked = f
+        let closed = f
             .store
             .domain_transaction(move |tx| {
                 Box::pin(async move {
@@ -674,9 +757,13 @@ mod db_tests {
             })
             .await
             .unwrap();
-        assert_eq!(revoked.len(), 1);
-        assert_eq!(revoked[0].id.to_string(), expired_b);
-        assert_eq!(revoked[0].task_id, f.task_b);
+        assert!(closed.revoked.is_empty());
+        assert_eq!(closed.expired.len(), 1);
+        assert_eq!(closed.expired[0].id.to_string(), expired_b);
+        assert_eq!(closed.expired[0].task_id, f.task_b);
+        let (status, closed_at, close_reason) = claim_row(&f, &expired_b).await;
+        assert_eq!((status.as_str(), close_reason.as_str()), ("expired", ""));
+        assert_eq!(closed_at.as_deref(), Some(now.as_str()));
     }
 
     #[tokio::test]

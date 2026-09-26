@@ -23,6 +23,12 @@ pub(crate) struct AffectedScope {
 // changes remain. Stops at proposed, blocked, cancelled, done and archived
 // epics. The scoped dependency graph is acyclic (guarded at insert), and
 // completion is monotone, so the worklist terminates.
+//
+// Contract: a caller that bumps an epic row in the same command MUST push its
+// epic.changed onto `events` before calling recompute — the pending-event scan
+// below is the once-per-command bump mechanism (plan/08: every bump emits an
+// event), and the reuse branch relies on that earlier write for revision and
+// updated_at.
 pub(crate) async fn recompute(
     conn: &mut SqliteConnection,
     scope: AffectedScope,

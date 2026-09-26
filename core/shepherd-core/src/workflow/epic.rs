@@ -41,15 +41,15 @@ pub(crate) async fn block(
     // Every descendant claim goes, planning and review included; pending
     // submissions stay pending (plan/04). Each claim-revoked task changed
     // representation, so it gets its once-per-command bump and event.
-    let revoked = revoke_active_claims(conn, ClaimScope::Epic(epic.id), &now, reason).await?;
-    for claim in &revoked {
+    let closed = revoke_active_claims(conn, ClaimScope::Epic(epic.id), &now, reason).await?;
+    for claim in closed.all() {
         events.push(PendingEvent::claim(
             claim.id,
             claim.task_revision,
             claim.task_id,
         ));
     }
-    let tasks: Vec<TaskId> = revoked.iter().map(|claim| claim.task_id).collect();
+    let tasks: Vec<TaskId> = closed.revoked.iter().map(|claim| claim.task_id).collect();
     for (task, revision) in bump_tasks(conn, &tasks, &now).await? {
         events.push(PendingEvent::task(task, revision, epic.id));
     }
@@ -86,7 +86,8 @@ pub(crate) async fn cancel(
 ) -> Result<Revision, DomainError> {
     let next = epic.revision.next();
     let now = format_ts(&ctx.now);
-    for claim in revoke_active_claims(conn, ClaimScope::Epic(epic.id), &now, reason).await? {
+    let closed = revoke_active_claims(conn, ClaimScope::Epic(epic.id), &now, reason).await?;
+    for claim in closed.all() {
         events.push(PendingEvent::claim(
             claim.id,
             claim.task_revision,
@@ -163,21 +164,31 @@ async fn bump_tasks(
     tasks: &[TaskId],
     now: &str,
 ) -> Result<Vec<(TaskId, Revision)>, DomainError> {
-    let mut bumped = Vec::with_capacity(tasks.len());
-    for task in tasks {
-        let revision: i64 = sqlx::query_scalar(
-            "UPDATE tasks SET revision = revision + 1, updated_at = ?1 WHERE id = ?2 \
-             RETURNING revision",
-        )
-        .bind(now)
-        .bind(task.to_string())
-        .fetch_one(&mut *conn)
-        .await?;
-        let revision = Revision::from_stored(revision)
-            .ok_or_else(|| crate::storage::StorageError::Corrupt("task revision".into()))?;
-        bumped.push((*task, revision));
+    if tasks.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(bumped)
+    let mut builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "UPDATE tasks SET revision = revision + 1, updated_at = ",
+    );
+    builder.push_bind(now).push(" WHERE id IN (");
+    let mut separated = builder.separated(", ");
+    for task in tasks {
+        separated.push_bind(task.to_string());
+    }
+    builder.push(") RETURNING id, revision");
+    let rows: Vec<(String, i64)> = builder
+        .build_query_as()
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(crate::storage::StorageError::from)?;
+    rows.into_iter()
+        .map(|(id, revision)| {
+            let task = TaskId::from_uuid(parse_uuid("tasks.id", &id)?);
+            let revision = Revision::from_stored(revision)
+                .ok_or_else(|| crate::storage::StorageError::Corrupt("task revision".into()))?;
+            Ok((task, revision))
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use super::{
     CommandContext, CommandResult, PendingEvent, append_events, epic_has_active_work, live_actor,
-    require_owner, require_revision, task_has_active_work,
+    missing_after_write, require_owner, require_revision, task_has_active_work,
 };
 use crate::dag;
 use crate::error::DomainError;
@@ -16,10 +16,6 @@ use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store};
 use crate::workflow::{self, AffectedScope};
-
-fn missing_after_write(what: &'static str) -> DomainError {
-    StorageError::Corrupt(format!("{what} missing after write")).into()
-}
 
 // Level-normalized endpoint view: everything the shared guards need.
 struct Endpoint {

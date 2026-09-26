@@ -234,59 +234,41 @@ async fn event_rows(s: &Setup, ids: &[i64]) -> Vec<(String, String, i64, String,
     rows
 }
 
-// Direct-SQL fixture: no public command can claim until step 009.
 async fn seed_active_claim(s: &Setup, task: TaskId) -> String {
-    let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-    sqlx::query(
-        "INSERT INTO claims (id, task_id, actor_id, phase, acquired_at, expires_at, \
-         status, task_revision, lease_hash) VALUES (?1, ?2, ?3, 'plan', ?4, ?5, \
-         'active', 1, 'hash')",
+    testing::seed_claim(
+        s.store.pool(),
+        task,
+        s.owner.id,
+        "plan",
+        "active",
+        &format_ts(&s.clock.now()),
+        &format_ts(&(s.clock.now() + chrono::Duration::minutes(5))),
     )
-    .bind(&id)
-    .bind(task.to_string())
-    .bind(s.owner.id.to_string())
-    .bind(format_ts(&s.clock.now()))
-    .bind(format_ts(&(s.clock.now() + chrono::Duration::minutes(5))))
-    .execute(s.store.pool())
     .await
-    .unwrap();
-    id
 }
 
-// Direct-SQL fixture: sessions/submissions get commands in steps 010/011.
+async fn seed_expired_claim(s: &Setup, task: TaskId) -> String {
+    testing::seed_claim(
+        s.store.pool(),
+        task,
+        s.owner.id,
+        "plan",
+        "active",
+        &format_ts(&s.clock.now()),
+        &format_ts(&(s.clock.now() - chrono::Duration::minutes(5))),
+    )
+    .await
+}
+
 async fn seed_pending_submission(s: &Setup, task: TaskId) -> String {
-    let now = format_ts(&s.clock.now());
-    let session = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-    let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-    let mut tx = s.store.pool().begin().await.unwrap();
-    sqlx::query(
-        "INSERT INTO sessions (id, task_id, claim_id, actor_id, phase, started_at, \
-         ended_at, outcome, summary, failure_reason, document_revision_ids, links) \
-         VALUES (?1, ?2, 'claim', ?3, 'execute', ?4, ?4, 'succeeded', '', '', '[]', '[]')",
+    testing::seed_submission(
+        s.store.pool(),
+        task,
+        s.owner.id,
+        "pending",
+        &format_ts(&s.clock.now()),
     )
-    .bind(&session)
-    .bind(task.to_string())
-    .bind(s.owner.id.to_string())
-    .bind(&now)
-    .execute(&mut *tx)
     .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO submissions (id, revision, created_at, updated_at, task_id, kind, \
-         producer_id, document_revision_ids, session_id, policy, status, \
-         created_context_revision) VALUES (?1, 1, ?2, ?2, ?3, 'work', ?4, '[]', ?5, \
-         'human', 'pending', 1)",
-    )
-    .bind(&id)
-    .bind(&now)
-    .bind(task.to_string())
-    .bind(s.owner.id.to_string())
-    .bind(&session)
-    .execute(&mut *tx)
-    .await
-    .unwrap();
-    tx.commit().await.unwrap();
-    id
 }
 
 // Acceptance: completing the last required task makes the epic done and
@@ -1111,4 +1093,113 @@ async fn deleting_last_unmet_epic_dependency_completes_finished_epic() {
         .collect();
     assert_eq!(dependent_events.len(), 1, "endpoint bump reused, one event");
     assert_eq!(dependent_events[0].2, revision);
+}
+
+// Plan/05 step 4: commands reconcile expired claims in scope instead of
+// misattributing them to the command reason.
+#[tokio::test]
+async fn blocking_reconciles_expired_claims_without_misattribution() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let leased = create_task(&s, project.id, epic.id, "Leased").await;
+    let lapsed = create_task(&s, project.id, epic.id, "Lapsed").await;
+    let live_claim = seed_active_claim(&s, leased.id).await;
+    let expired_claim = seed_expired_claim(&s, lapsed.id).await;
+
+    let blocked = s
+        .store
+        .block_epic(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            epic.id,
+            "rescoping".to_string(),
+        )
+        .await
+        .unwrap();
+
+    let mut verify = independent_connection(&s.db_path()).await;
+    let (status, reason): (String, String) =
+        sqlx::query_as("SELECT status, close_reason FROM claims WHERE id = ?1")
+            .bind(&live_claim)
+            .fetch_one(&mut verify)
+            .await
+            .unwrap();
+    assert_eq!((status.as_str(), reason.as_str()), ("revoked", "rescoping"));
+    let (status, reason): (String, String) =
+        sqlx::query_as("SELECT status, close_reason FROM claims WHERE id = ?1")
+            .bind(&expired_claim)
+            .fetch_one(&mut verify)
+            .await
+            .unwrap();
+    assert_eq!((status.as_str(), reason.as_str()), ("expired", ""));
+    // Only the truly revoked lease changed its task's representation.
+    assert_eq!(
+        revision_of(&mut verify, "tasks", leased.id.as_uuid()).await,
+        2
+    );
+    assert_eq!(
+        revision_of(&mut verify, "tasks", lapsed.id.as_uuid()).await,
+        1
+    );
+    let rows = event_rows(&s, &blocked.events).await;
+    assert_eq!(
+        rows.iter()
+            .filter(|(kind, _, _, _, _, _)| kind == "claim.changed")
+            .count(),
+        2
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|(kind, _, _, _, _, _)| kind == "task.changed")
+            .count(),
+        1
+    );
+}
+
+// Owner-confirmed spec-literal behavior (plan/04 unblock row: "owner; block
+// exists"): cancel retains the block record and unblock may clear it even on
+// terminal work.
+#[tokio::test]
+async fn unblock_clears_stale_block_on_cancelled_task() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+    s.store
+        .block_task(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            task.id,
+            "waiting on design".to_string(),
+        )
+        .await
+        .unwrap();
+    let cancelled = s
+        .store
+        .cancel_task(
+            ctx(&s.owner, s.clock.now(), Some(2)),
+            project.id,
+            task.id,
+            "obsolete".to_string(),
+        )
+        .await
+        .unwrap();
+    // Cancel keeps the durable block record on the terminal task.
+    assert!(cancelled.value.block.is_some());
+
+    let unblocked = s
+        .store
+        .unblock_task(ctx(&s.owner, s.clock.now(), Some(3)), project.id, task.id)
+        .await
+        .unwrap();
+    assert!(unblocked.value.block.is_none());
+    assert_eq!(unblocked.value.status.as_str(), "cancelled");
+    assert_eq!(unblocked.value.revision.value(), 4);
+    let rows = event_rows(&s, &unblocked.events).await;
+    assert!(rows.iter().all(
+        |(_, _, _, action, reason, _)| action == "unblockTask" && reason == "waiting on design"
+    ));
 }

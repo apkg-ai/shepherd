@@ -31,7 +31,8 @@ pub(crate) async fn block(
     .execute(&mut *conn)
     .await?;
     // Pending submissions stay pending on block (plan/04).
-    for claim in revoke_active_claims(conn, ClaimScope::Task(task.id), &now, reason).await? {
+    let closed = revoke_active_claims(conn, ClaimScope::Task(task.id), &now, reason).await?;
+    for claim in closed.all() {
         events.push(PendingEvent::claim(
             claim.id,
             claim.task_revision,
@@ -85,7 +86,8 @@ pub(crate) async fn cancel(
     .bind(task.id.to_string())
     .execute(&mut *conn)
     .await?;
-    for claim in revoke_active_claims(conn, ClaimScope::Task(task.id), &now, reason).await? {
+    let closed = revoke_active_claims(conn, ClaimScope::Task(task.id), &now, reason).await?;
+    for claim in closed.all() {
         events.push(PendingEvent::claim(
             claim.id,
             claim.task_revision,
