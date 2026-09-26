@@ -132,13 +132,11 @@ pub(crate) async fn epic_has_active_work(
     has_active_work_by(conn, "epic_id", epic.as_uuid(), now).await
 }
 
-#[cfg_attr(not(test), expect(dead_code))] // used from workflow transitions later in step 006
 pub(crate) enum ClaimScope {
     Task(TaskId),
     Epic(EpicId),
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 impl ClaimScope {
     fn task_filter(&self) -> &'static str {
         match self {
@@ -155,7 +153,6 @@ impl ClaimScope {
     }
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) struct RevokedClaim {
     pub(crate) id: Uuid,
     pub(crate) task_id: TaskId,
@@ -164,7 +161,6 @@ pub(crate) struct RevokedClaim {
 
 // Closes every active claim in scope regardless of expiry; expired-claim
 // reconciliation semantics land with the claim model in step 009.
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) async fn revoke_active_claims(
     conn: &mut SqliteConnection,
     scope: ClaimScope,
@@ -193,14 +189,12 @@ pub(crate) async fn revoke_active_claims(
         .collect()
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) struct WithdrawnSubmission {
     pub(crate) id: Uuid,
     pub(crate) revision: i64,
     pub(crate) task_id: TaskId,
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) async fn withdraw_pending_submissions(
     conn: &mut SqliteConnection,
     scope: ClaimScope,
@@ -305,7 +299,6 @@ impl PendingEvent {
 
     // Claims have no revision column; the event carries the task revision
     // pinned at acquisition (revisit when the claim model lands in step 009).
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn claim(id: Uuid, task_revision: i64, task: TaskId) -> Self {
         Self {
             event_type: "claim.changed",
@@ -316,7 +309,6 @@ impl PendingEvent {
         }
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn submission(id: Uuid, revision: i64, task: TaskId) -> Self {
         Self {
             event_type: "submission.changed",

@@ -6,9 +6,9 @@ use crate::error::DomainError;
 use crate::model::{
     BUILTIN_TASK_TYPES, DESCRIPTION_MAX_CHARS, Epic, EpicCreate, EpicId, EpicStatus, Goal,
     GoalCreate, GoalId, NAME_MAX_CHARS, Project, ProjectCreate, ProjectId, ProjectPatch,
-    ProjectSettings, Revision, Task, TaskCreate, TaskId, TaskPatch, TaskType, TaskTypeCreate,
-    TaskTypeId, TaskTypePatch, TextPatch, validate_long_text, validate_required_text,
-    validate_type_key, validate_type_label,
+    ProjectSettings, REASON_MAX_CHARS, Revision, Task, TaskCreate, TaskId, TaskPatch, TaskStatus,
+    TaskType, TaskTypeCreate, TaskTypeId, TaskTypePatch, TextPatch, validate_long_text,
+    validate_required_text, validate_type_key, validate_type_label,
 };
 use crate::queries::hierarchy::{
     epic_row, find_epic, find_goal, find_project, find_task, find_task_type, goal_row,
@@ -16,7 +16,7 @@ use crate::queries::hierarchy::{
 };
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store};
-use crate::workflow::policy;
+use crate::workflow::{self, AffectedScope, policy};
 
 fn settings_json(settings: &ProjectSettings) -> Result<String, DomainError> {
     serde_json::to_string(settings)
@@ -523,15 +523,19 @@ impl Store {
                 .bind(epic.to_string())
                 .execute(&mut **tx)
                 .await?;
-                let events = append_events(
+                // Accept runs the cascade (plan/04): tasks may already be done.
+                let mut pending = vec![PendingEvent::epic(epic, next, current.goal_id)];
+                workflow::recompute(
                     tx,
-                    &project,
-                    &ctx,
-                    "acceptEpic",
-                    "",
-                    vec![PendingEvent::epic(epic, next, current.goal_id)],
+                    AffectedScope {
+                        project,
+                        epics: vec![epic],
+                    },
+                    &mut pending,
+                    ctx.now,
                 )
                 .await?;
+                let events = append_events(tx, &project, &ctx, "acceptEpic", "", pending).await?;
                 let updated = find_epic(tx, &project, &epic)
                     .await?
                     .ok_or_else(|| missing_after_write("epic"))?;
@@ -865,19 +869,548 @@ impl Store {
                 )
                 .bind(next.value())
                 .bind(format_ts(&ctx.now))
-                .bind(crate::model::TaskStatus::Open.as_str())
+                .bind(TaskStatus::Open.as_str())
                 .bind(task.to_string())
                 .execute(&mut **tx)
                 .await?;
-                let events = append_events(
+                let mut pending = vec![PendingEvent::task(task, next, current.epic_id)];
+                workflow::recompute(
                     tx,
-                    &project,
-                    &ctx,
-                    "acceptTask",
-                    "",
-                    vec![PendingEvent::task(task, next, current.epic_id)],
+                    AffectedScope {
+                        project,
+                        epics: vec![current.epic_id],
+                    },
+                    &mut pending,
+                    ctx.now,
                 )
                 .await?;
+                let events = append_events(tx, &project, &ctx, "acceptTask", "", pending).await?;
+                let updated = find_task(tx, &project, &task)
+                    .await?
+                    .ok_or_else(|| missing_after_write("task"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    // Owner or agent (plan/12): blocking needs no owner capability.
+    pub async fn block_task(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        task: TaskId,
+        reason: String,
+    ) -> Result<CommandResult<Task>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                live_actor(tx, &ctx.actor.id).await?;
+                let current = task_row(tx, &project, &task)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                let epic_current = epic_row(tx, &project, &current.epic_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || epic_current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if current.status.is_terminal() || epic_current.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                if current.block.is_some() {
+                    return Err(DomainError::InvalidState("task is already blocked".into()));
+                }
+                let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
+                let mut pending = Vec::new();
+                workflow::task::block(tx, &ctx, &current, &reason, &mut pending).await?;
+                let events =
+                    append_events(tx, &project, &ctx, "blockTask", &reason, pending).await?;
+                let updated = find_task(tx, &project, &task)
+                    .await?
+                    .ok_or_else(|| missing_after_write("task"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn unblock_task(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        task: TaskId,
+    ) -> Result<CommandResult<Task>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = task_row(tx, &project, &task)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                let epic_current = epic_row(tx, &project, &current.epic_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || epic_current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
+                let Some(block) = &current.block else {
+                    return Err(DomainError::InvalidState("task is not blocked".into()));
+                };
+                // The unblock event preserves the cleared block reason (plan/08).
+                let cleared = block.reason.clone();
+                let mut pending = Vec::new();
+                workflow::task::unblock(tx, &ctx, &current, &mut pending).await?;
+                workflow::recompute(
+                    tx,
+                    AffectedScope {
+                        project,
+                        epics: vec![current.epic_id],
+                    },
+                    &mut pending,
+                    ctx.now,
+                )
+                .await?;
+                let events =
+                    append_events(tx, &project, &ctx, "unblockTask", &cleared, pending).await?;
+                let updated = find_task(tx, &project, &task)
+                    .await?
+                    .ok_or_else(|| missing_after_write("task"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn cancel_task(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        task: TaskId,
+        reason: String,
+    ) -> Result<CommandResult<Task>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = task_row(tx, &project, &task)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                let epic_current = epic_row(tx, &project, &current.epic_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || epic_current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if current.status.is_terminal() || epic_current.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
+                let mut pending = Vec::new();
+                workflow::task::cancel(tx, &ctx, &current, &reason, &mut pending).await?;
+                let events =
+                    append_events(tx, &project, &ctx, "cancelTask", &reason, pending).await?;
+                let updated = find_task(tx, &project, &task)
+                    .await?
+                    .ok_or_else(|| missing_after_write("task"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn waive_task(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        task: TaskId,
+        reason: String,
+    ) -> Result<CommandResult<Task>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = task_row(tx, &project, &task)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                let epic_current = epic_row(tx, &project, &current.epic_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || epic_current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if epic_current.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                if current.status != TaskStatus::Cancelled {
+                    return Err(DomainError::InvalidState(format!(
+                        "task status is {} but must be cancelled",
+                        current.status.as_str()
+                    )));
+                }
+                if current.waiver.is_some() {
+                    return Err(DomainError::InvalidState("task is already waived".into()));
+                }
+                let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
+                let mut pending = Vec::new();
+                workflow::task::waive(tx, &ctx, &current, &reason, &mut pending).await?;
+                // The waiver changes the epic's completion denominator: bump it
+                // once here; the cascade reuses this revision if it completes.
+                let epic_next = epic_current.revision.next();
+                sqlx::query("UPDATE epics SET revision = ?1, updated_at = ?2 WHERE id = ?3")
+                    .bind(epic_next.value())
+                    .bind(format_ts(&ctx.now))
+                    .bind(current.epic_id.to_string())
+                    .execute(&mut **tx)
+                    .await?;
+                pending.push(PendingEvent::epic(
+                    current.epic_id,
+                    epic_next,
+                    epic_current.goal_id,
+                ));
+                workflow::recompute(
+                    tx,
+                    AffectedScope {
+                        project,
+                        epics: vec![current.epic_id],
+                    },
+                    &mut pending,
+                    ctx.now,
+                )
+                .await?;
+                let events =
+                    append_events(tx, &project, &ctx, "waiveTask", &reason, pending).await?;
+                let updated = find_task(tx, &project, &task)
+                    .await?
+                    .ok_or_else(|| missing_after_write("task"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    // Owner or agent (plan/12): blocking needs no owner capability.
+    pub async fn block_epic(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        epic: EpicId,
+        reason: String,
+    ) -> Result<CommandResult<Epic>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                live_actor(tx, &ctx.actor.id).await?;
+                let current = epic_row(tx, &project, &epic)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                let goal_current = goal_row(tx, &project, &current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if current.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                if current.block.is_some() {
+                    return Err(DomainError::InvalidState("epic is already blocked".into()));
+                }
+                let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
+                let mut pending = Vec::new();
+                workflow::epic::block(tx, &ctx, &current, &reason, &mut pending).await?;
+                let events =
+                    append_events(tx, &project, &ctx, "blockEpic", &reason, pending).await?;
+                let updated = find_epic(tx, &project, &epic)
+                    .await?
+                    .ok_or_else(|| missing_after_write("epic"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn unblock_epic(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        epic: EpicId,
+    ) -> Result<CommandResult<Epic>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = epic_row(tx, &project, &epic)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                let goal_current = goal_row(tx, &project, &current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
+                let Some(block) = &current.block else {
+                    return Err(DomainError::InvalidState("epic is not blocked".into()));
+                };
+                let cleared = block.reason.clone();
+                let mut pending = Vec::new();
+                workflow::epic::unblock(tx, &ctx, &current, &mut pending).await?;
+                // Unblocking re-evaluates children finished before the block.
+                workflow::recompute(
+                    tx,
+                    AffectedScope {
+                        project,
+                        epics: vec![epic],
+                    },
+                    &mut pending,
+                    ctx.now,
+                )
+                .await?;
+                let events =
+                    append_events(tx, &project, &ctx, "unblockEpic", &cleared, pending).await?;
+                let updated = find_epic(tx, &project, &epic)
+                    .await?
+                    .ok_or_else(|| missing_after_write("epic"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    pub async fn cancel_epic(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        epic: EpicId,
+        reason: String,
+    ) -> Result<CommandResult<Epic>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = epic_row(tx, &project, &epic)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                let goal_current = goal_row(tx, &project, &current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if current.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
+                let mut pending = Vec::new();
+                workflow::epic::cancel(tx, &ctx, &current, &reason, &mut pending).await?;
+                let events =
+                    append_events(tx, &project, &ctx, "cancelEpic", &reason, pending).await?;
+                let updated = find_epic(tx, &project, &epic)
+                    .await?
+                    .ok_or_else(|| missing_after_write("epic"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    // Explicit completion covers the empty and all-waived shapes only; every
+    // other epic completes through the cascade (plan/04).
+    pub async fn complete_epic(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        epic: EpicId,
+        reason: String,
+    ) -> Result<CommandResult<Epic>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let current = epic_row(tx, &project, &epic)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_owner(&actor)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                let goal_current = goal_row(tx, &project, &current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if current.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                if current.status == EpicStatus::Proposed {
+                    return Err(DomainError::InvalidState(
+                        "epic is proposed and must be accepted first".into(),
+                    ));
+                }
+                if current.block.is_some() {
+                    return Err(DomainError::InvalidState("epic is blocked".into()));
+                }
+                let snapshot =
+                    workflow::eligibility::load_epic_snapshots(tx, &project, &[epic], ctx.now)
+                        .await?
+                        .remove(&epic)
+                        .ok_or_else(|| missing_after_write("epic snapshot"))?;
+                if !snapshot
+                    .epic_prereqs
+                    .iter()
+                    .all(|(_, status)| *status == EpicStatus::Done)
+                {
+                    return Err(DomainError::InvalidState(
+                        "epic prerequisites are not all done".into(),
+                    ));
+                }
+                if !workflow::epic::explicitly_completable(snapshot.task_counts) {
+                    return Err(DomainError::InvalidState(
+                        "epic has non-waived tasks; completion is automatic".into(),
+                    ));
+                }
+                let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
+                let mut pending = Vec::new();
+                workflow::epic::complete(tx, &ctx, &current, &mut pending).await?;
+                let dependents = workflow::dependents_of(tx, &[epic]).await?;
+                workflow::recompute(
+                    tx,
+                    AffectedScope {
+                        project,
+                        epics: dependents,
+                    },
+                    &mut pending,
+                    ctx.now,
+                )
+                .await?;
+                let events =
+                    append_events(tx, &project, &ctx, "completeEpic", &reason, pending).await?;
+                let updated = find_epic(tx, &project, &epic)
+                    .await?
+                    .ok_or_else(|| missing_after_write("epic"))?;
+                Ok(CommandResult {
+                    value: updated,
+                    events,
+                })
+            })
+        })
+        .await
+    }
+
+    // Temporary interface (step 006): drives the real done transition and the
+    // cascade in one transaction until execute reports land in step 010.
+    #[cfg(any(test, feature = "test-support"))]
+    pub async fn complete_task_for_test(
+        &self,
+        ctx: CommandContext,
+        project: ProjectId,
+        task: TaskId,
+    ) -> Result<CommandResult<Task>, DomainError> {
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                live_actor(tx, &ctx.actor.id).await?;
+                let current = task_row(tx, &project, &task)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                require_revision(ctx.expected_revision, current.revision)?;
+                let epic_current = epic_row(tx, &project, &current.epic_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                let goal_current = goal_row(tx, &project, &epic_current.goal_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                if current.archived
+                    || epic_current.archived
+                    || goal_current.archived
+                    || project_archived(tx, &project).await?
+                {
+                    return Err(DomainError::ArchivedScope);
+                }
+                if current.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                let mut pending = Vec::new();
+                workflow::task::complete(tx, &ctx, &current, &mut pending).await?;
+                workflow::recompute(
+                    tx,
+                    AffectedScope {
+                        project,
+                        epics: vec![current.epic_id],
+                    },
+                    &mut pending,
+                    ctx.now,
+                )
+                .await?;
+                let events =
+                    append_events(tx, &project, &ctx, "system.test.completeTask", "", pending)
+                        .await?;
                 let updated = find_task(tx, &project, &task)
                     .await?
                     .ok_or_else(|| missing_after_write("task"))?;
@@ -959,7 +1492,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::model::{Actor, ActorKind, Clock, ReviewPolicy, TestClock};
+    use crate::model::{Actor, ActorKind, Clock, DependencyCreate, ReviewPolicy, TestClock};
     use crate::storage::open;
     use crate::storage::rows::insert_actor;
     use crate::storage::testing::{store_options, test_clock};
@@ -2354,5 +2887,927 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(updated.value.title, "Renamed");
+    }
+
+    async fn seed_claim_row(f: &Fixture, task: TaskId) -> String {
+        let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+        // Direct-SQL fixture: no public command can claim until step 009.
+        sqlx::query(
+            "INSERT INTO claims (id, task_id, actor_id, phase, acquired_at, expires_at, \
+             status, task_revision, lease_hash) VALUES (?1, ?2, ?3, 'execute', ?4, ?5, \
+             'active', 1, 'hash')",
+        )
+        .bind(&id)
+        .bind(task.to_string())
+        .bind(f.owner.id.to_string())
+        .bind(format_ts(&f.clock.now()))
+        .bind(format_ts(&(f.clock.now() + chrono::Duration::minutes(30))))
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+        id
+    }
+
+    // Direct-SQL fixture: sessions/submissions get commands in steps 010/011.
+    async fn seed_submission_row(f: &Fixture, task: TaskId) -> String {
+        let now = format_ts(&f.clock.now());
+        let session = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+        let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+        let mut tx = f.store.pool().begin().await.unwrap();
+        sqlx::query(
+            "INSERT INTO sessions (id, task_id, claim_id, actor_id, phase, started_at, \
+             ended_at, outcome, summary, failure_reason, document_revision_ids, links) \
+             VALUES (?1, ?2, 'claim', ?3, 'execute', ?4, ?4, 'succeeded', '', '', '[]', '[]')",
+        )
+        .bind(&session)
+        .bind(task.to_string())
+        .bind(f.owner.id.to_string())
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO submissions (id, revision, created_at, updated_at, task_id, kind, \
+             producer_id, document_revision_ids, session_id, policy, status, \
+             created_context_revision) VALUES (?1, 1, ?2, ?2, ?3, 'work', ?4, '[]', ?5, \
+             'human', 'pending', 1)",
+        )
+        .bind(&id)
+        .bind(&now)
+        .bind(task.to_string())
+        .bind(f.owner.id.to_string())
+        .bind(&session)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        id
+    }
+
+    /// (type, resource_id, resource_revision, action, reason) per emitted event.
+    async fn event_rows(f: &Fixture, ids: &[i64]) -> Vec<(String, String, i64, String, String)> {
+        let mut rows = Vec::new();
+        for id in ids {
+            rows.push(
+                sqlx::query_as(
+                    "SELECT type, resource_id, resource_revision, action, reason \
+                     FROM events WHERE id = ?1",
+                )
+                .bind(id)
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap(),
+            );
+        }
+        rows
+    }
+
+    async fn epic_state(f: &Fixture, epic: EpicId) -> (String, i64) {
+        sqlx::query_as("SELECT status, revision FROM epics WHERE id = ?1")
+            .bind(epic.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap()
+    }
+
+    async fn task_state(f: &Fixture, task: TaskId) -> (String, String, i64) {
+        sqlx::query_as("SELECT status, phase, revision FROM tasks WHERE id = ?1")
+            .bind(task.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap()
+    }
+
+    async fn claim_state(f: &Fixture, claim: &str) -> (String, String) {
+        sqlx::query_as("SELECT status, close_reason FROM claims WHERE id = ?1")
+            .bind(claim)
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap()
+    }
+
+    struct LifecycleScope {
+        project: ProjectId,
+        epic: Epic,
+        task: Task,
+    }
+
+    async fn lifecycle_scope(f: &Fixture) -> LifecycleScope {
+        let p = project(f, "P").await;
+        let g = goal(f, p.id, "G").await;
+        let e = epic(f, p.id, g.id, "E").await;
+        let t = task(f, p.id, e.id, "T").await;
+        LifecycleScope {
+            project: p.id,
+            epic: e,
+            task: t,
+        }
+    }
+
+    #[tokio::test]
+    async fn block_task_blocks_revokes_claim_and_keeps_submission() {
+        let f = fixture().await;
+        let s = lifecycle_scope(&f).await;
+        let agent = person(&f.clock, ActorKind::Agent, "agent");
+        register(&f.store, &agent).await;
+        let claim = seed_claim_row(&f, s.task.id).await;
+        seed_submission_row(&f, s.task.id).await;
+
+        let blocked = f
+            .store
+            .block_task(
+                ctx(&agent, &f.clock, Some(1)),
+                s.project,
+                s.task.id,
+                "  scope changed  ".to_string(),
+            )
+            .await
+            .unwrap();
+        let block = blocked.value.block.expect("block record");
+        assert_eq!(block.reason, "scope changed");
+        assert_eq!(block.actor_id, agent.id);
+        assert_eq!(blocked.value.revision.value(), 2);
+        assert_eq!(
+            claim_state(&f, &claim).await,
+            ("revoked".into(), "scope changed".into())
+        );
+        let pending: String =
+            sqlx::query_scalar("SELECT status FROM submissions WHERE task_id = ?1")
+                .bind(s.task.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(pending, "pending");
+        let rows = event_rows(&f, &blocked.events).await;
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|(_, _, _, action, reason)| action == "blockTask" && reason == "scope changed"));
+        assert!(
+            rows.iter()
+                .any(|(kind, _, _, _, _)| kind == "claim.changed")
+        );
+        assert!(
+            rows.iter()
+                .any(|(kind, id, revision, _, _)| kind == "task.changed"
+                    && *id == s.task.id.to_string()
+                    && *revision == 2)
+        );
+
+        let err = f
+            .store
+            .block_task(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.task.id,
+                "again".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+    }
+
+    #[tokio::test]
+    async fn block_task_validates_reason_and_terminal_scope() {
+        let f = fixture().await;
+        let s = lifecycle_scope(&f).await;
+        for reason in ["   ", &"x".repeat(REASON_MAX_CHARS + 1)] {
+            let err = f
+                .store
+                .block_task(
+                    ctx(&f.owner, &f.clock, Some(1)),
+                    s.project,
+                    s.task.id,
+                    reason.to_string(),
+                )
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                err,
+                DomainError::Validation {
+                    field: "reason",
+                    ..
+                }
+            ));
+        }
+        f.store
+            .cancel_task(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.task.id,
+                "obsolete".into(),
+            )
+            .await
+            .unwrap();
+        let err = f
+            .store
+            .block_task(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.task.id,
+                "late".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::TerminalScope));
+    }
+
+    #[tokio::test]
+    async fn unblock_task_is_owner_only_and_preserves_the_cleared_reason() {
+        let f = fixture().await;
+        let s = lifecycle_scope(&f).await;
+        let agent = person(&f.clock, ActorKind::Agent, "agent");
+        register(&f.store, &agent).await;
+
+        let err = f
+            .store
+            .unblock_task(ctx(&f.owner, &f.clock, Some(1)), s.project, s.task.id)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+
+        f.store
+            .block_task(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.task.id,
+                "waiting on design".into(),
+            )
+            .await
+            .unwrap();
+        let err = f
+            .store
+            .unblock_task(ctx(&agent, &f.clock, Some(2)), s.project, s.task.id)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)));
+
+        let unblocked = f
+            .store
+            .unblock_task(ctx(&f.owner, &f.clock, Some(2)), s.project, s.task.id)
+            .await
+            .unwrap();
+        assert!(unblocked.value.block.is_none());
+        assert_eq!(unblocked.value.revision.value(), 3);
+        let rows = event_rows(&f, &unblocked.events).await;
+        // The unblock event preserves the cleared block reason (plan/08).
+        assert!(
+            rows.iter()
+                .all(|(_, _, _, action, reason)| action == "unblockTask"
+                    && reason == "waiting on design")
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_task_completes_phase_revokes_claims_and_withdraws_submissions() {
+        let f = fixture().await;
+        let s = lifecycle_scope(&f).await;
+        let claim = seed_claim_row(&f, s.task.id).await;
+        let submission = seed_submission_row(&f, s.task.id).await;
+        let agent = person(&f.clock, ActorKind::Agent, "agent");
+        register(&f.store, &agent).await;
+
+        let err = f
+            .store
+            .cancel_task(
+                ctx(&agent, &f.clock, Some(1)),
+                s.project,
+                s.task.id,
+                "nope".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)));
+
+        let cancelled = f
+            .store
+            .cancel_task(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.task.id,
+                "superseded".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            task_state(&f, s.task.id).await,
+            ("cancelled".into(), "complete".into(), 2)
+        );
+        let record = cancelled.value.cancellation.expect("cancellation record");
+        assert_eq!(record.reason, "superseded");
+        assert_eq!(
+            claim_state(&f, &claim).await,
+            ("revoked".into(), "superseded".into())
+        );
+        let (status, withdraw_reason): (String, String) =
+            sqlx::query_as("SELECT status, withdraw_reason FROM submissions WHERE id = ?1")
+                .bind(&submission)
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            (status.as_str(), withdraw_reason.as_str()),
+            ("withdrawn", "superseded")
+        );
+        let rows = event_rows(&f, &cancelled.events).await;
+        assert!(
+            rows.iter()
+                .any(|(kind, _, _, _, _)| kind == "submission.changed")
+        );
+
+        let err = f
+            .store
+            .cancel_task(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.task.id,
+                "twice".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::TerminalScope));
+    }
+
+    #[tokio::test]
+    async fn waive_task_needs_owner_a_cancelled_task_and_no_prior_waiver() {
+        let f = fixture().await;
+        let s = lifecycle_scope(&f).await;
+        let agent = person(&f.clock, ActorKind::Agent, "agent");
+        register(&f.store, &agent).await;
+
+        let err = f
+            .store
+            .waive_task(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.task.id,
+                "early".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+
+        f.store
+            .cancel_task(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.task.id,
+                "obsolete".into(),
+            )
+            .await
+            .unwrap();
+        let err = f
+            .store
+            .waive_task(
+                ctx(&agent, &f.clock, Some(2)),
+                s.project,
+                s.task.id,
+                "nope".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)));
+
+        let waived = f
+            .store
+            .waive_task(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.task.id,
+                "not needed".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(waived.value.waiver.expect("waiver").reason, "not needed");
+        // The waiver changes the epic's completion denominator: one epic bump.
+        assert_eq!(epic_state(&f, s.epic.id).await.1, 2);
+
+        let err = f
+            .store
+            .waive_task(
+                ctx(&f.owner, &f.clock, Some(3)),
+                s.project,
+                s.task.id,
+                "twice".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+    }
+
+    #[tokio::test]
+    async fn waiving_the_last_cancelled_task_completes_the_epic_once() {
+        let f = fixture().await;
+        let s = lifecycle_scope(&f).await;
+        let done = task(&f, s.project, s.epic.id, "Done work").await;
+        f.store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(1)), s.project, done.id)
+            .await
+            .unwrap();
+        f.store
+            .cancel_task(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.task.id,
+                "obsolete".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(epic_state(&f, s.epic.id).await.0, "open");
+
+        let waived = f
+            .store
+            .waive_task(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.task.id,
+                "not needed".into(),
+            )
+            .await
+            .unwrap();
+        // Auto-completion fires in the same command and reuses the waiver's
+        // epic bump: exactly one epic.changed with the final revision.
+        assert_eq!(epic_state(&f, s.epic.id).await, ("done".into(), 2));
+        let rows = event_rows(&f, &waived.events).await;
+        let epic_events: Vec<_> = rows
+            .iter()
+            .filter(|(kind, _, _, _, _)| kind == "epic.changed")
+            .collect();
+        assert_eq!(epic_events.len(), 1);
+        assert_eq!(epic_events[0].2, 2);
+    }
+
+    #[tokio::test]
+    async fn block_epic_revokes_descendant_claims_and_bumps_those_tasks() {
+        let f = fixture().await;
+        let s = lifecycle_scope(&f).await;
+        let second = task(&f, s.project, s.epic.id, "Second").await;
+        let first_claim = seed_claim_row(&f, s.task.id).await;
+        let second_claim = seed_claim_row(&f, second.id).await;
+        seed_submission_row(&f, s.task.id).await;
+        let agent = person(&f.clock, ActorKind::Agent, "agent");
+        register(&f.store, &agent).await;
+
+        let blocked = f
+            .store
+            .block_epic(
+                ctx(&agent, &f.clock, Some(1)),
+                s.project,
+                s.epic.id,
+                "rescoping".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(blocked.value.block.expect("block").reason, "rescoping");
+        assert_eq!(claim_state(&f, &first_claim).await.0, "revoked");
+        assert_eq!(claim_state(&f, &second_claim).await.0, "revoked");
+        // Claim-revoked tasks changed representation: one bump each (plan/04).
+        assert_eq!(task_state(&f, s.task.id).await.2, 2);
+        assert_eq!(task_state(&f, second.id).await.2, 2);
+        let pending: String =
+            sqlx::query_scalar("SELECT status FROM submissions WHERE task_id = ?1")
+                .bind(s.task.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(pending, "pending");
+        let rows = event_rows(&f, &blocked.events).await;
+        assert_eq!(
+            rows.iter()
+                .filter(|(kind, _, _, _, _)| kind == "task.changed")
+                .count(),
+            2
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|(kind, _, _, _, _)| kind == "claim.changed")
+                .count(),
+            2
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|(kind, _, _, _, _)| kind == "epic.changed")
+                .count(),
+            1
+        );
+
+        let err = f
+            .store
+            .block_epic(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.epic.id,
+                "again".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+    }
+
+    #[tokio::test]
+    async fn unblock_epic_completes_children_finished_before_the_block() {
+        let f = fixture().await;
+        let s = lifecycle_scope(&f).await;
+        f.store
+            .block_epic(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.epic.id,
+                "hold".into(),
+            )
+            .await
+            .unwrap();
+        f.store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(1)), s.project, s.task.id)
+            .await
+            .unwrap();
+        // An explicitly blocked epic cannot complete (plan/04 FLOW-03).
+        assert_eq!(epic_state(&f, s.epic.id).await.0, "open");
+
+        let agent = person(&f.clock, ActorKind::Agent, "agent");
+        register(&f.store, &agent).await;
+        let err = f
+            .store
+            .unblock_epic(ctx(&agent, &f.clock, Some(2)), s.project, s.epic.id)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)));
+
+        let unblocked = f
+            .store
+            .unblock_epic(ctx(&f.owner, &f.clock, Some(2)), s.project, s.epic.id)
+            .await
+            .unwrap();
+        // Unblock re-evaluates children: done in the same command, one event.
+        assert_eq!(epic_state(&f, s.epic.id).await, ("done".into(), 3));
+        let rows = event_rows(&f, &unblocked.events).await;
+        let epic_events: Vec<_> = rows
+            .iter()
+            .filter(|(kind, _, _, _, _)| kind == "epic.changed")
+            .collect();
+        assert_eq!(epic_events.len(), 1);
+        assert_eq!(epic_events[0].2, 3);
+        assert!(
+            rows.iter()
+                .all(|(_, _, _, action, reason)| action == "unblockEpic" && reason == "hold")
+        );
+
+        let err = f
+            .store
+            .unblock_epic(ctx(&f.owner, &f.clock, Some(3)), s.project, s.epic.id)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+    }
+
+    #[tokio::test]
+    async fn cancel_epic_preserves_done_descendants_and_propagates_the_reason() {
+        let f = fixture().await;
+        let s = lifecycle_scope(&f).await;
+        let done = task(&f, s.project, s.epic.id, "Done work").await;
+        f.store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(1)), s.project, done.id)
+            .await
+            .unwrap();
+        let claim = seed_claim_row(&f, s.task.id).await;
+        let submission = seed_submission_row(&f, s.task.id).await;
+
+        let cancelled = f
+            .store
+            .cancel_epic(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.epic.id,
+                "descoped".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            cancelled.value.cancellation.expect("record").reason,
+            "descoped"
+        );
+        assert_eq!(epic_state(&f, s.epic.id).await, ("cancelled".into(), 2));
+        // Done descendants stay done and unbumped; nonterminal ones cancel
+        // with the propagated reason.
+        assert_eq!(
+            task_state(&f, done.id).await,
+            ("done".into(), "complete".into(), 2)
+        );
+        assert_eq!(
+            task_state(&f, s.task.id).await,
+            ("cancelled".into(), "complete".into(), 2)
+        );
+        let reason: String =
+            sqlx::query_scalar("SELECT cancellation_reason FROM tasks WHERE id = ?1")
+                .bind(s.task.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(reason, "descoped");
+        assert_eq!(claim_state(&f, &claim).await.0, "revoked");
+        let status: String = sqlx::query_scalar("SELECT status FROM submissions WHERE id = ?1")
+            .bind(&submission)
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(status, "withdrawn");
+        let rows = event_rows(&f, &cancelled.events).await;
+        assert_eq!(
+            rows.iter()
+                .filter(|(kind, _, _, _, _)| kind == "task.changed")
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_epic_rejects_proposed_blocked_gated_and_automatic_shapes() {
+        let f = fixture().await;
+        let p = project(&f, "P").await;
+        let g = goal(&f, p.id, "G").await;
+        let agent = person(&f.clock, ActorKind::Agent, "agent");
+        register(&f.store, &agent).await;
+
+        // Proposed: agent creation under the default proposal gate.
+        let proposed = f
+            .store
+            .create_epic(
+                ctx(&agent, &f.clock, None),
+                p.id,
+                g.id,
+                EpicCreate {
+                    title: "Proposed".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        let err = f
+            .store
+            .complete_epic(
+                ctx(&f.owner, &f.clock, Some(1)),
+                p.id,
+                proposed.id,
+                "done".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+
+        // Blocked.
+        let blocked = epic(&f, p.id, g.id, "Blocked").await;
+        f.store
+            .block_epic(
+                ctx(&f.owner, &f.clock, Some(1)),
+                p.id,
+                blocked.id,
+                "hold".into(),
+            )
+            .await
+            .unwrap();
+        let err = f
+            .store
+            .complete_epic(
+                ctx(&f.owner, &f.clock, Some(2)),
+                p.id,
+                blocked.id,
+                "done".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+
+        // Unmet epic prerequisite.
+        let prereq = epic(&f, p.id, g.id, "Prereq").await;
+        task(&f, p.id, prereq.id, "Keeps it open").await;
+        let gated = epic(&f, p.id, g.id, "Gated").await;
+        f.store
+            .create_dependency(
+                ctx(&f.owner, &f.clock, None),
+                p.id,
+                DependencyCreate::Epic {
+                    dependent_id: gated.id,
+                    prerequisite_id: prereq.id,
+                },
+            )
+            .await
+            .unwrap();
+        let err = f
+            .store
+            .complete_epic(
+                ctx(&f.owner, &f.clock, Some(2)),
+                p.id,
+                gated.id,
+                "done".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+
+        // Non-waived tasks: completion is automatic, not explicit.
+        let working = epic(&f, p.id, g.id, "Working").await;
+        task(&f, p.id, working.id, "Open work").await;
+        let err = f
+            .store
+            .complete_epic(
+                ctx(&f.owner, &f.clock, Some(1)),
+                p.id,
+                working.id,
+                "done".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+
+        // Agents never complete epics.
+        let empty = epic(&f, p.id, g.id, "Empty").await;
+        let err = f
+            .store
+            .complete_epic(
+                ctx(&agent, &f.clock, Some(1)),
+                p.id,
+                empty.id,
+                "done".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)));
+    }
+
+    #[tokio::test]
+    async fn complete_epic_covers_empty_and_all_waived_and_cascades_downstream() {
+        let f = fixture().await;
+        let p = project(&f, "P").await;
+        let g = goal(&f, p.id, "G").await;
+
+        // Empty epic gating a finished dependent.
+        let empty = epic(&f, p.id, g.id, "Empty").await;
+        let dependent = epic(&f, p.id, g.id, "Dependent").await;
+        let dependent_task = task(&f, p.id, dependent.id, "Work").await;
+        f.store
+            .create_dependency(
+                ctx(&f.owner, &f.clock, None),
+                p.id,
+                DependencyCreate::Epic {
+                    dependent_id: dependent.id,
+                    prerequisite_id: empty.id,
+                },
+            )
+            .await
+            .unwrap();
+        f.store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(1)), p.id, dependent_task.id)
+            .await
+            .unwrap();
+        assert_eq!(epic_state(&f, dependent.id).await.0, "open");
+
+        let completed = f
+            .store
+            .complete_epic(
+                ctx(&f.owner, &f.clock, Some(2)),
+                p.id,
+                empty.id,
+                "nothing to do".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(completed.value.status, EpicStatus::Done);
+        // Downstream cascade in the same command.
+        assert_eq!(epic_state(&f, dependent.id).await.0, "done");
+        let rows = event_rows(&f, &completed.events).await;
+        assert_eq!(
+            rows.iter()
+                .filter(|(kind, _, _, _, _)| kind == "epic.changed")
+                .count(),
+            2
+        );
+        assert!(
+            rows.iter()
+                .all(|(_, _, _, action, _)| action == "completeEpic")
+        );
+
+        // All-waived epic completes explicitly, never automatically.
+        let waived_epic = epic(&f, p.id, g.id, "Waived").await;
+        let only = task(&f, p.id, waived_epic.id, "Only").await;
+        f.store
+            .cancel_task(
+                ctx(&f.owner, &f.clock, Some(1)),
+                p.id,
+                only.id,
+                "obsolete".into(),
+            )
+            .await
+            .unwrap();
+        f.store
+            .waive_task(
+                ctx(&f.owner, &f.clock, Some(2)),
+                p.id,
+                only.id,
+                "not needed".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(epic_state(&f, waived_epic.id).await.0, "open");
+        let completed = f
+            .store
+            .complete_epic(
+                ctx(&f.owner, &f.clock, Some(2)),
+                p.id,
+                waived_epic.id,
+                "all waived".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(completed.value.status, EpicStatus::Done);
+    }
+
+    #[tokio::test]
+    async fn accept_epic_cascade_completes_already_done_children() {
+        let f = fixture().await;
+        let p = project(&f, "P").await;
+        let g = goal(&f, p.id, "G").await;
+        let agent = person(&f.clock, ActorKind::Agent, "agent");
+        register(&f.store, &agent).await;
+        let proposed = f
+            .store
+            .create_epic(
+                ctx(&agent, &f.clock, None),
+                p.id,
+                g.id,
+                EpicCreate {
+                    title: "Proposed".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        let t = task(&f, p.id, proposed.id, "T").await;
+        f.store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(1)), p.id, t.id)
+            .await
+            .unwrap();
+        // A proposed epic never auto-completes (plan/04).
+        assert_eq!(epic_state(&f, proposed.id).await.0, "proposed");
+
+        let accepted = f
+            .store
+            .accept_epic(ctx(&f.owner, &f.clock, Some(1)), p.id, proposed.id)
+            .await
+            .unwrap();
+        // Accept runs the cascade: open then done in one command, one event.
+        assert_eq!(epic_state(&f, proposed.id).await, ("done".into(), 2));
+        let rows = event_rows(&f, &accepted.events).await;
+        let epic_events: Vec<_> = rows
+            .iter()
+            .filter(|(kind, _, _, _, _)| kind == "epic.changed")
+            .collect();
+        assert_eq!(epic_events.len(), 1);
+        assert_eq!(epic_events[0].2, 2);
+    }
+
+    #[tokio::test]
+    async fn completing_the_last_task_cascades_across_epic_dependencies() {
+        let f = fixture().await;
+        let p = project(&f, "P").await;
+        let g = goal(&f, p.id, "G").await;
+        let first = epic(&f, p.id, g.id, "First").await;
+        let first_task = task(&f, p.id, first.id, "A").await;
+        let second = epic(&f, p.id, g.id, "Second").await;
+        let second_task = task(&f, p.id, second.id, "B").await;
+        f.store
+            .create_dependency(
+                ctx(&f.owner, &f.clock, None),
+                p.id,
+                DependencyCreate::Epic {
+                    dependent_id: second.id,
+                    prerequisite_id: first.id,
+                },
+            )
+            .await
+            .unwrap();
+        f.store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(1)), p.id, second_task.id)
+            .await
+            .unwrap();
+        // Gated by the unmet epic prerequisite.
+        assert_eq!(epic_state(&f, second.id).await.0, "open");
+
+        let completed = f
+            .store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(1)), p.id, first_task.id)
+            .await
+            .unwrap();
+        assert_eq!(task_state(&f, first_task.id).await.0, "done");
+        assert_eq!(epic_state(&f, first.id).await.0, "done");
+        assert_eq!(epic_state(&f, second.id).await.0, "done");
+        // One transaction, one command: task + both epics, coalesced.
+        let rows = event_rows(&f, &completed.events).await;
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows.iter()
+                .filter(|(kind, _, _, _, _)| kind == "epic.changed")
+                .count(),
+            2
+        );
     }
 }

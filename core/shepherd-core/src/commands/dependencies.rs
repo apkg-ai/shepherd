@@ -8,12 +8,14 @@ use super::{
 use crate::dag;
 use crate::error::DomainError;
 use crate::model::{
-    ActorKind, Dependency, DependencyCreate, DependencyId, DependencyLevel, ProjectId, Revision,
+    ActorKind, Dependency, DependencyCreate, DependencyId, DependencyLevel, EpicId, ProjectId,
+    Revision,
 };
 use crate::queries::graph::{dependency_table, find_dependency, scoped_dependent_clause};
 use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store};
+use crate::workflow::{self, AffectedScope};
 
 fn missing_after_write(what: &'static str) -> DomainError {
     StorageError::Corrupt(format!("{what} missing after write")).into()
@@ -384,6 +386,20 @@ impl Store {
                     &prerequisite,
                     prerequisite_next,
                 ));
+                // Removing the last unmet prerequisite can complete a finished
+                // dependent epic; the cascade reuses the endpoint bump above.
+                if level == DependencyLevel::Epic {
+                    workflow::recompute(
+                        tx,
+                        AffectedScope {
+                            project,
+                            epics: vec![EpicId::from_uuid(dependent.id)],
+                        },
+                        &mut pending,
+                        ctx.now,
+                    )
+                    .await?;
+                }
                 let events =
                     append_events(tx, &project, &ctx, "deleteDependency", "", pending).await?;
                 Ok(CommandResult { value: (), events })
@@ -1154,5 +1170,73 @@ mod tests {
             )
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn deleting_the_last_unmet_epic_dependency_completes_the_dependent() {
+        let f = fixture().await;
+        let s = scope(&f).await;
+        let goal_id = s.epic.goal_id;
+        let prereq = epic(&f, s.project.id, goal_id, "Prereq").await;
+        task(&f, s.project.id, prereq.id, "keeps prereq open").await;
+        let link = f
+            .store
+            .create_dependency(
+                ctx(&f.owner, &f.clock, None),
+                s.project.id,
+                DependencyCreate::Epic {
+                    dependent_id: s.epic.id,
+                    prerequisite_id: prereq.id,
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        for t in [&s.a, &s.b] {
+            f.store
+                .complete_task_for_test(ctx(&f.owner, &f.clock, Some(1)), s.project.id, t.id)
+                .await
+                .unwrap();
+        }
+        // All tasks done, still gated by the unmet epic prerequisite.
+        let status: String = sqlx::query_scalar("SELECT status FROM epics WHERE id = ?1")
+            .bind(s.epic.id.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(status, "open");
+
+        let deleted = f
+            .store
+            .delete_dependency(
+                ctx(&f.owner, &f.clock, Some(link.revision.value())),
+                s.project.id,
+                link.id,
+            )
+            .await
+            .unwrap();
+        // The cascade reuses the endpoint bump: done, one epic.changed for the
+        // dependent, final revision on row and event.
+        let (status, revision): (String, i64) =
+            sqlx::query_as("SELECT status, revision FROM epics WHERE id = ?1")
+                .bind(s.epic.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(status, "done");
+        let mut dependent_events = Vec::new();
+        for id in &deleted.events {
+            let (kind, resource, event_revision): (String, String, i64) = sqlx::query_as(
+                "SELECT type, resource_id, resource_revision FROM events WHERE id = ?1",
+            )
+            .bind(id)
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+            if kind == "epic.changed" && resource == s.epic.id.to_string() {
+                dependent_events.push(event_revision);
+            }
+        }
+        assert_eq!(dependent_events, vec![revision]);
     }
 }

@@ -14,7 +14,6 @@ typed_uuid!(TaskTypeId);
 pub(crate) const NAME_MAX_CHARS: usize = 200;
 pub(crate) const DESCRIPTION_MAX_CHARS: usize = 10_000;
 pub(crate) const LABEL_MAX_CHARS: usize = 100;
-#[expect(dead_code)] // consumed by the step-006 lifecycle commands
 pub(crate) const REASON_MAX_CHARS: usize = 2_000;
 const KEY_MAX_LEN: usize = 40;
 
