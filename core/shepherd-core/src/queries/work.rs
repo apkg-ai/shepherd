@@ -93,6 +93,9 @@ impl Store {
         // SQL prefilters a strict superset of eligible rows; the evaluator decides.
         // The refill loop keysets over candidates while the emitted cursor anchors
         // the last returned item, so post-filter pagination stays deterministic.
+        // The scan chunk stays independent of the page limit so a small page over
+        // mostly-ineligible rows does not degrade into per-row snapshot loads.
+        let chunk = (limit + 1).max(256);
         let mut collected: Vec<WorkItem> = Vec::new();
         loop {
             let mut builder =
@@ -122,7 +125,7 @@ impl Store {
             }
             builder
                 .push(" ORDER BY created_at ASC, id ASC LIMIT ")
-                .push_bind(limit + 1);
+                .push_bind(chunk);
             let rows = builder.build().fetch_all(&mut *tx).await?;
             let chunk_len = i64::try_from(rows.len()).expect("chunk fits in i64");
             let Some(last) = rows.last() else {
@@ -160,7 +163,7 @@ impl Store {
                 }
             }
             if i64::try_from(collected.len()).expect("page fits in i64") > limit
-                || chunk_len < limit + 1
+                || chunk_len < chunk
             {
                 break;
             }

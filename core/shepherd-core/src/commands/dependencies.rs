@@ -10,7 +10,7 @@ use crate::error::DomainError;
 use crate::model::{
     ActorKind, Dependency, DependencyCreate, DependencyId, DependencyLevel, ProjectId, Revision,
 };
-use crate::queries::graph::{dependency_table, find_dependency};
+use crate::queries::graph::{dependency_table, find_dependency, scoped_dependent_clause};
 use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store};
@@ -48,7 +48,9 @@ async fn task_endpoint(
         id,
         revision: task.revision,
         terminal: task.status.is_terminal(),
-        proposed: task.status == crate::model::TaskStatus::Proposed,
+        // Accepted means neither the task nor its owning epic is proposed (plan/04).
+        proposed: task.status == crate::model::TaskStatus::Proposed
+            || epic.status == crate::model::EpicStatus::Proposed,
         scope: task.epic_id.as_uuid(),
         archived: task.archived || epic.archived || goal.archived,
     })
@@ -274,16 +276,10 @@ impl Store {
                 }
                 // Acyclicity over the scoped edge list, inside the serialized
                 // write transaction — this is what makes the cycle race safe.
-                let edges_query = AssertSqlSafe(match level {
-                    DependencyLevel::Epic => format!(
-                        "SELECT dependent_id, prerequisite_id FROM {table} \
-                         WHERE dependent_id IN (SELECT id FROM epics WHERE goal_id = ?1)"
-                    ),
-                    DependencyLevel::Task => format!(
-                        "SELECT dependent_id, prerequisite_id FROM {table} \
-                         WHERE dependent_id IN (SELECT id FROM tasks WHERE epic_id = ?1)"
-                    ),
-                });
+                let edges_query = AssertSqlSafe(format!(
+                    "SELECT dependent_id, prerequisite_id FROM {table} WHERE {}",
+                    scoped_dependent_clause(level, "?1"),
+                ));
                 let edges: Vec<(String, String)> = sqlx::query_as(edges_query)
                     .bind(dependent.scope.to_string())
                     .fetch_all(&mut **tx)
@@ -841,6 +837,42 @@ mod tests {
                 ctx(&f.owner, &f.clock, None),
                 project.id,
                 task_link(proposed.id, another.id),
+            )
+            .await
+            .unwrap();
+
+        // A task under a proposed epic is not accepted work either (plan/04).
+        let proposed_epic = f
+            .store
+            .create_epic(
+                ctx(&agent, &f.clock, None),
+                project.id,
+                g.id,
+                EpicCreate {
+                    title: "proposed epic".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        let under_a = task(&f, project.id, proposed_epic.id, "under a").await;
+        let under_b = task(&f, project.id, proposed_epic.id, "under b").await;
+        let err = f
+            .store
+            .create_dependency(
+                ctx(&agent, &f.clock, None),
+                project.id,
+                task_link(under_a.id, under_b.id),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+        f.store
+            .create_dependency(
+                ctx(&f.owner, &f.clock, None),
+                project.id,
+                task_link(under_a.id, under_b.id),
             )
             .await
             .unwrap();

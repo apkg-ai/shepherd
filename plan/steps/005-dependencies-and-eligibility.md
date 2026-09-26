@@ -99,4 +99,19 @@ Branch `v1-005-dependencies-and-eligibility` (PR pending).
 - Epic snapshots bake the descendant active-work aggregate with the load-time clock; task-level claim expiry stays raw for the pure evaluator.
 - Decisions confirmed with the owner during planning: `delete_dependency` ships in 005; dependency mutations bump both endpoint revisions; `listDependencies` ships here; graphs include archived nodes; the agent accepted-work guard applies to the dependent only; `DomainError::ActiveWork` added now.
 
+### Review follow-ups (local self-review, pre-PR)
+
+A high-effort local review of `main...HEAD` produced eight findings; six fixed on the branch, two rejected with rationale:
+
+- **Archived-goal reason misreport** [medium]: with only the goal archived, the `archived` gate's resource_id pointed at the (live) project because `TaskSnapshot` carried no goal id. Added `goal_id` to the snapshot; the reason now names the archived goal; the archived-chain test asserts the resource id for all four levels.
+- **Agent guard ignored proposed epics** [medium]: `task_endpoint.proposed` reflected only the task's own status, so an agent could link a dependent task living under a proposed epic — looser than the eligibility definition of accepted (task AND epic not proposed). The endpoint now folds the owning epic's proposed state in; regression added.
+- **selectTaskPlan advertised to non-claimants** [medium]: while a plan claim is active the button appeared for every actor; plan/04's carve-out is for the claimant. The action now requires `claim.actor_id == actor.id`; test asserts a bystander does not get it.
+- **list_work scan chunk** [efficiency]: the refill loop chunked by `limit + 1`, so small pages over mostly-ineligible rows triggered many snapshot rounds. The scan chunk is now `max(limit + 1, 256)`, independent of the page limit (the cursor anchors the last returned item, not the scan position).
+- **Scoped-edge mapping duplicated 4×** [simplification]: graph payloads, bounds check, listDependencies arm and the command's cycle-check edges each restated the level→parent mapping. Single `scope_parent`/`scoped_dependent_clause` source in `queries/graph.rs` now feeds all four.
+- **Claim-expiry predicate re-inlined** [simplification]: the reason emission and actions filter re-tested `expires_at > now`; both now go through `claim_is_active`.
+- Rejected — "multiple active claims collapse in the loader": impossible; the `one_active_claim_per_task` / `one_pending_submission_per_task` partial unique indexes guarantee at most one row per key (comments added citing the invariant).
+- Rejected — "split eligibility.rs (evaluators vs loaders)": the plan/05 module map is authoritative for the final tree (`workflow/{mod,epic,task,eligibility,policy}.rs`) and `commands/hierarchy.rs` sets the size precedent; kept single-file with the pure/storage seam documented.
+
+Post-fix results: `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test --workspace --doc` clean; `cargo test --workspace` 292 green; coverage Unit 97.9% / Integration 100.0% / union 97.9%; `python3 plan/validate.py` PASS.
+
 Next eligible step: [006](006-completion-and-blocking.md).

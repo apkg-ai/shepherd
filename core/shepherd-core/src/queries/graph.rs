@@ -52,6 +52,22 @@ pub(crate) fn dependency_table(level: DependencyLevel) -> &'static str {
     }
 }
 
+// Single source for the level → dependent-parent mapping: every scoped-edge
+// query (graph payloads, bounds, listing, cycle check) derives from this pair
+// so the scope rule cannot drift between call sites.
+pub(crate) fn scope_parent(level: DependencyLevel) -> (&'static str, &'static str) {
+    match level {
+        DependencyLevel::Epic => ("epics", "goal_id"),
+        DependencyLevel::Task => ("tasks", "epic_id"),
+    }
+}
+
+// `dependent_id IN (SELECT id FROM <parent> WHERE <column> = ?N)` fragment.
+pub(crate) fn scoped_dependent_clause(level: DependencyLevel, placeholder: &str) -> String {
+    let (parent, column) = scope_parent(level);
+    format!("dependent_id IN (SELECT id FROM {parent} WHERE {column} = {placeholder})")
+}
+
 pub(crate) fn dependency_from_row(
     level: DependencyLevel,
     row: &SqliteRow,
@@ -107,18 +123,11 @@ async fn scoped_dependencies(
     level: DependencyLevel,
     scope: &Uuid,
 ) -> Result<Vec<Dependency>, DomainError> {
-    let query = AssertSqlSafe(match level {
-        DependencyLevel::Epic => format!(
-            "SELECT {DEPENDENCY_COLUMNS} FROM epic_dependencies \
-             WHERE dependent_id IN (SELECT id FROM epics WHERE goal_id = ?1) \
-             ORDER BY created_at ASC, id ASC"
-        ),
-        DependencyLevel::Task => format!(
-            "SELECT {DEPENDENCY_COLUMNS} FROM task_dependencies \
-             WHERE dependent_id IN (SELECT id FROM tasks WHERE epic_id = ?1) \
-             ORDER BY created_at ASC, id ASC"
-        ),
-    });
+    let query = AssertSqlSafe(format!(
+        "SELECT {DEPENDENCY_COLUMNS} FROM {} WHERE {} ORDER BY created_at ASC, id ASC",
+        dependency_table(level),
+        scoped_dependent_clause(level, "?1"),
+    ));
     sqlx::query(query)
         .bind(scope.to_string())
         .fetch_all(&mut *conn)
@@ -133,18 +142,13 @@ async fn enforce_graph_bounds(
     level: DependencyLevel,
     scope: &Uuid,
 ) -> Result<(), DomainError> {
-    let (node_sql, edge_sql) = match level {
-        DependencyLevel::Epic => (
-            "SELECT COUNT(*) FROM epics WHERE goal_id = ?1",
-            "SELECT COUNT(*) FROM epic_dependencies \
-             WHERE dependent_id IN (SELECT id FROM epics WHERE goal_id = ?1)",
-        ),
-        DependencyLevel::Task => (
-            "SELECT COUNT(*) FROM tasks WHERE epic_id = ?1",
-            "SELECT COUNT(*) FROM task_dependencies \
-             WHERE dependent_id IN (SELECT id FROM tasks WHERE epic_id = ?1)",
-        ),
-    };
+    let (parent, column) = scope_parent(level);
+    let node_sql = AssertSqlSafe(format!("SELECT COUNT(*) FROM {parent} WHERE {column} = ?1"));
+    let edge_sql = AssertSqlSafe(format!(
+        "SELECT COUNT(*) FROM {} WHERE {}",
+        dependency_table(level),
+        scoped_dependent_clause(level, "?1"),
+    ));
     let nodes: i64 = sqlx::query_scalar(node_sql)
         .bind(scope.to_string())
         .fetch_one(&mut *conn)
@@ -177,23 +181,23 @@ fn push_dependency_arm(
     project: &ProjectId,
     scope: Option<&Uuid>,
 ) {
-    let (table, parent_sql) = match level {
-        DependencyLevel::Epic => ("epic_dependencies", "SELECT id FROM epics WHERE goal_id = "),
-        DependencyLevel::Task => ("task_dependencies", "SELECT id FROM tasks WHERE epic_id = "),
-    };
+    let (parent, column) = scope_parent(level);
     builder
         .push("SELECT '")
         .push(level.as_str())
         .push("' AS level, ")
         .push(DEPENDENCY_COLUMNS)
         .push(" FROM ")
-        .push(table)
+        .push(dependency_table(level))
         .push(" WHERE project_id = ")
         .push_bind(project.to_string());
     if let Some(scope) = scope {
         builder
-            .push(" AND dependent_id IN (")
-            .push(parent_sql)
+            .push(" AND dependent_id IN (SELECT id FROM ")
+            .push(parent)
+            .push(" WHERE ")
+            .push(column)
+            .push(" = ")
             .push_bind(scope.to_string())
             .push(")");
     }

@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{
-    Actor, ActorId, ActorKind, Counts, Epic, EpicId, EpicStatus, ProjectId, ReviewPolicy, Task,
-    TaskId, TaskPhase, TaskStatus,
+    Actor, ActorId, ActorKind, Counts, Epic, EpicId, EpicStatus, GoalId, ProjectId, ReviewPolicy,
+    Task, TaskId, TaskPhase, TaskStatus,
 };
 use crate::queries::hierarchy::{
     CountScope, EPIC_COLUMNS, TASK_COLUMNS, epic_from_row, parse_review_policy, project_archived,
@@ -115,6 +115,7 @@ pub struct TaskSnapshot {
     pub epic_status: EpicStatus,
     pub epic_blocked: bool,
     pub epic_archived: bool,
+    pub goal_id: GoalId,
     pub goal_archived: bool,
     pub project_archived: bool,
     pub active_claim: Option<ClaimSnapshot>,
@@ -162,7 +163,9 @@ fn archived_task_resource(snapshot: &TaskSnapshot) -> Option<Uuid> {
         Some(snapshot.task.id.as_uuid())
     } else if snapshot.epic_archived {
         Some(snapshot.task.epic_id.as_uuid())
-    } else if snapshot.goal_archived || snapshot.project_archived {
+    } else if snapshot.goal_archived {
+        Some(snapshot.goal_id.as_uuid())
+    } else if snapshot.project_archived {
         Some(snapshot.task.project_id.as_uuid())
     } else {
         None
@@ -332,7 +335,7 @@ pub fn evaluate_task(snapshot: &TaskSnapshot, actor: &Actor, now: DateTime<Utc>)
         ));
     }
     if let Some(claim) = snapshot.active_claim.as_ref()
-        && claim.expires_at > now
+        && claim_is_active(Some(claim), now)
     {
         reasons.push(GateReason::new(
             GateCode::Claimed,
@@ -397,7 +400,7 @@ fn allowed_task_actions(
     let claim = snapshot
         .active_claim
         .as_ref()
-        .filter(|claim| claim.expires_at > now);
+        .filter(|claim| claim_is_active(Some(claim), now));
     let unclaimed = claim.is_none();
     let pending = snapshot.pending_submission.is_some();
 
@@ -427,13 +430,13 @@ fn allowed_task_actions(
     if flags.can_plan || flags.can_execute || (flags.can_review && actor.kind == ActorKind::Agent) {
         actions.push("claimTask");
     }
-    // Plan claimant may save/select its own output; execute/review claims and
-    // pending reviews block requirement changes (plan/04 FLOW-03).
+    // Only the plan claimant may save/select while its claim is active; execute/
+    // review claims and pending reviews block requirement changes (plan/04 FLOW-03).
     if task.planning_required
         && !terminal
         && epic_live
         && !pending
-        && claim.is_none_or(|claim| claim.phase == "plan")
+        && claim.is_none_or(|claim| claim.phase == "plan" && claim.actor_id == actor.id)
     {
         actions.push("selectTaskPlan");
     }
@@ -693,6 +696,7 @@ pub(crate) async fn load_task_snapshots(
     push_in_list(&mut builder, ids.iter());
     builder.push(")");
     let rows = builder.build().fetch_all(&mut *conn).await?;
+    // one_active_claim_per_task (partial unique index) guarantees one row per key.
     let mut claims: HashMap<Uuid, ClaimSnapshot> = HashMap::new();
     for row in &rows {
         let task_id: String = row.try_get("task_id")?;
@@ -717,6 +721,7 @@ pub(crate) async fn load_task_snapshots(
     push_in_list(&mut builder, ids.iter());
     builder.push(")");
     let rows = builder.build().fetch_all(&mut *conn).await?;
+    // one_pending_submission_per_task (partial unique index) guarantees one row per key.
     let mut submissions: HashMap<Uuid, SubmissionSnapshot> = HashMap::new();
     for row in &rows {
         let task_id: String = row.try_get("task_id")?;
@@ -820,6 +825,7 @@ pub(crate) async fn load_task_snapshots(
                 epic_status: epic.status,
                 epic_blocked: epic.blocked,
                 epic_archived: epic.archived,
+                goal_id: GoalId::from_uuid(epic.goal_id),
                 goal_archived,
                 project_archived: project_is_archived,
                 task,
@@ -1012,6 +1018,7 @@ mod tests {
             epic_status: EpicStatus::Open,
             epic_blocked: false,
             epic_archived: false,
+            goal_id: GoalId::generate(now()),
             goal_archived: false,
             project_archived: false,
             active_claim: None,
@@ -1121,18 +1128,31 @@ mod tests {
 
     #[test]
     fn archived_chain_exits_early_and_empties_actions() {
-        for (task_archived, epic_archived, project_archived) in [
-            (true, false, false),
-            (false, true, false),
-            (false, false, true),
+        for (task_archived, epic_archived, goal_archived, project_archived) in [
+            (true, false, false, false),
+            (false, true, false, false),
+            (false, false, true, false),
+            (false, false, false, true),
         ] {
             let mut task = task();
             task.archived = task_archived;
             let mut snapshot = snapshot(task);
             snapshot.epic_archived = epic_archived;
+            snapshot.goal_archived = goal_archived;
             snapshot.project_archived = project_archived;
             let verdict = evaluate_task(&snapshot, &person(ActorKind::Human), now());
             assert_eq!(codes(&verdict), vec!["archived"]);
+            // The reason points at the archived resource itself.
+            let expected = if task_archived {
+                snapshot.task.id.as_uuid()
+            } else if epic_archived {
+                snapshot.task.epic_id.as_uuid()
+            } else if goal_archived {
+                snapshot.goal_id.as_uuid()
+            } else {
+                snapshot.task.project_id.as_uuid()
+            };
+            assert_eq!(verdict.reasons[0].resource_id, expected);
             assert!(verdict.allowed_actions.is_empty());
         }
     }
@@ -1342,12 +1362,20 @@ mod tests {
         let mut plan_claimed = base.clone();
         let mut plan_claim = claim(ts("2026-09-14T00:05:00Z"));
         plan_claim.phase = "plan".to_string();
+        plan_claim.actor_id = owner.id;
         plan_claimed.active_claim = Some(plan_claim);
         assert!(
             evaluate_task(&plan_claimed, &owner, now())
                 .allowed_actions
                 .contains(&"selectTaskPlan"),
             "plan claimant may save/select its own output"
+        );
+        // Only the claimant gets the button while the plan claim is active.
+        let bystander = person(ActorKind::Human);
+        assert!(
+            !evaluate_task(&plan_claimed, &bystander, now())
+                .allowed_actions
+                .contains(&"selectTaskPlan")
         );
 
         let mut execute_claimed = base.clone();
