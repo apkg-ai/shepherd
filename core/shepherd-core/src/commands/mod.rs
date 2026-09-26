@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{
-    Actor, ActorId, ActorKind, CommandId, DependencyId, EpicId, EventId, GoalId, ProjectId,
-    Revision, TaskId, TaskTypeId,
+    Actor, ActorId, ActorKind, CommandId, DependencyId, DependencyLevel, EpicId, EventId, GoalId,
+    ProjectId, Revision, TaskId, TaskTypeId,
 };
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store, rows};
@@ -84,6 +84,39 @@ pub(crate) fn require_revision(expected: Option<i64>, actual: Revision) -> Resul
     }
 }
 
+// Unexpired active claim or pending submission blocks mutations on the
+// resource; the epic level checks every descendant task (plan/03, plan/04
+// FLOW-03).
+pub(crate) async fn has_active_work(
+    conn: &mut SqliteConnection,
+    level: DependencyLevel,
+    resource: Uuid,
+    now: &str,
+) -> Result<bool, DomainError> {
+    let sql = match level {
+        DependencyLevel::Task => {
+            "SELECT 1 FROM tasks t WHERE t.id = ?1 \
+             AND (EXISTS (SELECT 1 FROM claims c WHERE c.task_id = t.id \
+                  AND c.status = 'active' AND c.expires_at > ?2) \
+              OR EXISTS (SELECT 1 FROM submissions s WHERE s.task_id = t.id \
+                  AND s.status = 'pending')) LIMIT 1"
+        }
+        DependencyLevel::Epic => {
+            "SELECT 1 FROM tasks t WHERE t.epic_id = ?1 \
+             AND (EXISTS (SELECT 1 FROM claims c WHERE c.task_id = t.id \
+                  AND c.status = 'active' AND c.expires_at > ?2) \
+              OR EXISTS (SELECT 1 FROM submissions s WHERE s.task_id = t.id \
+                  AND s.status = 'pending')) LIMIT 1"
+        }
+    };
+    Ok(sqlx::query(sql)
+        .bind(resource.to_string())
+        .bind(now)
+        .fetch_optional(&mut *conn)
+        .await?
+        .is_some())
+}
+
 pub(crate) struct PendingEvent {
     event_type: &'static str,
     // Ownership order (project, goal, epic, task, registry) for deterministic event rows.
@@ -114,23 +147,24 @@ impl PendingEvent {
         }
     }
 
-    pub(crate) fn epic(id: EpicId, revision: Revision) -> Self {
+    // epic/task changes carry the owning goal/epic id in affected_ids (plan/08).
+    pub(crate) fn epic(id: EpicId, revision: Revision, goal: GoalId) -> Self {
         Self {
             event_type: "epic.changed",
             kind_rank: 2,
             resource_id: id.as_uuid(),
             resource_revision: revision.value(),
-            affected_ids: Vec::new(),
+            affected_ids: vec![goal.as_uuid()],
         }
     }
 
-    pub(crate) fn task(id: TaskId, revision: Revision) -> Self {
+    pub(crate) fn task(id: TaskId, revision: Revision, epic: EpicId) -> Self {
         Self {
             event_type: "task.changed",
             kind_rank: 3,
             resource_id: id.as_uuid(),
             resource_revision: revision.value(),
-            affected_ids: Vec::new(),
+            affected_ids: vec![epic.as_uuid()],
         }
     }
 

@@ -604,8 +604,9 @@ mod tests {
         let live = epic(&f, "live").await;
         let archived = epic(&f, "archived").await;
         // Direct-SQL fixture: no public command can archive until step 006.
+        // plan/03 requires terminal before archive, so the epic is completed too.
         sqlx::query(
-            "UPDATE epics SET archived = 1, archive_actor_id = ?1, \
+            "UPDATE epics SET status = 'done', archived = 1, archive_actor_id = ?1, \
              archive_reason = 'shelved', archive_created_at = ?2 WHERE id = ?3",
         )
         .bind(f.owner.id.to_string())
@@ -639,7 +640,8 @@ mod tests {
         let big = epic(&f, "big").await;
         let now = ts_text(&f.clock.now());
         let mut tx = f.store.pool().begin().await.unwrap();
-        // Direct-SQL fixture: contract bound plus one, in a single transaction.
+        // Direct-SQL fixture: the state is ordinary create_task output; raw SQL
+        // exists only for scale — 2001 command transactions would dominate the test.
         for _ in 0..(GRAPH_MAX_NODES + 1) {
             sqlx::query(
                 "INSERT INTO tasks (id, revision, created_at, updated_at, project_id, \

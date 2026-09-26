@@ -431,13 +431,13 @@ fn allowed_task_actions(
     if owner && task.status == TaskStatus::Proposed && epic_live {
         actions.push("acceptTask");
     }
-    if !terminal && task.block.is_none() {
+    if !terminal && epic_live && task.block.is_none() {
         actions.push("blockTask");
     }
     if owner && task.block.is_some() {
         actions.push("unblockTask");
     }
-    if owner && !terminal {
+    if owner && !terminal && epic_live {
         actions.push("cancelTask");
     }
     if owner && task.status == TaskStatus::Cancelled && task.waiver.is_none() && epic_live {
@@ -1139,6 +1139,8 @@ mod tests {
         let verdict = evaluate_task(&snapshot, &person(ActorKind::Human), now());
         assert_eq!(codes(&verdict), vec!["terminal"]);
         assert_eq!(verdict.reasons[0].resource_id, expected);
+        // A nonterminal task under a terminal epic offers no mutations.
+        assert!(verdict.allowed_actions.is_empty());
     }
 
     #[test]

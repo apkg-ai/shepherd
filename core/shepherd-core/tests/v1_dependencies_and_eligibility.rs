@@ -5,8 +5,9 @@ use chrono::{DateTime, Utc};
 use shepherd_core::commands::CommandContext;
 use shepherd_core::error::DomainError;
 use shepherd_core::model::{
-    Actor, ActorId, ActorKind, Clock, CommandId, DependencyCreate, Epic, EpicCreate, EpicId, Goal,
-    GoalCreate, GoalId, Project, ProjectCreate, ProjectId, Task, TaskCreate, TaskId, TestClock,
+    Actor, ActorId, ActorKind, Clock, CommandId, Dependency, DependencyCreate, Epic, EpicCreate,
+    EpicId, Goal, GoalCreate, GoalId, Project, ProjectCreate, ProjectId, Task, TaskCreate, TaskId,
+    TestClock,
 };
 use shepherd_core::queries::{ListParams, WorkFilters, WorkPhase};
 use shepherd_core::storage::rows::{format_ts, insert_actor};
@@ -192,7 +193,12 @@ async fn create_planning_task(
         .value
 }
 
-async fn link_tasks(s: &Setup, project: ProjectId, dependent: TaskId, prerequisite: TaskId) {
+async fn link_tasks(
+    s: &Setup,
+    project: ProjectId,
+    dependent: TaskId,
+    prerequisite: TaskId,
+) -> Dependency {
     s.store
         .create_dependency(
             ctx(&s.owner, s.clock.now(), None),
@@ -203,7 +209,8 @@ async fn link_tasks(s: &Setup, project: ProjectId, dependent: TaskId, prerequisi
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .value
 }
 
 async fn link_epics(s: &Setup, project: ProjectId, dependent: EpicId, prerequisite: EpicId) {
@@ -409,9 +416,10 @@ async fn candidate_waits_until_every_prerequisite_done() {
     let p1 = create_task(&s, project.id, epic.id, "p1").await;
     let p2 = create_task(&s, project.id, epic.id, "p2").await;
     let p3 = create_task(&s, project.id, epic.id, "p3").await;
-    for prerequisite in [&p1, &p2, &p3] {
+    for prerequisite in [&p1, &p2] {
         link_tasks(&s, project.id, waiting.id, prerequisite.id).await;
     }
+    let p3_link = link_tasks(&s, project.id, waiting.id, p3.id).await;
 
     assert!(
         !work_ids(&s, &project.id, WorkPhase::Execute)
@@ -450,6 +458,7 @@ async fn candidate_waits_until_every_prerequisite_done() {
     );
 
     // Cancelled — even waived — prerequisites remain unmet (plan/04).
+    // Direct-SQL fixture: cancellation and waiver commands land in step 006.
     mark_task_done(&s, p2.id).await;
     sqlx::query(
         "UPDATE tasks SET status = 'cancelled', phase = 'complete', \
@@ -469,17 +478,16 @@ async fn candidate_waits_until_every_prerequisite_done() {
             .contains(&waiting.id)
     );
 
-    // Every prerequisite done: the candidate becomes eligible.
-    sqlx::query(
-        "UPDATE tasks SET status = 'done', cancellation_actor_id = NULL, \
-         cancellation_reason = NULL, cancellation_created_at = NULL, \
-         waiver_actor_id = NULL, waiver_reason = NULL, waiver_created_at = NULL \
-         WHERE id = ?1",
-    )
-    .bind(p3.id.to_string())
-    .execute(s.store.pool())
-    .await
-    .unwrap();
+    // Cancellation is terminal (plan/03): no future command can flip a
+    // cancelled prerequisite to done, so the owner removes the obsolete link.
+    s.store
+        .delete_dependency(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            project.id,
+            p3_link.id,
+        )
+        .await
+        .unwrap();
     assert_eq!(
         work_ids(&s, &project.id, WorkPhase::Execute).await,
         vec![waiting.id]

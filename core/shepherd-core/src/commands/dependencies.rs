@@ -2,8 +2,8 @@ use sqlx::{AssertSqlSafe, SqliteConnection};
 use uuid::Uuid;
 
 use super::{
-    CommandContext, CommandResult, PendingEvent, append_events, live_actor, require_owner,
-    require_revision,
+    CommandContext, CommandResult, PendingEvent, append_events, has_active_work, live_actor,
+    require_owner, require_revision,
 };
 use crate::dag;
 use crate::error::DomainError;
@@ -47,7 +47,10 @@ async fn task_endpoint(
     Ok(Endpoint {
         id,
         revision: task.revision,
-        terminal: task.status.is_terminal(),
+        // The dependent must be live at both levels (plan/04 base); the epic
+        // terminal fold only ever gates the dependent — a terminal
+        // prerequisite is allowed.
+        terminal: task.status.is_terminal() || epic.status.is_terminal(),
         // Accepted means neither the task nor its owning epic is proposed (plan/04).
         proposed: task.status == crate::model::TaskStatus::Proposed
             || epic.status == crate::model::EpicStatus::Proposed,
@@ -89,38 +92,6 @@ async fn load_endpoint(
     }
 }
 
-// Dependent claimed or pending review blocks any dependency mutation; the epic
-// level checks every descendant task (plan/03, plan/04 FLOW-03).
-async fn dependent_has_active_work(
-    conn: &mut SqliteConnection,
-    level: DependencyLevel,
-    dependent: Uuid,
-    now: &str,
-) -> Result<bool, DomainError> {
-    let sql = match level {
-        DependencyLevel::Task => {
-            "SELECT 1 FROM tasks t WHERE t.id = ?1 \
-             AND (EXISTS (SELECT 1 FROM claims c WHERE c.task_id = t.id \
-                  AND c.status = 'active' AND c.expires_at > ?2) \
-              OR EXISTS (SELECT 1 FROM submissions s WHERE s.task_id = t.id \
-                  AND s.status = 'pending')) LIMIT 1"
-        }
-        DependencyLevel::Epic => {
-            "SELECT 1 FROM tasks t WHERE t.epic_id = ?1 \
-             AND (EXISTS (SELECT 1 FROM claims c WHERE c.task_id = t.id \
-                  AND c.status = 'active' AND c.expires_at > ?2) \
-              OR EXISTS (SELECT 1 FROM submissions s WHERE s.task_id = t.id \
-                  AND s.status = 'pending')) LIMIT 1"
-        }
-    };
-    Ok(sqlx::query(sql)
-        .bind(dependent.to_string())
-        .bind(now)
-        .fetch_optional(&mut *conn)
-        .await?
-        .is_some())
-}
-
 // Guards shared by create and delete, in failure-precedence order
 // (archived → terminal → active-work), after membership/capability/revision.
 async fn guard_mutation(
@@ -139,7 +110,7 @@ async fn guard_mutation(
     if dependent.terminal {
         return Err(DomainError::TerminalScope);
     }
-    if dependent_has_active_work(conn, level, dependent.id, now).await? {
+    if has_active_work(conn, level, dependent.id, now).await? {
         return Err(DomainError::ActiveWork(
             "dependent work has an active claim or pending submission".into(),
         ));
@@ -189,20 +160,24 @@ fn endpoint_events(
             PendingEvent::epic(
                 crate::model::EpicId::from_uuid(dependent.id),
                 dependent_revision,
+                crate::model::GoalId::from_uuid(dependent.scope),
             ),
             PendingEvent::epic(
                 crate::model::EpicId::from_uuid(prerequisite.id),
                 prerequisite_revision,
+                crate::model::GoalId::from_uuid(prerequisite.scope),
             ),
         ],
         DependencyLevel::Task => vec![
             PendingEvent::task(
                 crate::model::TaskId::from_uuid(dependent.id),
                 dependent_revision,
+                crate::model::EpicId::from_uuid(dependent.scope),
             ),
             PendingEvent::task(
                 crate::model::TaskId::from_uuid(prerequisite.id),
                 prerequisite_revision,
+                crate::model::EpicId::from_uuid(prerequisite.scope),
             ),
         ],
     }
@@ -662,6 +637,20 @@ mod tests {
                 s.epic.id.to_string()
             ]
         );
+        // Endpoint events name the owning epic (plan/08).
+        let endpoint_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT affected_ids FROM events WHERE type = 'task.changed' \
+             AND command_id = (SELECT command_id FROM events \
+                 WHERE type = 'dependency.changed') ORDER BY id",
+        )
+        .fetch_all(f.store.pool())
+        .await
+        .unwrap();
+        assert_eq!(endpoint_ids.len(), 2);
+        for ids in &endpoint_ids {
+            let ids: Vec<String> = serde_json::from_str(ids).unwrap();
+            assert_eq!(ids, vec![s.epic.id.to_string()]);
+        }
     }
 
     #[tokio::test]
@@ -693,6 +682,20 @@ mod tests {
                 .unwrap();
         let affected: Vec<String> = serde_json::from_str(&affected).unwrap();
         assert_eq!(affected[2], g.id.to_string());
+        // Endpoint events name the owning goal (plan/08).
+        let endpoint_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT affected_ids FROM events WHERE type = 'epic.changed' \
+             AND command_id = (SELECT command_id FROM events \
+                 WHERE type = 'dependency.changed') ORDER BY id",
+        )
+        .fetch_all(f.store.pool())
+        .await
+        .unwrap();
+        assert_eq!(endpoint_ids.len(), 2);
+        for ids in &endpoint_ids {
+            let ids: Vec<String> = serde_json::from_str(ids).unwrap();
+            assert_eq!(ids, vec![g.id.to_string()]);
+        }
     }
 
     #[tokio::test]
@@ -962,6 +965,22 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, DomainError::TerminalScope));
         link_tasks(&f, s.project.id, s.a.id, s.b.id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn terminal_owning_epic_blocks_the_dependent_task() {
+        let f = fixture().await;
+        let s = scope(&f).await;
+        // Direct-SQL fixture: epic completion lands in step 006.
+        sqlx::query("UPDATE epics SET status = 'done' WHERE id = ?1")
+            .bind(s.epic.id.to_string())
+            .execute(f.store.pool())
+            .await
+            .unwrap();
+        let err = link_tasks(&f, s.project.id, s.a.id, s.b.id)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::TerminalScope));
     }
 
     #[tokio::test]

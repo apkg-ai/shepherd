@@ -89,8 +89,12 @@ impl Store {
         let filter = work_filter(project, phase, filters, actor);
         let mut after = decode_after(params, "listWork", &filter)?;
         let now = self.clock().now();
+        let now_text = format_ts(&now);
 
         // SQL prefilters a strict superset of eligible rows; the evaluator decides.
+        // Blocked and actively-claimed candidates are excludable here because
+        // every phase's eligibility requires unblocked and unclaimed; pending
+        // submissions stay in the superset (review eligibility needs them).
         // The refill loop keysets over candidates while the emitted cursor anchors
         // the last returned item, so post-filter pagination stays deterministic.
         // The scan chunk stays independent of the page limit so a small page over
@@ -102,6 +106,13 @@ impl Store {
                 QueryBuilder::<Sqlite>::new("SELECT id, created_at FROM tasks WHERE project_id = ");
             builder.push_bind(project.to_string());
             builder.push(" AND archived = 0 AND status IN ('open', 'active')");
+            builder
+                .push(
+                    " AND block_actor_id IS NULL AND NOT EXISTS (SELECT 1 FROM claims c \
+                 WHERE c.task_id = tasks.id AND c.status = 'active' AND c.expires_at > ",
+                )
+                .push_bind(now_text.clone())
+                .push(")");
             match phase {
                 WorkPhase::Plan => builder.push(" AND phase = 'planning'"),
                 WorkPhase::Execute => builder.push(" AND phase = 'execution'"),
@@ -531,7 +542,8 @@ mod tests {
         register(&f.store, &reviewer).await;
         let reviewed = task(&f, "reviewed").await;
         let now = format_ts(&f.clock.now());
-        // Direct-SQL fixture: sessions/submissions get commands in steps 010/011.
+        // Direct-SQL fixture: sessions/submissions get commands in steps 010/011;
+        // the task's phase transition lands with the report commands in step 011.
         let session_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
         let mut tx = f.store.pool().begin().await.unwrap();
         sqlx::query(
