@@ -2,8 +2,8 @@ use sqlx::{AssertSqlSafe, SqliteConnection};
 use uuid::Uuid;
 
 use super::{
-    CommandContext, CommandResult, PendingEvent, append_events, has_active_work, live_actor,
-    require_owner, require_revision,
+    CommandContext, CommandResult, PendingEvent, append_events, epic_has_active_work, live_actor,
+    require_owner, require_revision, task_has_active_work,
 };
 use crate::dag;
 use crate::error::DomainError;
@@ -94,15 +94,21 @@ async fn load_endpoint(
 
 // Guards shared by create and delete, in failure-precedence order
 // (archived → terminal → active-work), after membership/capability/revision.
+// The prerequisite's archived chain gates creation only: an archived
+// prerequisite can never become done, so its links must stay removable or the
+// live dependent is trapped forever (plan/03 guards the dependent).
 async fn guard_mutation(
     conn: &mut SqliteConnection,
     project: &ProjectId,
     level: DependencyLevel,
     dependent: &Endpoint,
-    prerequisite: &Endpoint,
+    prerequisite: Option<&Endpoint>,
     now: &str,
 ) -> Result<(), DomainError> {
-    if project_archived(conn, project).await? || dependent.archived || prerequisite.archived {
+    if project_archived(conn, project).await?
+        || dependent.archived
+        || prerequisite.is_some_and(|endpoint| endpoint.archived)
+    {
         return Err(DomainError::ArchivedScope);
     }
     // Prerequisite terminal is allowed: a done edge is immediately satisfied and
@@ -110,7 +116,15 @@ async fn guard_mutation(
     if dependent.terminal {
         return Err(DomainError::TerminalScope);
     }
-    if has_active_work(conn, level, dependent.id, now).await? {
+    let busy = match level {
+        DependencyLevel::Task => {
+            task_has_active_work(conn, crate::model::TaskId::from_uuid(dependent.id), now).await?
+        }
+        DependencyLevel::Epic => {
+            epic_has_active_work(conn, crate::model::EpicId::from_uuid(dependent.id), now).await?
+        }
+    };
+    if busy {
         return Err(DomainError::ActiveWork(
             "dependent work has an active claim or pending submission".into(),
         ));
@@ -210,7 +224,15 @@ impl Store {
                 let dependent = load_endpoint(tx, &project, level, dependent_id).await?;
                 let prerequisite = load_endpoint(tx, &project, level, prerequisite_id).await?;
                 let now_text = format_ts(&ctx.now);
-                guard_mutation(tx, &project, level, &dependent, &prerequisite, &now_text).await?;
+                guard_mutation(
+                    tx,
+                    &project,
+                    level,
+                    &dependent,
+                    Some(&prerequisite),
+                    &now_text,
+                )
+                .await?;
                 // Agents may only link accepted dependent work (plan/03).
                 if actor.kind == ActorKind::Agent && dependent.proposed {
                     return Err(DomainError::InvalidState(
@@ -336,7 +358,8 @@ impl Store {
                 let prerequisite =
                     load_endpoint(tx, &project, level, current.prerequisite_id).await?;
                 let now_text = format_ts(&ctx.now);
-                guard_mutation(tx, &project, level, &dependent, &prerequisite, &now_text).await?;
+                // None: an archived prerequisite must not trap the live dependent.
+                guard_mutation(tx, &project, level, &dependent, None, &now_text).await?;
 
                 let delete = AssertSqlSafe(format!(
                     "DELETE FROM {} WHERE id = ?1",
@@ -1012,6 +1035,47 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(d_err, DomainError::ArchivedScope));
+    }
+
+    #[tokio::test]
+    async fn archived_prerequisite_blocks_new_links_but_stays_removable() {
+        let f = fixture().await;
+        let s = scope(&f).await;
+        let created = link_tasks(&f, s.project.id, s.a.id, s.b.id).await.unwrap();
+        // Direct-SQL fixture: completion (006) then archive (006) of the
+        // prerequisite only; the dependent and its chain stay live.
+        sqlx::query(
+            "UPDATE tasks SET status = 'done', phase = 'complete', archived = 1, \
+             archive_actor_id = ?1, archive_reason = 'done', archive_created_at = ?2 \
+             WHERE id = ?3",
+        )
+        .bind(f.owner.id.to_string())
+        .bind(format_ts(&f.clock.now()))
+        .bind(s.b.id.to_string())
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+
+        let c = task(&f, s.project.id, s.epic.id, "c").await;
+        let err = link_tasks(&f, s.project.id, c.id, s.b.id)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
+
+        // The live dependent is never trapped behind an archived prerequisite.
+        f.store
+            .delete_dependency(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project.id,
+                created.value.id,
+            )
+            .await
+            .unwrap();
+        let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM task_dependencies")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 
     #[tokio::test]

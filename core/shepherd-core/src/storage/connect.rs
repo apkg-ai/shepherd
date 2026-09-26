@@ -18,6 +18,10 @@ pub const EXPORT_VERSION: &str = "2.0.0";
 
 pub(crate) const BASELINE_SQL: &str = include_str!("../../migrations/20260914000001_baseline.sql");
 const BASELINE_VERSION: i64 = 20_260_914_000_001;
+// Applied migrations are checksum-locked; schema additions land as new files.
+const PROJECT_SCOPE_INDEXES_SQL: &str =
+    include_str!("../../migrations/20260926000001_project_scope_indexes.sql");
+const PROJECT_SCOPE_INDEXES_VERSION: i64 = 20_260_926_000_001;
 const SQLITE_MAGIC: &[u8] = b"SQLite format 3\0";
 // SQLite file format: 100-byte header, application_id big-endian at offset 68.
 const HEADER_LEN: usize = 100;
@@ -284,13 +288,22 @@ async fn build_pool(path: &Path) -> Result<SqlitePool, StorageError> {
 }
 
 fn migrator() -> Migrator {
-    Migrator::with_migrations(vec![Migration::new(
-        BASELINE_VERSION,
-        "baseline".into(),
-        MigrationType::Simple,
-        BASELINE_SQL.into_sql_str(),
-        false,
-    )])
+    Migrator::with_migrations(vec![
+        Migration::new(
+            BASELINE_VERSION,
+            "baseline".into(),
+            MigrationType::Simple,
+            BASELINE_SQL.into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            PROJECT_SCOPE_INDEXES_VERSION,
+            "project_scope_indexes".into(),
+            MigrationType::Simple,
+            PROJECT_SCOPE_INDEXES_SQL.into_sql_str(),
+            false,
+        ),
+    ])
 }
 
 async fn verify_identity(pool: &SqlitePool) -> Result<(), StorageError> {
@@ -414,7 +427,41 @@ mod tests {
             .fetch_one(pool)
             .await
             .unwrap();
-        assert_eq!(applied, 1);
+        // Baseline plus the step 005 project-scope indexes.
+        assert_eq!(applied, 2);
+    }
+
+    // A database created before the index migration existed upgrades in place:
+    // the locked baseline checksum still matches and only the new file applies.
+    #[tokio::test]
+    async fn index_migration_applies_over_an_existing_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = build_pool(&dir.path().join("shepherd.db")).await.unwrap();
+        Migrator::with_migrations(vec![Migration::new(
+            BASELINE_VERSION,
+            "baseline".into(),
+            MigrationType::Simple,
+            BASELINE_SQL.into_sql_str(),
+            false,
+        )])
+        .run(&pool)
+        .await
+        .unwrap();
+
+        migrator().run(&pool).await.unwrap();
+        let applied: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(applied, 2);
+        let index: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'epics_project'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert!(index.is_some());
+        pool.close().await;
     }
 
     #[tokio::test]

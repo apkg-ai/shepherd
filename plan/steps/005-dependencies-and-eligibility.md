@@ -141,4 +141,16 @@ Rejected on evidence: a claimed missing `dependent_id` index (the `UNIQUE(depend
 
 Post-review results: `cargo fmt --check` / `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo test --workspace` 297 green; `python3 plan/validate.py` PASS; contract gates (smoke, operation freeze, v1 baseline) PASS; semgrep (p/rust, p/default) 0 findings; shellcheck clean.
 
+### Review follow-ups (final pre-merge review)
+
+A last high-effort review of the accumulated branch produced six findings; four fixed, two re-rejected:
+
+- **Baseline migration edited in place** [high]: the full-codebase-review round added three project-scope indexes by editing the applied `20260914000001_baseline.sql`, changing its checksum — sqlx validates applied migrations, so every pre-existing database would fail to open with `VersionMismatch` (violating "never break the user's existing database"). Reverted the baseline; the indexes now ship as `20260926000001_project_scope_indexes.sql`, registered as a second migration. The line-identical schema guard became a structural one (`applied_migrations_match_contract_schema`: apply all migrations vs `plan/contracts/schema.sql`, compare `sqlite_master` objects) so it stays valid as migrations accrue; `index_migration_applies_over_an_existing_baseline` regresses the exact brick scenario.
+- **Archived prerequisite trapped the live dependent** [medium]: `delete_dependency` reused the create guard, so an archived (never-again-done) prerequisite made its edge permanently unremovable and the dependent permanently ineligible. The prerequisite's archived chain now gates creation only; removal checks project + dependent (plan/03 guards the dependent). The delete still bumps both endpoints. Regression: `archived_prerequisite_blocks_new_links_but_stays_removable`.
+- **listDependencies returned empty pages for unknown scopes** [medium]: `scope_id` membership is now validated per level (goal for epic, epic for task, either when level is absent) → `NotFound`, matching every sibling list's route-membership precedence. Tests extended.
+- **Active-work predicate duplicated / DependencyLevel misused as resource kind** [simplification ×2]: one `active_work_predicate` fragment plus named `task_has_active_work`/`epic_has_active_work` helpers replace the twin match arms; `update_task` no longer imports `DependencyLevel`; the epic-snapshot busy query reuses the fragment via numbered placeholders. The listWork SQL prefilter keeps its own (claims-only, negated) clause deliberately: it is a superset optimization, the evaluator stays authoritative.
+- Re-rejected: splitting `eligibility.rs` (plan/05 module map + `hierarchy.rs` precedent, as before).
+
+Post-fix results: `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test --workspace --doc` clean; `cargo test --workspace` 299 green; coverage Unit 98.0% / Integration 100.0% / union 98.0%; `python3 plan/validate.py` PASS.
+
 Next eligible step: [006](006-completion-and-blocking.md).

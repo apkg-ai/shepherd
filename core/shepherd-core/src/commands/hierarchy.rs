@@ -1,14 +1,14 @@
 use super::{
-    CommandContext, CommandResult, PendingEvent, append_events, has_active_work, live_actor,
-    require_owner, require_revision,
+    CommandContext, CommandResult, PendingEvent, append_events, live_actor, require_owner,
+    require_revision, task_has_active_work,
 };
 use crate::error::DomainError;
 use crate::model::{
-    BUILTIN_TASK_TYPES, DESCRIPTION_MAX_CHARS, DependencyLevel, Epic, EpicCreate, EpicId,
-    EpicStatus, Goal, GoalCreate, GoalId, NAME_MAX_CHARS, Project, ProjectCreate, ProjectId,
-    ProjectPatch, ProjectSettings, Revision, Task, TaskCreate, TaskId, TaskPatch, TaskType,
-    TaskTypeCreate, TaskTypeId, TaskTypePatch, TextPatch, validate_long_text,
-    validate_required_text, validate_type_key, validate_type_label,
+    BUILTIN_TASK_TYPES, DESCRIPTION_MAX_CHARS, Epic, EpicCreate, EpicId, EpicStatus, Goal,
+    GoalCreate, GoalId, NAME_MAX_CHARS, Project, ProjectCreate, ProjectId, ProjectPatch,
+    ProjectSettings, Revision, Task, TaskCreate, TaskId, TaskPatch, TaskType, TaskTypeCreate,
+    TaskTypeId, TaskTypePatch, TextPatch, validate_long_text, validate_required_text,
+    validate_type_key, validate_type_label,
 };
 use crate::queries::hierarchy::{
     epic_row, find_epic, find_goal, find_project, find_task, find_task_type, goal_row,
@@ -688,7 +688,7 @@ impl Store {
                 }
                 // No edit while a claim is held or a review is pending (plan/03).
                 let now_text = format_ts(&ctx.now);
-                if has_active_work(tx, DependencyLevel::Task, task.as_uuid(), &now_text).await? {
+                if task_has_active_work(tx, task, &now_text).await? {
                     return Err(DomainError::ActiveWork(
                         "task has an active claim or pending submission".into(),
                     ));

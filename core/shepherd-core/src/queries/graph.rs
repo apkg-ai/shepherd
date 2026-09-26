@@ -8,7 +8,9 @@ use crate::model::{
     Actor, Counts, Dependency, DependencyId, DependencyLevel, EntityStatus, EpicId, GoalId,
     ProjectId, Revision, TaskId,
 };
-use crate::queries::hierarchy::{epic_row, filter_token, goal_row, project_exists};
+use crate::queries::hierarchy::{
+    epic_exists, epic_row, filter_token, goal_exists, goal_row, project_exists,
+};
 use crate::storage::rows::{format_ts, parse_ts, parse_uuid};
 use crate::storage::{StorageError, Store};
 use crate::workflow::eligibility::{
@@ -312,9 +314,27 @@ impl Store {
     ) -> Result<Page<Dependency>, DomainError> {
         let limit = effective_limit(params)?;
         let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
-        // Route membership before cursor validity (plan/04): unknown project is 404.
+        // Route membership before cursor validity (plan/04): unknown project or
+        // scope is 404, matching the sibling list endpoints.
         if !project_exists(&mut tx, project).await? {
             return Err(DomainError::NotFound);
+        }
+        if let Some(scope) = filters.scope_id {
+            let known = match filters.level {
+                Some(DependencyLevel::Epic) => {
+                    goal_exists(&mut tx, project, &GoalId::from_uuid(scope)).await?
+                }
+                Some(DependencyLevel::Task) => {
+                    epic_exists(&mut tx, project, &EpicId::from_uuid(scope)).await?
+                }
+                None => {
+                    goal_exists(&mut tx, project, &GoalId::from_uuid(scope)).await?
+                        || epic_exists(&mut tx, project, &EpicId::from_uuid(scope)).await?
+                }
+            };
+            if !known {
+                return Err(DomainError::NotFound);
+            }
         }
         let filter = dependencies_filter(project, filters);
         let after = decode_after(params, "listDependencies", &filter)?;
@@ -699,6 +719,48 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, DomainError::NotFound));
+
+        // An unknown scope — or one of the wrong kind for the level — is 404,
+        // never an empty page.
+        for filters in [
+            DependencyListFilters {
+                level: Some(DependencyLevel::Task),
+                scope_id: Some(EpicId::generate(f.clock.now()).as_uuid()),
+            },
+            DependencyListFilters {
+                level: Some(DependencyLevel::Task),
+                scope_id: Some(f.goal.as_uuid()),
+            },
+            DependencyListFilters {
+                level: Some(DependencyLevel::Epic),
+                scope_id: Some(GoalId::generate(f.clock.now()).as_uuid()),
+            },
+            DependencyListFilters {
+                level: None,
+                scope_id: Some(TaskId::generate(f.clock.now()).as_uuid()),
+            },
+        ] {
+            let err = f
+                .store
+                .list_dependencies(&f.project, &filters, &ListParams::default())
+                .await
+                .unwrap_err();
+            assert!(matches!(err, DomainError::NotFound));
+        }
+        // A known scope with no matching rows is an empty page, not 404.
+        let page = f
+            .store
+            .list_dependencies(
+                &f.project,
+                &DependencyListFilters {
+                    level: None,
+                    scope_id: Some(f.goal.as_uuid()),
+                },
+                &ListParams::default(),
+            )
+            .await
+            .unwrap();
+        assert!(page.items.is_empty());
     }
 
     #[tokio::test]

@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
-use sqlx::{QueryBuilder, Row, Sqlite, SqliteConnection};
+use sqlx::{AssertSqlSafe, QueryBuilder, Row, Sqlite, SqliteConnection};
 use uuid::Uuid;
 
 use crate::error::DomainError;
@@ -939,20 +939,20 @@ pub(crate) async fn load_epic_snapshots(
     let uuids: Vec<Uuid> = ids.iter().map(EpicId::as_uuid).collect();
     let counts = task_counts_by(conn, CountScope::Epic, &uuids).await?;
 
-    let mut builder =
-        QueryBuilder::<Sqlite>::new("SELECT DISTINCT t.epic_id FROM tasks t WHERE t.epic_id IN (");
-    push_in_list(&mut builder, ids.iter());
-    builder
-        .push(
-            ") AND (EXISTS (SELECT 1 FROM claims c WHERE c.task_id = t.id \
-             AND c.status = 'active' AND c.expires_at > ",
-        )
-        .push_bind(format_ts(&now))
-        .push(
-            ") OR EXISTS (SELECT 1 FROM submissions s WHERE s.task_id = t.id \
-             AND s.status = 'pending'))",
-        );
-    let rows = builder.build().fetch_all(&mut *conn).await?;
+    let placeholders: Vec<String> = (1..=ids.len()).map(|index| format!("?{index}")).collect();
+    let busy_query = AssertSqlSafe(format!(
+        "SELECT DISTINCT t.epic_id FROM tasks t WHERE t.epic_id IN ({}) AND {}",
+        placeholders.join(", "),
+        crate::commands::active_work_predicate(&format!("?{}", ids.len() + 1)),
+    ));
+    let mut busy_query = sqlx::query(busy_query);
+    for id in ids {
+        busy_query = busy_query.bind(id.to_string());
+    }
+    let rows = busy_query
+        .bind(format_ts(&now))
+        .fetch_all(&mut *conn)
+        .await?;
     let mut busy: HashSet<Uuid> = HashSet::new();
     for row in &rows {
         let id: String = row.try_get("epic_id")?;

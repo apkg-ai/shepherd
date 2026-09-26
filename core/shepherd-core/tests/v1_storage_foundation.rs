@@ -106,7 +106,8 @@ async fn reopening_v1_database_preserves_data_without_new_migrations() {
         .fetch_one(store.pool())
         .await
         .unwrap();
-    assert_eq!(migrations, 1);
+    // Baseline plus the step 005 project-scope indexes; a reopen adds nothing.
+    assert_eq!(migrations, 2);
 }
 
 async fn assert_rejection_leaves_bytes_untouched(dir: &tempfile::TempDir, db_name: &str) {
@@ -467,20 +468,51 @@ async fn idempotency_lookup_honors_ttl_with_test_clock() {
     );
 }
 
-#[test]
-fn baseline_migration_matches_contract_schema() {
-    fn normalized(path: &Path) -> Vec<String> {
-        std::fs::read_to_string(path)
-            .unwrap()
-            .lines()
-            .map(str::trim_end)
-            .filter(|line| !line.is_empty() && !line.starts_with("--"))
-            .map(str::to_string)
-            .collect()
+// Structural equivalence: applying every migration in order must produce
+// exactly the objects the contract schema declares (applied migrations are
+// checksum-locked, so additions land as new files rather than baseline edits).
+#[tokio::test]
+async fn applied_migrations_match_contract_schema() {
+    async fn schema_objects(sources: Vec<String>) -> Vec<(String, String, String)> {
+        let mut conn = SqliteConnectOptions::new()
+            .in_memory(true)
+            .connect()
+            .await
+            .unwrap();
+        for source in sources {
+            // Trusted repo files; raw_sql requires an owned SqlSafeStr.
+            sqlx::raw_sql(sqlx::AssertSqlSafe(source))
+                .execute(&mut conn)
+                .await
+                .unwrap();
+        }
+        let objects = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT type, name, COALESCE(sql, '') FROM sqlite_master \
+             WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+        )
+        .fetch_all(&mut conn)
+        .await
+        .unwrap();
+        conn.close().await.unwrap();
+        objects
     }
+
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let migration = normalized(&manifest.join("migrations/20260914000001_baseline.sql"));
-    let contract = normalized(&manifest.join("../../plan/contracts/schema.sql"));
-    assert!(!migration.is_empty());
-    assert_eq!(migration, contract);
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(manifest.join("migrations"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    paths.sort();
+    let migrations: Vec<String> = paths
+        .iter()
+        .map(|path| std::fs::read_to_string(path).unwrap())
+        .collect();
+    assert!(!migrations.is_empty());
+    let contract =
+        vec![std::fs::read_to_string(manifest.join("../../plan/contracts/schema.sql")).unwrap()];
+
+    let migrated = schema_objects(migrations).await;
+    let declared = schema_objects(contract).await;
+    assert!(!migrated.is_empty());
+    assert_eq!(migrated, declared);
 }
