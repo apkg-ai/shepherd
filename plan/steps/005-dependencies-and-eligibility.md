@@ -1,6 +1,6 @@
 # 005 — Scoped dependencies and pure eligibility
 
-Status: implemented on branch `v1-005-dependencies-and-eligibility` (PR pending). Requirements: DEP-01 FLOW-02.
+Status: complete (merged, PR #86). Requirements: DEP-01 FLOW-02.
 
 ## Objective and prerequisites
 
@@ -68,7 +68,7 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Implementation handoff record
 
-Branch `v1-005-dependencies-and-eligibility` (PR pending).
+Branch `v1-005-dependencies-and-eligibility` (merged, PR #86).
 
 ### Files changed
 

@@ -210,6 +210,80 @@ pub mod testing {
             codec: Arc::new(TestCodec::new(Arc::new(TestKeyProvider([3; 32])))),
         }
     }
+
+    fn test_uuid() -> String {
+        uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string()
+    }
+
+    /// Direct-SQL claim fixture: no public command can claim until step 009.
+    pub async fn seed_claim(
+        pool: &sqlx::SqlitePool,
+        task: crate::model::TaskId,
+        actor: crate::model::ActorId,
+        phase: &str,
+        status: &str,
+        acquired_at: &str,
+        expires_at: &str,
+    ) -> String {
+        let id = test_uuid();
+        sqlx::query(
+            "INSERT INTO claims (id, task_id, actor_id, phase, acquired_at, expires_at, \
+             status, task_revision, lease_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, 'hash')",
+        )
+        .bind(&id)
+        .bind(task.to_string())
+        .bind(actor.to_string())
+        .bind(phase)
+        .bind(acquired_at)
+        .bind(expires_at)
+        .bind(status)
+        .execute(pool)
+        .await
+        .unwrap();
+        id
+    }
+
+    /// Direct-SQL session + submission fixture: commands land in steps 010/011.
+    pub async fn seed_submission(
+        pool: &sqlx::SqlitePool,
+        task: crate::model::TaskId,
+        producer: crate::model::ActorId,
+        status: &str,
+        now: &str,
+    ) -> String {
+        let session = test_uuid();
+        let id = test_uuid();
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query(
+            "INSERT INTO sessions (id, task_id, claim_id, actor_id, phase, started_at, \
+             ended_at, outcome, summary, failure_reason, document_revision_ids, links) \
+             VALUES (?1, ?2, 'claim', ?3, 'execute', ?4, ?4, 'succeeded', '', '', '[]', '[]')",
+        )
+        .bind(&session)
+        .bind(task.to_string())
+        .bind(producer.to_string())
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO submissions (id, revision, created_at, updated_at, task_id, kind, \
+             producer_id, document_revision_ids, session_id, policy, status, \
+             created_context_revision) VALUES (?1, 1, ?2, ?2, ?3, 'work', ?4, '[]', ?5, \
+             'human', ?6, 1)",
+        )
+        .bind(&id)
+        .bind(now)
+        .bind(task.to_string())
+        .bind(producer.to_string())
+        .bind(&session)
+        .bind(status)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        id
+    }
 }
 
 #[cfg(test)]

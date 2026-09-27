@@ -18,7 +18,7 @@ Retain audit events indefinitely in v1; replay accepts only last 7 days, allowin
 |---|---|
 | project.changed | project registry, project detail/settings |
 | goal.changed | goal list/detail, project counts |
-| epic.changed | epic detail/list, goal graph/counts, project counts, work list |
+| epic.changed | epic detail/list, goal graph/counts, project counts, work list, task contexts/eligibility in the epic and its dependent epics |
 | task.changed | task detail/list/context, epic graph/counts, work and proposal/review queues |
 | dependency.changed | scoped graph, dependency lists, affected contexts/work/eligibility |
 | claim.changed | claims, task/context, work and review queues; status style without relayout |

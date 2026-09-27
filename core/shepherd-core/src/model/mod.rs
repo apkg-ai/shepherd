@@ -10,7 +10,7 @@ pub use project::{
     ReviewPolicy, TaskType, TaskTypeCreate, TaskTypeId, TaskTypePatch,
 };
 pub(crate) use project::{
-    DESCRIPTION_MAX_CHARS, NAME_MAX_CHARS, validate_type_key, validate_type_label,
+    DESCRIPTION_MAX_CHARS, NAME_MAX_CHARS, REASON_MAX_CHARS, validate_type_key, validate_type_label,
 };
 pub use task::{Task, TaskCreate, TaskId, TaskPatch, TaskPhase, TaskStatus};
 

@@ -3,21 +3,19 @@ use uuid::Uuid;
 
 use super::{
     CommandContext, CommandResult, PendingEvent, append_events, epic_has_active_work, live_actor,
-    require_owner, require_revision, task_has_active_work,
+    missing_after_write, require_owner, require_revision, task_has_active_work,
 };
 use crate::dag;
 use crate::error::DomainError;
 use crate::model::{
-    ActorKind, Dependency, DependencyCreate, DependencyId, DependencyLevel, ProjectId, Revision,
+    ActorKind, Dependency, DependencyCreate, DependencyId, DependencyLevel, EpicId, ProjectId,
+    Revision,
 };
 use crate::queries::graph::{dependency_table, find_dependency, scoped_dependent_clause};
 use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
 use crate::storage::rows::format_ts;
 use crate::storage::{StorageError, Store};
-
-fn missing_after_write(what: &'static str) -> DomainError {
-    StorageError::Corrupt(format!("{what} missing after write")).into()
-}
+use crate::workflow::{self, AffectedScope};
 
 // Level-normalized endpoint view: everything the shared guards need.
 struct Endpoint {
@@ -132,23 +130,28 @@ async fn guard_mutation(
     Ok(())
 }
 
+// Both endpoints bump on create; the delete path passes None for an archived
+// prerequisite so the frozen scope stays untouched (plan/03 one-way archive).
 async fn bump_endpoints(
     conn: &mut SqliteConnection,
     level: DependencyLevel,
     ctx: &CommandContext,
     dependent: &Endpoint,
-    prerequisite: &Endpoint,
-) -> Result<(Revision, Revision), DomainError> {
+    prerequisite: Option<&Endpoint>,
+) -> Result<(Revision, Option<Revision>), DomainError> {
     let table = match level {
         DependencyLevel::Epic => "epics",
         DependencyLevel::Task => "tasks",
     };
     let dependent_next = dependent.revision.next();
-    let prerequisite_next = prerequisite.revision.next();
-    for (id, next) in [
-        (dependent.id, dependent_next),
-        (prerequisite.id, prerequisite_next),
-    ] {
+    let mut updates = vec![(dependent.id, dependent_next)];
+    let mut prerequisite_next = None;
+    if let Some(prerequisite) = prerequisite {
+        let next = prerequisite.revision.next();
+        updates.push((prerequisite.id, next));
+        prerequisite_next = Some(next);
+    }
+    for (id, next) in updates {
         let query = AssertSqlSafe(format!(
             "UPDATE {table} SET revision = ?1, updated_at = ?2 WHERE id = ?3"
         ));
@@ -167,34 +170,35 @@ fn endpoint_events(
     dependent: &Endpoint,
     dependent_revision: Revision,
     prerequisite: &Endpoint,
-    prerequisite_revision: Revision,
+    prerequisite_revision: Option<Revision>,
 ) -> Vec<PendingEvent> {
-    match level {
-        DependencyLevel::Epic => vec![
-            PendingEvent::epic(
-                crate::model::EpicId::from_uuid(dependent.id),
-                dependent_revision,
-                crate::model::GoalId::from_uuid(dependent.scope),
-            ),
-            PendingEvent::epic(
+    let mut events = vec![match level {
+        DependencyLevel::Epic => PendingEvent::epic(
+            crate::model::EpicId::from_uuid(dependent.id),
+            dependent_revision,
+            crate::model::GoalId::from_uuid(dependent.scope),
+        ),
+        DependencyLevel::Task => PendingEvent::task(
+            crate::model::TaskId::from_uuid(dependent.id),
+            dependent_revision,
+            crate::model::EpicId::from_uuid(dependent.scope),
+        ),
+    }];
+    if let Some(prerequisite_revision) = prerequisite_revision {
+        events.push(match level {
+            DependencyLevel::Epic => PendingEvent::epic(
                 crate::model::EpicId::from_uuid(prerequisite.id),
                 prerequisite_revision,
                 crate::model::GoalId::from_uuid(prerequisite.scope),
             ),
-        ],
-        DependencyLevel::Task => vec![
-            PendingEvent::task(
-                crate::model::TaskId::from_uuid(dependent.id),
-                dependent_revision,
-                crate::model::EpicId::from_uuid(dependent.scope),
-            ),
-            PendingEvent::task(
+            DependencyLevel::Task => PendingEvent::task(
                 crate::model::TaskId::from_uuid(prerequisite.id),
                 prerequisite_revision,
                 crate::model::EpicId::from_uuid(prerequisite.scope),
             ),
-        ],
+        });
     }
+    events
 }
 
 impl Store {
@@ -311,7 +315,7 @@ impl Store {
                 // Both endpoints' structural picture changed: bump to invalidate
                 // stale edits (plan/03); descendants stay untouched.
                 let (dependent_next, prerequisite_next) =
-                    bump_endpoints(tx, level, &ctx, &dependent, &prerequisite).await?;
+                    bump_endpoints(tx, level, &ctx, &dependent, Some(&prerequisite)).await?;
                 let mut pending = vec![PendingEvent::dependency(
                     id,
                     Revision::INITIAL,
@@ -324,7 +328,8 @@ impl Store {
                     &prerequisite,
                     prerequisite_next,
                 ));
-                let events = append_events(tx, &project, &ctx, "createDependency", pending).await?;
+                let events =
+                    append_events(tx, &project, &ctx, "createDependency", "", pending).await?;
                 let created = find_dependency(tx, &project, &id)
                     .await?
                     .ok_or_else(|| missing_after_write("dependency"))?;
@@ -369,8 +374,17 @@ impl Store {
                     .bind(dependency.to_string())
                     .execute(&mut **tx)
                     .await?;
-                let (dependent_next, prerequisite_next) =
-                    bump_endpoints(tx, level, &ctx, &dependent, &prerequisite).await?;
+                // An archived prerequisite is frozen (plan/03): only the live
+                // dependent bumps and emits; dependency.changed still names
+                // both endpoints (plan/08 addressability).
+                let (dependent_next, prerequisite_next) = bump_endpoints(
+                    tx,
+                    level,
+                    &ctx,
+                    &dependent,
+                    (!prerequisite.archived).then_some(&prerequisite),
+                )
+                .await?;
                 let mut pending = vec![PendingEvent::dependency(
                     dependency,
                     current.revision,
@@ -383,7 +397,22 @@ impl Store {
                     &prerequisite,
                     prerequisite_next,
                 ));
-                let events = append_events(tx, &project, &ctx, "deleteDependency", pending).await?;
+                // Removing the last unmet prerequisite can complete a finished
+                // dependent epic; the cascade reuses the endpoint bump above.
+                if level == DependencyLevel::Epic {
+                    workflow::recompute(
+                        tx,
+                        AffectedScope {
+                            project,
+                            epics: vec![EpicId::from_uuid(dependent.id)],
+                        },
+                        &mut pending,
+                        ctx.now,
+                    )
+                    .await?;
+                }
+                let events =
+                    append_events(tx, &project, &ctx, "deleteDependency", "", pending).await?;
                 Ok(CommandResult { value: (), events })
             })
         })
@@ -1141,6 +1170,176 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deleting_a_link_to_an_archived_prerequisite_freezes_it() {
+        let f = fixture().await;
+        let s = scope(&f).await;
+        let created = link_tasks(&f, s.project.id, s.a.id, s.b.id).await.unwrap();
+        // The real step-006 commands build the archived-prerequisite state.
+        f.store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(2)), s.project.id, s.b.id)
+            .await
+            .unwrap();
+        f.store
+            .archive_task(
+                ctx(&f.owner, &f.clock, Some(3)),
+                s.project.id,
+                s.b.id,
+                "done".to_string(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(revision_of(&f, "tasks", s.b.id.as_uuid()).await, 4);
+
+        let deleted = f
+            .store
+            .delete_dependency(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project.id,
+                created.value.id,
+            )
+            .await
+            .unwrap();
+
+        let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM task_dependencies")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(remaining, 0);
+        // The live dependent bumps once; the archived prerequisite stays frozen.
+        assert_eq!(revision_of(&f, "tasks", s.a.id.as_uuid()).await, 3);
+        assert_eq!(revision_of(&f, "tasks", s.b.id.as_uuid()).await, 4);
+        // Exactly dependency.changed plus the dependent's task.changed.
+        assert_eq!(deleted.events.len(), 2);
+        let mut saw_dependent = false;
+        for id in &deleted.events {
+            let (kind, resource, affected): (String, String, String) =
+                sqlx::query_as("SELECT type, resource_id, affected_ids FROM events WHERE id = ?1")
+                    .bind(id)
+                    .fetch_one(f.store.pool())
+                    .await
+                    .unwrap();
+            // No event names the frozen prerequisite.
+            assert_ne!(resource, s.b.id.to_string());
+            if kind == "task.changed" {
+                assert_eq!(resource, s.a.id.to_string());
+                saw_dependent = true;
+            } else {
+                assert_eq!(kind, "dependency.changed");
+                // Payload references stay addressable even after archive (plan/08).
+                let affected: Vec<String> = serde_json::from_str(&affected).unwrap();
+                assert_eq!(
+                    affected,
+                    vec![
+                        s.a.id.to_string(),
+                        s.b.id.to_string(),
+                        s.epic.id.to_string()
+                    ]
+                );
+            }
+        }
+        assert!(saw_dependent);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_link_to_an_archived_prerequisite_epic_freezes_it() {
+        let f = fixture().await;
+        let project = project(&f).await;
+        let g = goal(&f, project.id, "G").await;
+        let dependent = epic(&f, project.id, g.id, "dependent").await;
+        let prerequisite = epic(&f, project.id, g.id, "prerequisite").await;
+        // The dependent keeps an open task so the post-delete cascade cannot
+        // complete it.
+        task(&f, project.id, dependent.id, "keeps dependent open").await;
+        let finish = task(&f, project.id, prerequisite.id, "finishes prerequisite").await;
+        let link = f
+            .store
+            .create_dependency(
+                ctx(&f.owner, &f.clock, None),
+                project.id,
+                DependencyCreate::Epic {
+                    dependent_id: dependent.id,
+                    prerequisite_id: prerequisite.id,
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        // Completing the last task cascades the prerequisite epic to done.
+        f.store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(1)), project.id, finish.id)
+            .await
+            .unwrap();
+        let (status, revision): (String, i64) =
+            sqlx::query_as("SELECT status, revision FROM epics WHERE id = ?1")
+                .bind(prerequisite.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(status, "done");
+        assert_eq!(revision, 3);
+        f.store
+            .archive_epic(
+                ctx(&f.owner, &f.clock, Some(3)),
+                project.id,
+                prerequisite.id,
+                "done".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let deleted = f
+            .store
+            .delete_dependency(
+                ctx(&f.owner, &f.clock, Some(link.revision.value())),
+                project.id,
+                link.id,
+            )
+            .await
+            .unwrap();
+
+        let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM epic_dependencies")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(remaining, 0);
+        assert_eq!(revision_of(&f, "epics", dependent.id.as_uuid()).await, 3);
+        assert_eq!(revision_of(&f, "epics", prerequisite.id.as_uuid()).await, 4);
+        assert_eq!(deleted.events.len(), 2);
+        let mut saw_dependent = false;
+        for id in &deleted.events {
+            let (kind, resource, affected): (String, String, String) =
+                sqlx::query_as("SELECT type, resource_id, affected_ids FROM events WHERE id = ?1")
+                    .bind(id)
+                    .fetch_one(f.store.pool())
+                    .await
+                    .unwrap();
+            assert_ne!(resource, prerequisite.id.to_string());
+            if kind == "epic.changed" {
+                assert_eq!(resource, dependent.id.to_string());
+                saw_dependent = true;
+            } else {
+                assert_eq!(kind, "dependency.changed");
+                let affected: Vec<String> = serde_json::from_str(&affected).unwrap();
+                assert_eq!(
+                    affected,
+                    vec![
+                        dependent.id.to_string(),
+                        prerequisite.id.to_string(),
+                        g.id.to_string()
+                    ]
+                );
+            }
+        }
+        assert!(saw_dependent);
+        let status: String = sqlx::query_scalar("SELECT status FROM epics WHERE id = ?1")
+            .bind(dependent.id.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(status, "open");
+    }
+
+    #[tokio::test]
     async fn create_ignores_expected_revision_like_other_creates() {
         let f = fixture().await;
         let s = scope(&f).await;
@@ -1152,5 +1351,73 @@ mod tests {
             )
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn deleting_the_last_unmet_epic_dependency_completes_the_dependent() {
+        let f = fixture().await;
+        let s = scope(&f).await;
+        let goal_id = s.epic.goal_id;
+        let prereq = epic(&f, s.project.id, goal_id, "Prereq").await;
+        task(&f, s.project.id, prereq.id, "keeps prereq open").await;
+        let link = f
+            .store
+            .create_dependency(
+                ctx(&f.owner, &f.clock, None),
+                s.project.id,
+                DependencyCreate::Epic {
+                    dependent_id: s.epic.id,
+                    prerequisite_id: prereq.id,
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        for t in [&s.a, &s.b] {
+            f.store
+                .complete_task_for_test(ctx(&f.owner, &f.clock, Some(1)), s.project.id, t.id)
+                .await
+                .unwrap();
+        }
+        // All tasks done, still gated by the unmet epic prerequisite.
+        let status: String = sqlx::query_scalar("SELECT status FROM epics WHERE id = ?1")
+            .bind(s.epic.id.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(status, "open");
+
+        let deleted = f
+            .store
+            .delete_dependency(
+                ctx(&f.owner, &f.clock, Some(link.revision.value())),
+                s.project.id,
+                link.id,
+            )
+            .await
+            .unwrap();
+        // The cascade reuses the endpoint bump: done, one epic.changed for the
+        // dependent, final revision on row and event.
+        let (status, revision): (String, i64) =
+            sqlx::query_as("SELECT status, revision FROM epics WHERE id = ?1")
+                .bind(s.epic.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(status, "done");
+        let mut dependent_events = Vec::new();
+        for id in &deleted.events {
+            let (kind, resource, event_revision): (String, String, i64) = sqlx::query_as(
+                "SELECT type, resource_id, resource_revision FROM events WHERE id = ?1",
+            )
+            .bind(id)
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+            if kind == "epic.changed" && resource == s.epic.id.to_string() {
+                dependent_events.push(event_revision);
+            }
+        }
+        assert_eq!(dependent_events, vec![revision]);
     }
 }
