@@ -159,41 +159,65 @@ pub(crate) async fn complete(
     Ok(next)
 }
 
+// SQLite caps bound parameters per statement (999 before 3.32, 32,766 after);
+// chunked IN lists keep blockEpic safe at any task count.
+const TASK_CHUNK: usize = 500;
+
 async fn bump_tasks(
     conn: &mut SqliteConnection,
     tasks: &[TaskId],
     now: &str,
 ) -> Result<Vec<(TaskId, Revision)>, DomainError> {
-    if tasks.is_empty() {
-        return Ok(Vec::new());
+    let mut bumped = Vec::new();
+    for chunk in tasks.chunks(TASK_CHUNK) {
+        let mut builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "UPDATE tasks SET revision = revision + 1, updated_at = ",
+        );
+        builder.push_bind(now).push(" WHERE id IN (");
+        let mut separated = builder.separated(", ");
+        for task in chunk {
+            separated.push_bind(task.to_string());
+        }
+        builder.push(") RETURNING id, revision");
+        let rows: Vec<(String, i64)> = builder
+            .build_query_as()
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(crate::storage::StorageError::from)?;
+        let parsed: Result<Vec<(TaskId, Revision)>, DomainError> = rows
+            .into_iter()
+            .map(|(id, revision)| {
+                let task = TaskId::from_uuid(parse_uuid("tasks.id", &id)?);
+                let revision = Revision::from_stored(revision)
+                    .ok_or_else(|| crate::storage::StorageError::Corrupt("task revision".into()))?;
+                Ok((task, revision))
+            })
+            .collect();
+        bumped.extend(parsed?);
     }
-    let mut builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-        "UPDATE tasks SET revision = revision + 1, updated_at = ",
-    );
-    builder.push_bind(now).push(" WHERE id IN (");
-    let mut separated = builder.separated(", ");
-    for task in tasks {
-        separated.push_bind(task.to_string());
-    }
-    builder.push(") RETURNING id, revision");
-    let rows: Vec<(String, i64)> = builder
-        .build_query_as()
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(crate::storage::StorageError::from)?;
-    rows.into_iter()
-        .map(|(id, revision)| {
-            let task = TaskId::from_uuid(parse_uuid("tasks.id", &id)?);
-            let revision = Revision::from_stored(revision)
-                .ok_or_else(|| crate::storage::StorageError::Corrupt("task revision".into()))?;
-            Ok((task, revision))
-        })
-        .collect()
+    Ok(bumped)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
+    use crate::model::{Actor, ActorKind, Clock, EpicCreate, GoalCreate, ProjectCreate, TestClock};
+    use crate::storage::open;
+    use crate::storage::rows::insert_actor;
+    use crate::storage::testing::{store_options, test_clock};
+    use uuid::Uuid;
+
+    fn ctx(actor: &Actor, clock: &TestClock) -> CommandContext {
+        CommandContext {
+            actor: actor.clone(),
+            command_id: crate::model::CommandId::generate(clock.now()),
+            idempotency_key: Uuid::nil(),
+            expected_revision: None,
+            now: clock.now(),
+        }
+    }
 
     fn counts(total: i64, done: i64, cancelled: i64, waived: i64) -> Counts {
         Counts {
@@ -222,5 +246,95 @@ mod tests {
         assert!(explicitly_completable(counts(2, 0, 2, 2)));
         assert!(!explicitly_completable(counts(3, 3, 0, 0)));
         assert!(!explicitly_completable(counts(3, 2, 1, 1)));
+    }
+
+    // 501 revoked-claim tasks = one full chunk plus the boundary remainder.
+    #[tokio::test]
+    async fn bump_tasks_crosses_the_chunk_boundary_without_lost_or_double_bumps() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = test_clock();
+        let store = open(store_options(dir.path(), "shepherd.db", clock.clone()))
+            .await
+            .unwrap();
+        let owner = Actor {
+            id: crate::model::ActorId::generate(clock.now()),
+            kind: ActorKind::Human,
+            label: "owner".to_string(),
+            revoked: false,
+            created_at: clock.now(),
+        };
+        let seeded = owner.clone();
+        store
+            .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &seeded).await }))
+            .await
+            .unwrap();
+        let project = store
+            .create_project(
+                ctx(&owner, &clock),
+                ProjectCreate {
+                    name: "P".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        let goal = store
+            .create_goal(
+                ctx(&owner, &clock),
+                project.id,
+                GoalCreate {
+                    title: "G".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        let epic = store
+            .create_epic(
+                ctx(&owner, &clock),
+                project.id,
+                goal.id,
+                EpicCreate {
+                    title: "E".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+
+        let ids: Vec<TaskId> = (0..501).map(|_| TaskId::generate(clock.now())).collect();
+        let now = format_ts(&clock.now());
+        let mut tx = store.pool().begin().await.unwrap();
+        for (i, id) in ids.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO tasks (id, revision, created_at, updated_at, project_id, \
+                 epic_id, title, description, type_key, status, phase, planning_required, \
+                 plan_review, work_review, archived, attempt_count) \
+                 VALUES (?1, 1, ?2, ?2, ?3, ?4, ?5, '', 'code', 'open', 'execution', 0, \
+                 'none', 'none', 0, 0)",
+            )
+            .bind(id.to_string())
+            .bind(&now)
+            .bind(project.id.to_string())
+            .bind(epic.id.to_string())
+            .bind(format!("task-{i}"))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        }
+        tx.commit().await.unwrap();
+
+        let mut conn = store.pool().acquire().await.unwrap();
+        let bumped = bump_tasks(&mut conn, &ids, &now).await.unwrap();
+
+        assert_eq!(bumped.len(), 501);
+        assert_eq!(
+            bumped.iter().map(|(id, _)| *id).collect::<HashSet<_>>(),
+            ids.iter().copied().collect::<HashSet<_>>()
+        );
+        assert!(bumped.iter().all(|(_, revision)| revision.value() == 2));
     }
 }
