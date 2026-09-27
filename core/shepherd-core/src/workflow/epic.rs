@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use sqlx::SqliteConnection;
 
 use crate::commands::{
@@ -94,9 +96,11 @@ pub(crate) async fn cancel(
             claim.task_id,
         ));
     }
+    let mut settled: BTreeSet<TaskId> = closed.revoked.iter().map(|claim| claim.task_id).collect();
     for submission in
         withdraw_pending_submissions(conn, ClaimScope::Epic(epic.id), &now, reason).await?
     {
+        settled.insert(submission.task_id);
         events.push(PendingEvent::submission(
             submission.id,
             submission.revision,
@@ -120,8 +124,15 @@ pub(crate) async fn cancel(
     .await?;
     for (id, revision) in cancelled {
         let task = TaskId::from_uuid(parse_uuid("tasks.id", &id)?);
+        settled.remove(&task);
         let revision = Revision::from_stored(revision)
             .ok_or_else(|| crate::storage::StorageError::Corrupt("task revision".into()))?;
+        events.push(PendingEvent::task(task, revision, epic.id));
+    }
+    // A preserved done task whose claim was revoked or submission withdrawn
+    // changed representation too: same once-per-command bump as epic::block.
+    let settled: Vec<TaskId> = settled.into_iter().collect();
+    for (task, revision) in bump_tasks(conn, &settled, &now).await? {
         events.push(PendingEvent::task(task, revision, epic.id));
     }
     sqlx::query(

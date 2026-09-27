@@ -226,6 +226,21 @@ impl Store {
                         "epic must be terminal before archive".into(),
                     ));
                 }
+                // Belt and braces against fixture-seeded inconsistency, like the
+                // goal/project descendant checks: a live task must never be
+                // frozen under a one-way archive.
+                let live_task = sqlx::query(
+                    "SELECT 1 FROM tasks WHERE epic_id = ?1 \
+                     AND status NOT IN ('done', 'cancelled') LIMIT 1",
+                )
+                .bind(epic.to_string())
+                .fetch_optional(&mut **tx)
+                .await?;
+                if live_task.is_some() {
+                    return Err(DomainError::InvalidState(
+                        "epic contains nonterminal work".into(),
+                    ));
+                }
                 if epic_has_active_work(tx, epic, &format_ts(&ctx.now)).await? {
                     return Err(DomainError::ActiveWork(
                         "a descendant task has an active claim or pending submission".into(),
@@ -650,26 +665,23 @@ mod tests {
         let f = fixture().await;
         let s = scope(&f).await;
 
-        for (goal_attempt, project_attempt) in [(true, false), (false, true)] {
-            let err = if goal_attempt {
-                f.store
-                    .archive_goal(
-                        ctx(&f.owner, &f.clock, Some(1)),
-                        s.project,
-                        s.goal,
-                        "x".into(),
-                    )
-                    .await
-                    .unwrap_err()
-            } else {
-                debug_assert!(project_attempt);
-                f.store
-                    .archive_project(ctx(&f.owner, &f.clock, Some(1)), s.project, "x".into())
-                    .await
-                    .unwrap_err()
-            };
-            assert!(matches!(err, DomainError::InvalidState(_)));
-        }
+        let err = f
+            .store
+            .archive_goal(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.goal,
+                "x".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+        let err = f
+            .store
+            .archive_project(ctx(&f.owner, &f.clock, Some(1)), s.project, "x".into())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
 
         f.store
             .cancel_epic(
@@ -764,6 +776,42 @@ mod tests {
             )
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn archive_epic_rejects_a_live_task_under_a_terminal_epic() {
+        let f = fixture().await;
+        let s = scope(&f).await;
+        f.store
+            .cancel_epic(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.epic,
+                "descoped".into(),
+            )
+            .await
+            .unwrap();
+        // Fixture-seeded inconsistency: revive the cancelled task directly.
+        sqlx::query(
+            "UPDATE tasks SET status = 'open', phase = 'execution', cancellation_actor_id = NULL, \
+             cancellation_reason = NULL, cancellation_created_at = NULL WHERE id = ?1",
+        )
+        .bind(s.task.to_string())
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+
+        let err = f
+            .store
+            .archive_epic(
+                ctx(&f.owner, &f.clock, Some(2)),
+                s.project,
+                s.epic,
+                "wrapped".into(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
     }
 
     #[tokio::test]

@@ -119,4 +119,18 @@ Post-fix results: `cargo fmt --check` — clean; `cargo clippy --all-targets -- 
 
 Post-PR-fix results (Rust 1.98.1): `cargo fmt --check` — clean; `cargo clippy --all-targets -- -D warnings` — clean; `cargo test --workspace` — 345 green (exit code checked directly, never piped); `cargo test --workspace --doc` — clean; `python3 plan/validate.py` — PASS (29 step DAG; 70 operations); semgrep (p/rust, p/default) — 0 findings.
 
+### Review follow-ups (merge-readiness review)
+
+Second xhigh review of the branch: verdict merge-ready, no blocking findings; the low-severity items were fixed or dispositioned with the owner.
+
+- **Settled work on preserved done tasks was unbumped** [consistency, minor]: `epic::cancel` revoked claims / withdrew pending submissions across all descendants but bumped only the cancelled ones, so a preserved done task whose lease or submission was settled changed representation without a `task.changed` — inconsistent with `epic::block`. Fixed: settled-but-not-cancelled tasks get the once-per-command bump. Regression: `cancel_epic_bumps_done_tasks_whose_work_was_settled`.
+- **Provably dead cascades on acceptTask/unblockTask** [efficiency, minor]: counts include proposed tasks and task blocks never gate epic completion, so neither command can flip epic state — the snapshot loads were wasted I/O in the write transaction. Removed with proof comments; the plan/04 "changed + cascade" rows stay satisfied vacuously.
+- **archive_epic lacked the descendant belt-and-braces** [robustness, minor]: goal/project archives defend against fixture-seeded live tasks under terminal scope; epic archive now does the same (`InvalidState`). Regression: `archive_epic_rejects_a_live_task_under_a_terminal_epic`.
+- **Misleading error string** [minor]: `complete_epic`'s snapshot-load miss no longer reports "missing after write" for a pre-write read.
+- **Test style** [trivial]: the boolean-tuple loop in `goal_and_project_archive_require_only_terminal_work` became two straight-line assertions.
+- **Deferred — remaining cascade IN-lists**: `bump_tasks` chunking landed in the PR-findings round above; `dependents_of` and the step-005 snapshot loaders still bind one variable per id. A wave with >32,766 dependent epics is 16× the graph bound and the pattern predates this step — kept as the follow-up already flagged above.
+- **Rejected — per-event reasons for reconciled-expired claims**: plan/08 defines the event row reason as the command reason; the claims row (`expired`, empty close_reason) is the authoritative lease history.
+
+Post-fix results: `cargo fmt --check` — clean; `cargo clippy --all-targets -- -D warnings` — clean; `cargo test --workspace` — 347 green; doc tests clean; coverage Unit 98.5% (≥95) ✅, Integration 100.0% (≥70) ✅, union 98.5% (≥92) ✅; `python3 plan/validate.py` — PASS; semgrep (p/rust, p/default) — 0 findings.
+
 Next eligible step: [007](007-identity-and-permissions.md).

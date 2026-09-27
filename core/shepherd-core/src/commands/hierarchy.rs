@@ -845,17 +845,10 @@ impl Store {
                 .bind(task.to_string())
                 .execute(&mut **tx)
                 .await?;
-                let mut pending = vec![PendingEvent::task(task, next, scope.task.epic_id)];
-                workflow::recompute(
-                    tx,
-                    AffectedScope {
-                        project,
-                        epics: vec![scope.task.epic_id],
-                    },
-                    &mut pending,
-                    ctx.now,
-                )
-                .await?;
+                // The plan/04 cascade is provably a no-op here: counts already
+                // include proposed tasks and task blocks never gate epic
+                // completion, so accepting a task cannot flip any epic state.
+                let pending = vec![PendingEvent::task(task, next, scope.task.epic_id)];
                 let events = append_events(tx, &project, &ctx, "acceptTask", "", pending).await?;
                 let updated = find_task(tx, &project, &task)
                     .await?
@@ -924,18 +917,11 @@ impl Store {
                 };
                 // The unblock event preserves the cleared block reason (plan/08).
                 let cleared = block.reason.clone();
+                // The plan/04 cascade is provably a no-op here: a task block
+                // never gates epic completion, so clearing it cannot flip any
+                // epic state.
                 let mut pending = Vec::new();
                 workflow::task::unblock(tx, &ctx, &scope.task, &mut pending).await?;
-                workflow::recompute(
-                    tx,
-                    AffectedScope {
-                        project,
-                        epics: vec![scope.task.epic_id],
-                    },
-                    &mut pending,
-                    ctx.now,
-                )
-                .await?;
                 let events =
                     append_events(tx, &project, &ctx, "unblockTask", &cleared, pending).await?;
                 let updated = find_task(tx, &project, &task)
@@ -1197,7 +1183,11 @@ impl Store {
                     workflow::eligibility::load_epic_snapshots(tx, &project, &[epic], ctx.now)
                         .await?
                         .remove(&epic)
-                        .ok_or_else(|| missing_after_write("epic snapshot"))?;
+                        .ok_or_else(|| {
+                            DomainError::from(StorageError::Corrupt(
+                                "epic snapshot missing during completion checks".into(),
+                            ))
+                        })?;
                 if !snapshot
                     .epic_prereqs
                     .iter()
@@ -3353,6 +3343,44 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn cancel_epic_bumps_done_tasks_whose_work_was_settled() {
+        let f = fixture().await;
+        let s = lifecycle_scope(&f).await;
+        let done = task(&f, s.project, s.epic.id, "Done work").await;
+        f.store
+            .complete_task_for_test(ctx(&f.owner, &f.clock, Some(1)), s.project, done.id)
+            .await
+            .unwrap();
+        // Fixture-only today (claims settle with reports in step 010), but the
+        // preserved done task still changes representation when its lease and
+        // pending submission are settled — same bump rule as blockEpic.
+        seed_claim_row(&f, done.id).await;
+        seed_submission_row(&f, done.id).await;
+
+        let cancelled = f
+            .store
+            .cancel_epic(
+                ctx(&f.owner, &f.clock, Some(1)),
+                s.project,
+                s.epic.id,
+                "descoped".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            task_state(&f, done.id).await,
+            ("done".into(), "complete".into(), 3)
+        );
+        let rows = event_rows(&f, &cancelled.events).await;
+        let done_events: Vec<_> = rows
+            .iter()
+            .filter(|(kind, id, _, _, _)| kind == "task.changed" && *id == done.id.to_string())
+            .collect();
+        assert_eq!(done_events.len(), 1);
+        assert_eq!(done_events[0].2, 3);
     }
 
     #[tokio::test]
