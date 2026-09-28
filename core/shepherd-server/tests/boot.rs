@@ -16,6 +16,28 @@ impl Drop for KillOnDrop {
 struct Daemon {
     child: KillOnDrop,
     addr: String,
+    // Kept open so later daemon prints cannot EPIPE, and so tests can drain
+    // everything printed after the listen line.
+    stdout: std::io::Lines<BufReader<std::process::ChildStdout>>,
+}
+
+impl Daemon {
+    /// Kills the daemon and returns everything it printed after the listen
+    /// line, plus all of stderr.
+    fn kill_and_collect_output(mut self) -> String {
+        let _ = self.child.0.kill();
+        let _ = self.child.0.wait();
+        let mut collected = String::new();
+        for line in self.stdout.by_ref() {
+            let Ok(line) = line else { break };
+            collected.push_str(&line);
+            collected.push('\n');
+        }
+        if let Some(mut err) = self.child.0.stderr.take() {
+            let _ = err.read_to_string(&mut collected);
+        }
+        collected
+    }
 }
 
 fn spawn_daemon(data_dir: &Path, ui_dir: &Path, home: &Path, extra: &[&str]) -> Daemon {
@@ -49,7 +71,11 @@ fn spawn_daemon(data_dir: &Path, ui_dir: &Path, home: &Path, extra: &[&str]) -> 
         .expect("listen line must contain the bound address")
         .trim()
         .to_string();
-    Daemon { child, addr }
+    Daemon {
+        child,
+        addr,
+        stdout: lines,
+    }
 }
 
 fn http(addr: &str, request_head: &str, body: &str) -> String {
@@ -160,7 +186,7 @@ fn no_secrets_in_server_output() {
     let data_dir = tempfile::tempdir().unwrap();
     let ui_dist = ui_dir();
 
-    let mut daemon = spawn_daemon(data_dir.path(), ui_dist.path(), fake_home.path(), &[]);
+    let daemon = spawn_daemon(data_dir.path(), ui_dist.path(), fake_home.path(), &[]);
     let owner_token = std::fs::read_to_string(data_dir.path().join("owner-token")).unwrap();
 
     // A real login flows the owner token and mints a session cookie.
@@ -176,17 +202,14 @@ fn no_secrets_in_server_output() {
         .map(|rest| rest.split(';').next().unwrap().to_string())
         .expect("login must set the session cookie");
 
-    let mut stdout_rest = String::new();
-    let mut stderr_text = String::new();
-    drop(daemon.child.0.stdin.take());
-    let _ = daemon.child.0.kill();
-    if let Some(mut out) = daemon.child.0.stdout.take() {
-        let _ = out.read_to_string(&mut stdout_rest);
-    }
-    if let Some(mut err) = daemon.child.0.stderr.take() {
-        let _ = err.read_to_string(&mut stderr_text);
-    }
-    let combined = format!("{stdout_rest}\n{stderr_text}");
+    let combined = daemon.kill_and_collect_output();
+    // The startup lines print resolved paths, so the output is nonempty even
+    // when no secret leaked (guards against scanning an accidentally empty
+    // stream, which would pass vacuously).
+    assert!(
+        combined.contains("data dir:"),
+        "expected startup output, got: {combined:?}"
+    );
     let owner_token = owner_token.trim();
     assert!(
         !combined.contains(owner_token),
