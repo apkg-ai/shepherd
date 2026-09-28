@@ -143,6 +143,14 @@ impl Store {
             .bind(format_ts(&now))
             .execute(&mut *tx)
             .await?;
+            // Reissue is the compromise-recovery path: sessions minted with the
+            // old token must die with it, like revocation does for agents.
+            sqlx::query(
+                "DELETE FROM browser_sessions \
+                 WHERE actor_id IN (SELECT id FROM actors WHERE kind = 'human')",
+            )
+            .execute(&mut *tx)
+            .await?;
             insert_credential(&mut tx, &owner_id, &digest, &now).await?;
             security_audit(
                 &mut tx,
@@ -731,6 +739,26 @@ mod tests {
                 "reissueOwnerToken".to_string()
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn reissue_invalidates_existing_owner_browser_sessions() {
+        let f = fixture().await;
+        f.owner().await;
+        let stolen = f.owner_token().await;
+        let login = f.store.login_browser(&stolen, f.clock.now()).await.unwrap();
+        f.store.reissue_owner_token(&f.paths()).await.unwrap();
+        // The compromised token's session must not survive the rotation.
+        assert!(matches!(
+            f.store
+                .browser_session(&login.session_token, f.clock.now())
+                .await
+                .unwrap_err(),
+            DomainError::Unauthenticated
+        ));
+        assert_eq!(f.count("browser_sessions").await, 0);
+        let fresh = f.owner_token().await;
+        f.store.login_browser(&fresh, f.clock.now()).await.unwrap();
     }
 
     #[tokio::test]
