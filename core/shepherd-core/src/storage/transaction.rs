@@ -116,7 +116,8 @@ impl FileReplayKeyProvider {
         let bytes = fs::read(path)?;
         let key: [u8; 32] = bytes.try_into().map_err(|_| {
             StorageError::CredentialFile(format!(
-                "replay key at {} must be exactly 32 bytes",
+                "replay key at {} must be exactly 32 bytes; restore it from a \
+                 backup (or delete the whole data directory to start fresh)",
                 path.display()
             ))
         })?;
@@ -140,20 +141,26 @@ impl ReplayKeyProvider for FileReplayKeyProvider {
 
 /// Writes 0600 under a 0700 parent, replacing any previous contents (plan/12).
 pub fn write_secret_file(path: &Path, bytes: &[u8]) -> Result<(), StorageError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-        fs::set_permissions(parent, Permissions::from_mode(0o700))?;
-    }
+    let parent = path.parent().ok_or_else(|| {
+        StorageError::CredentialFile(format!("{} has no parent directory", path.display()))
+    })?;
+    fs::create_dir_all(parent)?;
+    fs::set_permissions(parent, Permissions::from_mode(0o700))?;
+    // Same-directory temp file + rename: a crash mid-write can never leave a
+    // truncated secret behind, only the old file or the complete new one.
+    let staging = path.with_extension("tmp");
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .mode(0o600)
-        .open(path)?;
+        .open(&staging)?;
     // mode() applies only at creation; a pre-existing file keeps its old bits.
     file.set_permissions(Permissions::from_mode(0o600))?;
     file.write_all(bytes)?;
     file.sync_all()?;
+    drop(file);
+    fs::rename(&staging, path)?;
     Ok(())
 }
 
