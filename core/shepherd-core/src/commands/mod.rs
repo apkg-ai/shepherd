@@ -1,6 +1,9 @@
 mod archive;
 mod dependencies;
 mod hierarchy;
+mod identity;
+
+pub use identity::IdentityPaths;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -11,17 +14,17 @@ use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{
-    Actor, ActorId, CommandId, DependencyId, Epic, EpicId, EventId, GoalId, ProjectId, Revision,
-    Task, TaskId, TaskTypeId,
+    Actor, ActorId, CommandId, DependencyId, Epic, EpicId, EventId, GoalId, IDEMPOTENCY_TTL_DAYS,
+    ProjectId, Revision, Task, TaskId, TaskTypeId,
 };
 use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
 use crate::storage::rows::format_ts;
-use crate::storage::{StorageError, Store, rows};
+use crate::storage::{IdempotencyAad, StorageError, Store, rows};
 
 pub struct CommandContext {
     pub actor: Actor,
     pub command_id: CommandId,
-    /// Carried per plan/05; replay lookup lands with the real codec in step 007.
+    /// Honored by idempotent_transaction; plain domain_transaction commands are not replayable.
     pub idempotency_key: Uuid,
     pub expected_revision: Option<i64>,
     pub now: DateTime<Utc>,
@@ -35,6 +38,26 @@ pub struct CommandResult<T> {
 
 pub(crate) type DomainTxFuture<'t, T> =
     Pin<Box<dyn Future<Output = Result<T, DomainError>> + Send + 't>>;
+
+/// Whether the value was computed by this call or decrypted from the stored
+/// idempotency response (plan/05 step 2).
+#[derive(Debug)]
+pub enum Replay<T> {
+    Fresh(T),
+    Replayed(T),
+}
+
+impl<T> Replay<T> {
+    pub fn into_inner(self) -> T {
+        match self {
+            Replay::Fresh(value) | Replay::Replayed(value) => value,
+        }
+    }
+
+    pub fn is_replay(&self) -> bool {
+        matches!(self, Replay::Replayed(_))
+    }
+}
 
 impl Store {
     pub(crate) async fn domain_transaction<T, F>(&self, command: F) -> Result<T, DomainError>
@@ -52,6 +75,85 @@ impl Store {
                 Err(err)
             }
         }
+    }
+
+    // Plan/05 command algorithm step 2: revocation check strictly before the
+    // replay lookup, encrypted response stored in the same transaction.
+    pub(crate) async fn idempotent_transaction<T, F>(
+        &self,
+        ctx: &CommandContext,
+        request_hash: &str,
+        response_status: i64,
+        command: F,
+    ) -> Result<Replay<T>, DomainError>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+        F: for<'t> FnOnce(&'t mut Transaction<'static, Sqlite>) -> DomainTxFuture<'t, T>,
+    {
+        let mut tx = self.begin_command().await?;
+        match self
+            .idempotent_body(&mut tx, ctx, request_hash, response_status, command)
+            .await
+        {
+            Ok(value) => {
+                tx.commit().await.map_err(StorageError::from)?;
+                Ok(value)
+            }
+            Err(err) => {
+                tx.rollback().await.ok();
+                Err(err)
+            }
+        }
+    }
+
+    async fn idempotent_body<T, F>(
+        &self,
+        tx: &mut Transaction<'static, Sqlite>,
+        ctx: &CommandContext,
+        request_hash: &str,
+        response_status: i64,
+        command: F,
+    ) -> Result<Replay<T>, DomainError>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+        F: for<'t> FnOnce(&'t mut Transaction<'static, Sqlite>) -> DomainTxFuture<'t, T>,
+    {
+        live_actor(tx, &ctx.actor.id).await?;
+        let aad = IdempotencyAad {
+            actor_id: &ctx.actor.id,
+            key: &ctx.idempotency_key,
+            request_hash,
+        };
+        if let Some(record) =
+            rows::get_idempotency(&mut **tx, &ctx.actor.id, &ctx.idempotency_key, ctx.now).await?
+        {
+            if record.request_hash != request_hash {
+                return Err(DomainError::IdempotencyConflict);
+            }
+            let plaintext = self.codec().open(&aad, &record.sealed)?;
+            let value: T = serde_json::from_slice(&plaintext)
+                .map_err(|err| StorageError::Corrupt(format!("idempotency response: {err}")))?;
+            return Ok(Replay::Replayed(value));
+        }
+        let value = command(tx).await?;
+        let plaintext = serde_json::to_vec(&value)
+            .map_err(|err| StorageError::Corrupt(format!("idempotency response: {err}")))?;
+        let sealed = self.codec().seal(&aad, &plaintext)?;
+        rows::put_idempotency(
+            tx,
+            &rows::IdempotencyRecord {
+                actor_id: ctx.actor.id,
+                key: ctx.idempotency_key,
+                command_id: ctx.command_id,
+                request_hash: request_hash.to_string(),
+                response_status,
+                sealed,
+                created_at: ctx.now,
+                expires_at: ctx.now + chrono::TimeDelta::days(IDEMPOTENCY_TTL_DAYS),
+            },
+        )
+        .await?;
+        Ok(Replay::Fresh(value))
     }
 }
 

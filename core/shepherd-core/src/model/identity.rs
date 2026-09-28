@@ -2,6 +2,8 @@ use std::fmt;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
@@ -12,6 +14,43 @@ pub const TOKEN_BYTES: usize = 32;
 /// Fixed browser-session lifetime; no sliding extension (plan/12).
 pub const SESSION_TTL_SECONDS: i64 = 43_200;
 pub const IDEMPOTENCY_TTL_DAYS: i64 = 7;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentCreate {
+    pub label: String,
+}
+
+/// Deletion-style command acknowledgement ({"ok":true} per plan/07).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ack {
+    pub ok: bool,
+}
+
+#[derive(Debug)]
+pub struct BrowserSession {
+    pub actor: Actor,
+    pub csrf_token: SecretString,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+pub struct BrowserSessionGrant {
+    pub session_token: SecretString,
+    pub session: BrowserSession,
+}
+
+/// Agent issuance result: the plaintext token exists only here, once (plan/12).
+#[derive(Debug)]
+pub struct AgentTokenGrant {
+    pub actor: Actor,
+    pub token: SecretString,
+}
+
+#[derive(Debug)]
+pub struct OwnerBootstrap {
+    pub actor: Actor,
+    pub created: bool,
+}
 
 /// Secret carrier: Debug/Display never print the value (plan/12: no secrets in logs).
 #[derive(Clone)]

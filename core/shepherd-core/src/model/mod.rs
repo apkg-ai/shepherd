@@ -7,8 +7,10 @@ mod task;
 pub use epic::{Epic, EpicCreate, EpicId, EpicStatus};
 pub use goal::{Goal, GoalCreate, GoalId, TextPatch, goal_completed};
 pub use identity::{
-    Capability, IDEMPOTENCY_TTL_DAYS, SESSION_TTL_SECONDS, SecretString, TOKEN_BYTES, base_allow,
-    canonical_request_hash, digest_matches, generate_token, require_capability, token_digest,
+    Ack, AgentCreate, AgentTokenGrant, BrowserSession, BrowserSessionGrant, Capability,
+    IDEMPOTENCY_TTL_DAYS, OwnerBootstrap, SESSION_TTL_SECONDS, SecretString, TOKEN_BYTES,
+    base_allow, canonical_request_hash, digest_matches, generate_token, require_capability,
+    token_digest,
 };
 pub use project::{
     BUILTIN_TASK_TYPES, Project, ProjectCreate, ProjectId, ProjectPatch, ProjectSettings,

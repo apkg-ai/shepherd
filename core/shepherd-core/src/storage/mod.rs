@@ -6,7 +6,10 @@ pub(crate) mod rows;
 mod transaction;
 
 pub use connect::{APPLICATION_ID, EXPORT_VERSION, SCHEMA_VERSION, StoreOptions, open};
-pub use transaction::{AesGcmCodec, DaemonLock, FileReplayKeyProvider, TxFuture};
+pub use transaction::{
+    AesGcmCodec, DaemonLock, FileReplayKeyProvider, TxFuture, verify_secret_file_mode,
+    write_secret_file,
+};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -201,11 +204,33 @@ pub mod testing {
     use std::path::Path;
     use std::sync::Arc;
 
-    use super::{StoreOptions, TestCodec, TestKeyProvider};
-    use crate::model::TestClock;
+    use super::{Store, StoreOptions, TestCodec, TestKeyProvider};
+    use crate::model::{Actor, ActorId, ActorKind, TestClock};
 
     pub fn test_clock() -> Arc<TestClock> {
         Arc::new(TestClock::new("2026-09-14T00:00:00Z".parse().unwrap()))
+    }
+
+    /// Explicit test-only identity bypass: registers an actor without a
+    /// credential. Production actors exist only via owner bootstrap and
+    /// createAgent (plan step 007).
+    pub async fn seed_actor(store: &Store, kind: ActorKind, label: &str) -> Actor {
+        let now = store.clock().now();
+        let actor = Actor {
+            id: ActorId::generate(now),
+            kind,
+            label: label.to_string(),
+            revoked: false,
+            created_at: now,
+        };
+        let inserted = actor.clone();
+        store
+            .command_transaction(|tx| {
+                Box::pin(async move { super::rows::insert_actor(tx, &inserted).await })
+            })
+            .await
+            .unwrap();
+        actor
     }
 
     pub fn store_options(dir: &Path, db_name: &str, clock: Arc<TestClock>) -> StoreOptions {
