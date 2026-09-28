@@ -6,7 +6,7 @@ pub(crate) mod rows;
 mod transaction;
 
 pub use connect::{APPLICATION_ID, EXPORT_VERSION, SCHEMA_VERSION, StoreOptions, open};
-pub use transaction::TxFuture;
+pub use transaction::{AesGcmCodec, DaemonLock, FileReplayKeyProvider, TxFuture};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -68,6 +68,10 @@ pub enum StorageError {
     Corrupt(String),
     #[error("idempotency codec: {0}")]
     Codec(String),
+    #[error("credential file: {0}")]
+    CredentialFile(String),
+    #[error("another daemon holds the lock at {path}")]
+    DaemonLocked { path: PathBuf },
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
     #[error(transparent)]
@@ -82,6 +86,12 @@ pub struct IdempotencyAad<'a> {
     pub request_hash: &'a str,
 }
 
+impl IdempotencyAad<'_> {
+    pub fn text(&self) -> String {
+        format!("{}\n{}\n{}", self.actor_id, self.key, self.request_hash)
+    }
+}
+
 pub struct SealedResponse {
     pub ciphertext: Vec<u8>,
     pub nonce: Vec<u8>,
@@ -91,18 +101,28 @@ pub trait ReplayKeyProvider: Send + Sync {
     fn key(&self) -> &[u8; 32];
 }
 
+// Raw-AAD methods are the implementation surface; session CSRF-at-rest reuses
+// them with the session id as AAD (plan/12).
 pub trait IdempotencyCodec: Send + Sync {
+    fn seal_bytes(&self, aad: &[u8], plaintext: &[u8]) -> Result<SealedResponse, StorageError>;
+
+    fn open_bytes(&self, aad: &[u8], sealed: &SealedResponse) -> Result<Vec<u8>, StorageError>;
+
     fn seal(
         &self,
         aad: &IdempotencyAad<'_>,
         plaintext: &[u8],
-    ) -> Result<SealedResponse, StorageError>;
+    ) -> Result<SealedResponse, StorageError> {
+        self.seal_bytes(aad.text().as_bytes(), plaintext)
+    }
 
     fn open(
         &self,
         aad: &IdempotencyAad<'_>,
         sealed: &SealedResponse,
-    ) -> Result<Vec<u8>, StorageError>;
+    ) -> Result<Vec<u8>, StorageError> {
+        self.open_bytes(aad.text().as_bytes(), sealed)
+    }
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -115,7 +135,7 @@ impl ReplayKeyProvider for TestKeyProvider {
     }
 }
 
-// Deliberately insecure stand-in proving the codec plumbing; AES-256-GCM replaces it in step 007.
+// Deliberately insecure stand-in proving the codec plumbing; production uses AesGcmCodec.
 #[cfg(any(test, feature = "test-support"))]
 pub struct TestCodec {
     provider: Arc<dyn ReplayKeyProvider>,
@@ -139,15 +159,9 @@ impl TestCodec {
             .collect())
     }
 
-    fn tag(&self, nonce: &[u8], aad: &IdempotencyAad<'_>, plaintext: &[u8]) -> [u8; 8] {
+    fn tag(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> [u8; 8] {
         let mut acc: u64 = 0xcbf2_9ce4_8422_2325;
-        let aad_text = format!("{}\n{}\n{}", aad.actor_id, aad.key, aad.request_hash);
-        for part in [
-            self.provider.key().as_slice(),
-            nonce,
-            aad_text.as_bytes(),
-            plaintext,
-        ] {
+        for part in [self.provider.key().as_slice(), nonce, aad, plaintext] {
             for byte in part {
                 acc = (acc ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3);
             }
@@ -159,11 +173,7 @@ impl TestCodec {
 
 #[cfg(any(test, feature = "test-support"))]
 impl IdempotencyCodec for TestCodec {
-    fn seal(
-        &self,
-        aad: &IdempotencyAad<'_>,
-        plaintext: &[u8],
-    ) -> Result<SealedResponse, StorageError> {
+    fn seal_bytes(&self, aad: &[u8], plaintext: &[u8]) -> Result<SealedResponse, StorageError> {
         let nonce =
             uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).as_bytes()[..12].to_vec();
         let mut ciphertext = self.keystream(&nonce, plaintext)?;
@@ -171,11 +181,7 @@ impl IdempotencyCodec for TestCodec {
         Ok(SealedResponse { ciphertext, nonce })
     }
 
-    fn open(
-        &self,
-        aad: &IdempotencyAad<'_>,
-        sealed: &SealedResponse,
-    ) -> Result<Vec<u8>, StorageError> {
+    fn open_bytes(&self, aad: &[u8], sealed: &SealedResponse) -> Result<Vec<u8>, StorageError> {
         let split = sealed
             .ciphertext
             .len()
