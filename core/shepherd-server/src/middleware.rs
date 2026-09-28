@@ -356,6 +356,18 @@ async fn api_gate(
         }
     }
 
+    // Command operations require Idempotency-Key up front (plan/07: 428).
+    // Detected here by route so the answer never depends on the generated
+    // validator's rejection wording; step 015 generalizes this from the
+    // contract catalog.
+    if requires_idempotency_key(method, path) && !req.headers().contains_key("Idempotency-Key") {
+        return reject(
+            StatusCode::PRECONDITION_REQUIRED,
+            "precondition_required",
+            "supply the Idempotency-Key header",
+        );
+    }
+
     let ctx = RequestContext(Arc::new(RequestContextInner {
         request_id,
         principal,
@@ -391,6 +403,15 @@ fn domain_reject(err: &DomainError, request_id: Uuid) -> Response<Body> {
         .header(header::CONTENT_TYPE, "application/problem+json")
         .body(Body::from(bytes))
         .expect("problem response builds")
+}
+
+// The 007 surface has exactly one replayable command (revokeAgent).
+fn requires_idempotency_key(method: &Method, path: &str) -> bool {
+    *method == Method::POST
+        && path
+            .strip_prefix("/api/v1/agents/")
+            .and_then(|rest| rest.strip_suffix("/revoke"))
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
 }
 
 fn session_cookie(headers: &axum::http::HeaderMap) -> Option<SecretString> {
@@ -445,21 +466,12 @@ pub async fn problem_shaper(req: Request, next: Next) -> Response<Body> {
                 .collect()
         })
         .unwrap_or_default();
-    let missing_command_header = errors
-        .iter()
-        .any(|item| item.field == "/header/Idempotency-Key" && item.message.contains("required"));
-    let (status, code) = if missing_command_header {
-        (StatusCode::PRECONDITION_REQUIRED, "precondition_required")
-    } else {
-        (
-            parts.status,
-            match parts.status {
-                StatusCode::BAD_REQUEST => "malformed_request",
-                StatusCode::PAYLOAD_TOO_LARGE => "payload_too_large",
-                StatusCode::UNSUPPORTED_MEDIA_TYPE => "unsupported_media_type",
-                _ => "validation_error",
-            },
-        )
+    let status = parts.status;
+    let code = match status {
+        StatusCode::BAD_REQUEST => "malformed_request",
+        StatusCode::PAYLOAD_TOO_LARGE => "payload_too_large",
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => "unsupported_media_type",
+        _ => "validation_error",
     };
     let detail = errors
         .first()
