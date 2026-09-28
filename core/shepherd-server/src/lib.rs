@@ -289,7 +289,9 @@ impl IdentityApi for AppState {
             return domain_problem!(ListAgentsResponse, err);
         }
         let params = ListParams {
-            limit: limit.map(|value| value.max(0) as u32),
+            // Negatives are unreachable past the generated validation
+            // (minimum: 1); 0 falls to effective_limit's range error.
+            limit: limit.map(|value| u32::try_from(value).unwrap_or(0)),
             cursor,
             include_archived: false,
         };

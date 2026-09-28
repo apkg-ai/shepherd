@@ -53,16 +53,15 @@ impl Store {
 /// Production replay codec (plan/12): AES-256-GCM, random 96-bit nonce,
 /// caller-supplied authenticated associated data.
 pub struct AesGcmCodec {
-    provider: Arc<dyn ReplayKeyProvider>,
+    // Key schedule derived once; the provider is only needed at construction.
+    cipher: Aes256Gcm,
 }
 
 impl AesGcmCodec {
     pub fn new(provider: Arc<dyn ReplayKeyProvider>) -> Self {
-        Self { provider }
-    }
-
-    fn cipher(&self) -> Aes256Gcm {
-        Aes256Gcm::new(&(*self.provider.key()).into())
+        Self {
+            cipher: Aes256Gcm::new(&(*provider.key()).into()),
+        }
     }
 }
 
@@ -71,7 +70,7 @@ impl IdempotencyCodec for AesGcmCodec {
         let mut nonce = [0u8; 12];
         getrandom::fill(&mut nonce).expect("system RNG is available");
         let ciphertext = self
-            .cipher()
+            .cipher
             .encrypt(
                 &nonce.into(),
                 Payload {
@@ -92,7 +91,7 @@ impl IdempotencyCodec for AesGcmCodec {
             .as_slice()
             .try_into()
             .map_err(|_| StorageError::Codec("nonce must be 12 bytes".into()))?;
-        self.cipher()
+        self.cipher
             .decrypt(
                 &nonce.into(),
                 Payload {

@@ -52,6 +52,11 @@ impl Store {
     pub fn codec(&self) -> &dyn IdempotencyCodec {
         self.codec.as_ref()
     }
+
+    // Cloneable handle for command closures that outlive a `&self` borrow.
+    pub(crate) fn codec_arc(&self) -> Arc<dyn IdempotencyCodec> {
+        Arc::clone(&self.codec)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

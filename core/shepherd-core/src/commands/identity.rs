@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use sqlx::sqlite::SqliteRow;
-use sqlx::{QueryBuilder, Row, Sqlite, SqliteConnection, Transaction};
+use sqlx::{QueryBuilder, Row, Sqlite, SqliteConnection};
 
 use super::{CommandContext, CommandResult, Replay, live_actor};
 use crate::error::DomainError;
@@ -75,24 +75,25 @@ impl Store {
             };
             let digest = token_digest(&token);
             let command_id = CommandId::generate(now);
-            let mut tx = self.begin_command().await?;
-            let result: Result<(), DomainError> = async {
-                insert_actor(&mut tx, &owner).await?;
-                insert_credential(&mut tx, &owner.id, &digest, &now).await?;
-                security_audit(
-                    &mut tx,
-                    &owner.id,
-                    "bootstrapOwner",
-                    None,
-                    "",
-                    &command_id,
-                    &now,
-                )
-                .await?;
-                Ok(())
-            }
-            .await;
-            commit_or_rollback(tx, result).await?;
+            let registered = owner.clone();
+            self.domain_transaction(move |tx| {
+                Box::pin(async move {
+                    insert_actor(tx, &registered).await?;
+                    insert_credential(tx, &registered.id, &digest, &now).await?;
+                    security_audit(
+                        tx,
+                        &registered.id,
+                        "bootstrapOwner",
+                        None,
+                        "",
+                        &command_id,
+                        &now,
+                    )
+                    .await?;
+                    Ok(())
+                })
+            })
+            .await?;
             return Ok(OwnerBootstrap {
                 actor: owner,
                 created: true,
@@ -134,38 +135,38 @@ impl Store {
         let now = self.clock().now();
         let command_id = CommandId::generate(now);
         let owner_id = actor.id;
-        let mut tx = self.begin_command().await?;
-        let result: Result<(), DomainError> = async {
-            sqlx::query(
-                "UPDATE credentials SET revoked_at = ?1 WHERE revoked_at IS NULL \
-                 AND actor_id IN (SELECT id FROM actors WHERE kind = 'human')",
-            )
-            .bind(format_ts(&now))
-            .execute(&mut *tx)
-            .await?;
-            // Reissue is the compromise-recovery path: sessions minted with the
-            // old token must die with it, like revocation does for agents.
-            sqlx::query(
-                "DELETE FROM browser_sessions \
-                 WHERE actor_id IN (SELECT id FROM actors WHERE kind = 'human')",
-            )
-            .execute(&mut *tx)
-            .await?;
-            insert_credential(&mut tx, &owner_id, &digest, &now).await?;
-            security_audit(
-                &mut tx,
-                &owner_id,
-                "reissueOwnerToken",
-                None,
-                "",
-                &command_id,
-                &now,
-            )
-            .await?;
-            Ok(())
-        }
-        .await;
-        commit_or_rollback(tx, result).await?;
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                sqlx::query(
+                    "UPDATE credentials SET revoked_at = ?1 WHERE revoked_at IS NULL \
+                     AND actor_id IN (SELECT id FROM actors WHERE kind = 'human')",
+                )
+                .bind(format_ts(&now))
+                .execute(&mut **tx)
+                .await?;
+                // Reissue is the compromise-recovery path: sessions minted with
+                // the old token must die with it, like revocation does for agents.
+                sqlx::query(
+                    "DELETE FROM browser_sessions \
+                     WHERE actor_id IN (SELECT id FROM actors WHERE kind = 'human')",
+                )
+                .execute(&mut **tx)
+                .await?;
+                insert_credential(tx, &owner_id, &digest, &now).await?;
+                security_audit(
+                    tx,
+                    &owner_id,
+                    "reissueOwnerToken",
+                    None,
+                    "",
+                    &command_id,
+                    &now,
+                )
+                .await?;
+                Ok(())
+            })
+        })
+        .await?;
         Ok(OwnerBootstrap {
             actor,
             created: false,
@@ -285,66 +286,59 @@ impl Store {
         now: DateTime<Utc>,
     ) -> Result<BrowserSessionGrant, DomainError> {
         let digest = token_digest(owner_token);
-        let mut tx = self.begin_command().await?;
-        let result = self.login_browser_body(&mut tx, &digest, now).await;
-        commit_or_rollback(tx, result).await
-    }
-
-    async fn login_browser_body(
-        &self,
-        tx: &mut Transaction<'static, Sqlite>,
-        digest: &str,
-        now: DateTime<Utc>,
-    ) -> Result<BrowserSessionGrant, DomainError> {
-        let Some((actor, stored_hash)) = credential_actor_by_hash(&mut **tx, digest).await? else {
-            return Err(DomainError::Unauthenticated);
-        };
-        if !digest_matches(digest, &stored_hash) {
-            return Err(DomainError::Unauthenticated);
-        }
-        if actor.revoked {
-            return Err(DomainError::Unauthenticated);
-        }
-        if actor.kind != ActorKind::Human {
-            return Err(DomainError::Forbidden(
-                "agents cannot create browser sessions".into(),
-            ));
-        }
-        sqlx::query("DELETE FROM browser_sessions WHERE actor_id = ?1 AND expires_at <= ?2")
-            .bind(actor.id.to_string())
-            .bind(format_ts(&now))
-            .execute(&mut **tx)
-            .await?;
-        let session_id = crate::model::new_v7(now).to_string();
-        let session_token = generate_token();
-        let csrf_token = generate_token();
-        let sealed = self
-            .codec()
-            .seal_bytes(session_id.as_bytes(), csrf_token.expose().as_bytes())?;
-        let expires_at = now + TimeDelta::seconds(SESSION_TTL_SECONDS);
-        sqlx::query(
-            "INSERT INTO browser_sessions (id, actor_id, token_hash, csrf_hash, \
-             csrf_ciphertext, csrf_nonce, created_at, expires_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        )
-        .bind(&session_id)
-        .bind(actor.id.to_string())
-        .bind(token_digest(&session_token))
-        .bind(token_digest(&csrf_token))
-        .bind(&sealed.ciphertext)
-        .bind(&sealed.nonce)
-        .bind(format_ts(&now))
-        .bind(format_ts(&expires_at))
-        .execute(&mut **tx)
-        .await?;
-        Ok(BrowserSessionGrant {
-            session_token,
-            session: BrowserSession {
-                actor,
-                csrf_token,
-                expires_at,
-            },
+        let codec = self.codec_arc();
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let Some(actor) = credential_actor_by_hash(&mut **tx, &digest).await? else {
+                    return Err(DomainError::Unauthenticated);
+                };
+                if actor.revoked {
+                    return Err(DomainError::Unauthenticated);
+                }
+                if actor.kind != ActorKind::Human {
+                    return Err(DomainError::Forbidden(
+                        "agents cannot create browser sessions".into(),
+                    ));
+                }
+                sqlx::query(
+                    "DELETE FROM browser_sessions WHERE actor_id = ?1 AND expires_at <= ?2",
+                )
+                .bind(actor.id.to_string())
+                .bind(format_ts(&now))
+                .execute(&mut **tx)
+                .await?;
+                let session_id = crate::model::new_v7(now).to_string();
+                let session_token = generate_token();
+                let csrf_token = generate_token();
+                let sealed =
+                    codec.seal_bytes(session_id.as_bytes(), csrf_token.expose().as_bytes())?;
+                let expires_at = now + TimeDelta::seconds(SESSION_TTL_SECONDS);
+                sqlx::query(
+                    "INSERT INTO browser_sessions (id, actor_id, token_hash, csrf_hash, \
+                     csrf_ciphertext, csrf_nonce, created_at, expires_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                )
+                .bind(&session_id)
+                .bind(actor.id.to_string())
+                .bind(token_digest(&session_token))
+                .bind(token_digest(&csrf_token))
+                .bind(&sealed.ciphertext)
+                .bind(&sealed.nonce)
+                .bind(format_ts(&now))
+                .bind(format_ts(&expires_at))
+                .execute(&mut **tx)
+                .await?;
+                Ok(BrowserSessionGrant {
+                    session_token,
+                    session: BrowserSession {
+                        actor,
+                        csrf_token,
+                        expires_at,
+                    },
+                })
+            })
         })
+        .await
     }
 
     /// Cookie authentication. Returns the stored CSRF and the fixed expiry;
@@ -393,29 +387,28 @@ impl Store {
         _now: DateTime<Utc>,
     ) -> Result<Ack, DomainError> {
         let digest = token_digest(session_token);
-        let mut tx = self.begin_command().await?;
-        let result: Result<Ack, DomainError> = async {
-            let deleted = sqlx::query("DELETE FROM browser_sessions WHERE token_hash = ?1")
-                .bind(&digest)
-                .execute(&mut *tx)
-                .await?;
-            if deleted.rows_affected() == 0 {
-                return Err(DomainError::NotFound);
-            }
-            Ok(Ack { ok: true })
-        }
-        .await;
-        commit_or_rollback(tx, result).await
+        self.domain_transaction(move |tx| {
+            Box::pin(async move {
+                let deleted = sqlx::query("DELETE FROM browser_sessions WHERE token_hash = ?1")
+                    .bind(&digest)
+                    .execute(&mut **tx)
+                    .await?;
+                if deleted.rows_affected() == 0 {
+                    return Err(DomainError::NotFound);
+                }
+                Ok(Ack { ok: true })
+            })
+        })
+        .await
     }
 
     /// Bearer authentication: live credential, live actor, nothing from the body.
     pub async fn authenticate_bearer(&self, token: &SecretString) -> Result<Actor, DomainError> {
         let digest = token_digest(token);
-        let Some((actor, stored_hash)) = credential_actor_by_hash(self.pool(), &digest).await?
-        else {
+        let Some(actor) = credential_actor_by_hash(self.pool(), &digest).await? else {
             return Err(DomainError::Unauthenticated);
         };
-        if !digest_matches(&digest, &stored_hash) || actor.revoked {
+        if actor.revoked {
             return Err(DomainError::Unauthenticated);
         }
         Ok(actor)
@@ -462,22 +455,6 @@ impl Store {
                 &actor.id.to_string(),
             )
         }))
-    }
-}
-
-async fn commit_or_rollback<T>(
-    tx: Transaction<'static, Sqlite>,
-    result: Result<T, DomainError>,
-) -> Result<T, DomainError> {
-    match result {
-        Ok(value) => {
-            tx.commit().await.map_err(StorageError::from)?;
-            Ok(value)
-        }
-        Err(err) => {
-            tx.rollback().await.ok();
-            Err(err)
-        }
     }
 }
 
@@ -540,15 +517,17 @@ fn actor_from_joined_row(row: &SqliteRow) -> Result<Actor, DomainError> {
     })
 }
 
+// The indexed equality on the SHA-256 digest is the credential check; both
+// sides are hashes, so there is nothing left to compare in constant time.
 async fn credential_actor_by_hash<'e, E>(
     executor: E,
     digest: &str,
-) -> Result<Option<(Actor, String)>, DomainError>
+) -> Result<Option<Actor>, DomainError>
 where
     E: sqlx::Executor<'e, Database = Sqlite>,
 {
     let Some(row) = sqlx::query(
-        "SELECT a.id, a.kind, a.label, a.revoked, a.created_at, c.token_hash \
+        "SELECT a.id, a.kind, a.label, a.revoked, a.created_at \
          FROM credentials c JOIN actors a ON a.id = c.actor_id \
          WHERE c.token_hash = ?1 AND c.revoked_at IS NULL",
     )
@@ -559,8 +538,7 @@ where
     else {
         return Ok(None);
     };
-    let hash: String = row.try_get("token_hash").map_err(StorageError::from)?;
-    Ok(Some((actor_from_joined_row(&row)?, hash)))
+    Ok(Some(actor_from_joined_row(&row)?))
 }
 
 async fn live_owner_credential<'e, E>(executor: E) -> Result<Option<(Actor, String)>, DomainError>

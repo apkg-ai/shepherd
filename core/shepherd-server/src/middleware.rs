@@ -7,7 +7,8 @@ use axum::middleware::Next;
 use http_body_util::BodyExt;
 use shepherd_core::error::DomainError;
 use shepherd_core::model::{
-    Actor as CoreActor, BrowserSession, SecretString, digest_matches, token_digest,
+    Actor as CoreActor, BrowserSession, SESSION_TTL_SECONDS, SecretString, digest_matches,
+    token_digest,
 };
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
@@ -378,9 +379,11 @@ async fn api_gate(
 
     if let Some(action) = ctx.0.cookie_action.lock().unwrap().take() {
         let value = match action {
-            // Local HTTP: no Secure attribute (plan/12).
+            // Local HTTP: no Secure attribute (plan/12). Max-Age tracks the
+            // server-side session TTL.
             CookieAction::Set(token) => format!(
-                "{SESSION_COOKIE}={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200",
+                "{SESSION_COOKIE}={}; HttpOnly; SameSite=Strict; Path=/; \
+                 Max-Age={SESSION_TTL_SECONDS}",
                 token.expose()
             ),
             CookieAction::Clear => {
