@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${SMOKE_PORT:-7541}"
 BASE="http://127.0.0.1:${PORT}"
+DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/shepherd-smoke.XXXXXX")"
 
 fail() {
   echo "smoke: FAIL — $1" >&2
@@ -18,10 +19,11 @@ cleanup() {
   if [ -n "${SERVER_PID:-}" ]; then
     kill "$SERVER_PID" 2>/dev/null || true
   fi
+  rm -rf "$DATA_DIR"
 }
 trap cleanup EXIT
 
-"$ROOT/core/target/debug/shepherd-server" --port "$PORT" --ui-dir "$ROOT/ui/dist" &
+"$ROOT/core/target/debug/shepherd-server" --port "$PORT" --ui-dir "$ROOT/ui/dist" --data-dir "$DATA_DIR" &
 SERVER_PID=$!
 
 booted=false
