@@ -15,8 +15,15 @@ rules:
   license-url: off
 
   # ──────────────────────────────────────────────────────────────────────
-  # OWASP 2023 — all at default (error) severity.
+  # OWASP 2023 — at default (error) severity except the rules below.
   # ──────────────────────────────────────────────────────────────────────
+
+  # The loopback daemon has no rate limiting, and plan/12 forbids broad
+  # fake RateLimit headers; only /health declares (and sends) them.
+  owasp:api4:2023-rate-limit: off
+
+  # POST /api/v1/session is browser login — necessarily public (plan/12).
+  owasp:api2:2023-write-restricted: off
 
   # ──────────────────────────────────────────────────────────────────────
   # IBM Cloud OpenAPI — disable rules that conflict with shepherd's
@@ -96,4 +103,7 @@ rules:
   # Also fires on $ref'd error responses (401/422/429/500) which correctly
   # use problem+json — false positive.
   api-health-format: off
+
+  # X-CSRF-Token is the contract-fixed CSRF header name (plan/12).
+  no-x-headers: off
 

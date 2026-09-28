@@ -356,6 +356,7 @@ checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
  "num-traits",
+ "serde",
  "windows-link",
 ]
 
@@ -2192,6 +2193,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "chrono",
  "clap",
  "http-body-util",
  "jsonschema 0.49.9",
@@ -2199,12 +2201,15 @@ dependencies = [
  "mime",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "serde_yaml",
  "shepherd-core",
  "tempfile",
  "tokio",
  "tower",
  "tower-http 0.7.1",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -2834,6 +2839,7 @@ checksum = "2ef6dac1e96601b4fb3acccccff2139741fcb757cb9a36089bf5be91cfb285ce"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

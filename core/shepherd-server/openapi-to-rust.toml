@@ -14,6 +14,13 @@ uuid = "uuid"
 framework = "axum"
 operations = [
     "getHealth",
+    "createBrowserSession",
+    "getBrowserSession",
+    "deleteBrowserSession",
+    "listAgents",
+    "createAgent",
+    "revokeAgent",
+    "getPrincipal",
 ]
 prune_models = true
 

@@ -266,7 +266,7 @@ mod contract {
     }
 
     #[tokio::test]
-    async fn served_spec_is_the_embedded_health_contract() {
+    async fn served_spec_is_the_embedded_scaffold_and_identity_contract() {
         let app = test_app();
         let response = get_response(&app, "/api/v1/openapi.yaml").await;
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
@@ -275,10 +275,56 @@ mod contract {
         assert_eq!(served, load_spec(), "served spec must be the embedded one");
 
         let paths = served["paths"].as_object().unwrap();
-        assert_eq!(paths.keys().collect::<Vec<_>>(), ["/health"]);
+        // serde_yaml maps sort keys; compare as sets.
+        assert_eq!(
+            paths.keys().collect::<Vec<_>>(),
+            [
+                "/api/v1/agents",
+                "/api/v1/agents/{agent_id}/revoke",
+                "/api/v1/principal",
+                "/api/v1/session",
+                "/health",
+            ]
+        );
         assert_eq!(
             served["paths"]["/health"]["get"]["operationId"],
             "getHealth"
         );
+        assert_eq!(
+            served["paths"]["/api/v1/principal"]["get"]["operationId"],
+            "getPrincipal"
+        );
+    }
+
+    // Step 007 serves exactly the auth-owned operations from the contract
+    // (owner-approved deviation from the health-only scaffold; the rest of
+    // the surface stays with step 015).
+    #[test]
+    fn identity_operations_match_the_v1_contract() {
+        let spec = load_spec();
+        let catalog: Value =
+            serde_json::from_str(include_str!("../../../plan/contracts/operations.json"))
+                .expect("operations catalog parses");
+        let identity_ids = [
+            "createBrowserSession",
+            "getBrowserSession",
+            "deleteBrowserSession",
+            "listAgents",
+            "createAgent",
+            "revokeAgent",
+            "getPrincipal",
+        ];
+        for op in catalog.as_array().unwrap() {
+            let id = op["operation_id"].as_str().unwrap();
+            if !identity_ids.contains(&id) {
+                continue;
+            }
+            let method = op["method"].as_str().unwrap().to_lowercase();
+            let path = op["path"].as_str().unwrap();
+            assert_eq!(
+                spec["paths"][path][&method]["operationId"], id,
+                "{id} must be served at {method} {path}"
+            );
+        }
     }
 }
