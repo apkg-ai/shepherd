@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use aes_gcm::Aes256Gcm;
 use aes_gcm::aead::{Aead, KeyInit, Payload};
-use fs2::FileExt;
 use sqlx::{Sqlite, Transaction};
 
 use super::{IdempotencyCodec, ReplayKeyProvider, SealedResponse, StorageError, Store};
@@ -189,14 +188,11 @@ impl DaemonLock {
             .create(true)
             .truncate(false)
             .open(path)?;
-        file.try_lock_exclusive().map_err(|err| {
-            if err.kind() == fs2::lock_contended_error().kind() {
-                StorageError::DaemonLocked {
-                    path: path.to_path_buf(),
-                }
-            } else {
-                StorageError::Io(err)
-            }
+        file.try_lock().map_err(|err| match err {
+            fs::TryLockError::WouldBlock => StorageError::DaemonLocked {
+                path: path.to_path_buf(),
+            },
+            fs::TryLockError::Error(err) => StorageError::Io(err),
         })?;
         Ok(Self { _file: file })
     }
