@@ -168,7 +168,15 @@ macro_rules! domain_problem {
             StatusCode::CONFLICT => $response::Conflict(body),
             StatusCode::UNPROCESSABLE_ENTITY => $response::UnprocessableEntity(body),
             StatusCode::SERVICE_UNAVAILABLE => $response::ServiceUnavailable(body),
-            _ => $response::InternalServerError(body),
+            // A status the operation's contract does not declare (e.g. 412/428
+            // on a read): re-coerce the body so wire status and body agree
+            // instead of shipping a 500 that claims another status.
+            _ => $response::InternalServerError(problem(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                &body.detail,
+                request_id(),
+            )),
         }
     }};
 }
@@ -357,7 +365,15 @@ impl IdentityApi for AppState {
             Ok(replay) => RevokeAgentResponse::Ok(wire::Ack {
                 ok: replay.into_inner().ok,
             }),
-            Err(err) => domain_problem!(RevokeAgentResponse, err),
+            // revokeAgent's contract declares 428 (missing command header),
+            // which the shared macro cannot name for the other operations.
+            Err(err) => {
+                let (status, body) = problem_for(&err, request_id());
+                if status == StatusCode::PRECONDITION_REQUIRED {
+                    return RevokeAgentResponse::Status428(body);
+                }
+                domain_problem!(RevokeAgentResponse, err)
+            }
         }
     }
 

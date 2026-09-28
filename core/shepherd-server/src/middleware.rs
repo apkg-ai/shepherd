@@ -164,11 +164,18 @@ pub fn problem_for(err: &DomainError, request_id: Uuid) -> (StatusCode, wire::Pr
         "unauthenticated" => StatusCode::UNAUTHORIZED,
         "forbidden" => StatusCode::FORBIDDEN,
         "not_found" => StatusCode::NOT_FOUND,
-        "idempotency_conflict" | "terminal" | "active_work" | "not_eligible" => {
-            StatusCode::CONFLICT
-        }
+        // invalid_state joins the workflow-conflict family (see error.rs).
+        "idempotency_conflict"
+        | "terminal"
+        | "active_work"
+        | "dependency_cycle"
+        | "scope_mismatch"
+        | "invalid_state" => StatusCode::CONFLICT,
         "revision_conflict" => StatusCode::PRECONDITION_FAILED,
-        "validation_error" | "invalid_cursor" => StatusCode::UNPROCESSABLE_ENTITY,
+        // graph_too_large is 422 per plan/05 (recorded in the step-005 handoff).
+        "validation_error" | "invalid_cursor" | "graph_too_large" => {
+            StatusCode::UNPROCESSABLE_ENTITY
+        }
         "precondition_required" => StatusCode::PRECONDITION_REQUIRED,
         "storage_busy" | "integrity_failure" => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -494,6 +501,88 @@ mod tests {
             redact_header("content-type", "application/json"),
             "application/json"
         );
+    }
+
+    #[test]
+    fn problem_for_maps_every_domain_code_to_its_plan07_status() {
+        use shepherd_core::error::DomainError;
+        use shepherd_core::storage::StorageError;
+        let request_id = Uuid::nil();
+        let cases: Vec<(DomainError, StatusCode)> = vec![
+            (DomainError::NotFound, StatusCode::NOT_FOUND),
+            (DomainError::Unauthenticated, StatusCode::UNAUTHORIZED),
+            (DomainError::Forbidden("x".into()), StatusCode::FORBIDDEN),
+            (DomainError::IdempotencyConflict, StatusCode::CONFLICT),
+            (
+                DomainError::RevisionConflict {
+                    expected: 2,
+                    actual: 1,
+                },
+                StatusCode::PRECONDITION_FAILED,
+            ),
+            (
+                DomainError::PreconditionRequired,
+                StatusCode::PRECONDITION_REQUIRED,
+            ),
+            (
+                DomainError::Validation {
+                    field: "label",
+                    message: "blank".into(),
+                },
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                DomainError::InvalidCursor("bad".into()),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                DomainError::DuplicateTaskTypeKey { key: "code".into() },
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (DomainError::ArchivedScope, StatusCode::CONFLICT),
+            (DomainError::TerminalScope, StatusCode::CONFLICT),
+            (
+                DomainError::ActiveWork("claimed".into()),
+                StatusCode::CONFLICT,
+            ),
+            (DomainError::DependencyCycle, StatusCode::CONFLICT),
+            (
+                DomainError::ScopeMismatch("cross".into()),
+                StatusCode::CONFLICT,
+            ),
+            (
+                DomainError::GraphTooLarge {
+                    nodes: 2001,
+                    dependencies: 0,
+                },
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                DomainError::InvalidState("wrong".into()),
+                StatusCode::CONFLICT,
+            ),
+            (
+                DomainError::Storage(StorageError::Corrupt("bad".into())),
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                DomainError::Storage(StorageError::Codec("boom".into())),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+        for (err, expected) in cases {
+            let (status, body) = problem_for(&err, request_id);
+            assert_eq!(status, expected, "{}", err.code());
+            assert_eq!(body.status, i32::from(expected.as_u16()), "{}", err.code());
+            assert_eq!(body.code, err.code());
+            assert_eq!(body.r#type, format!("urn:shepherd:error:{}", err.code()));
+        }
+        // Storage details never reach the wire.
+        let (_, body) = problem_for(
+            &DomainError::Storage(StorageError::Codec("secret path".into())),
+            request_id,
+        );
+        assert_eq!(body.detail, "internal storage error");
     }
 
     #[test]
