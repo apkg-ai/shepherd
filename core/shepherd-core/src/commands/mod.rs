@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{
-    Actor, ActorId, ActorKind, CommandId, DependencyId, Epic, EpicId, EventId, GoalId, ProjectId,
-    Revision, Task, TaskId, TaskTypeId,
+    Actor, ActorId, CommandId, DependencyId, Epic, EpicId, EventId, GoalId, ProjectId, Revision,
+    Task, TaskId, TaskTypeId,
 };
 use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
 use crate::storage::rows::format_ts;
@@ -144,13 +144,6 @@ pub(crate) async fn epic_scope(
 
 pub(crate) fn missing_after_write(what: &'static str) -> DomainError {
     StorageError::Corrupt(format!("{what} missing after write")).into()
-}
-
-pub(crate) fn require_owner(actor: &Actor) -> Result<(), DomainError> {
-    match actor.kind {
-        ActorKind::Human => Ok(()),
-        ActorKind::Agent => Err(DomainError::Forbidden("owner capability required".into())),
-    }
 }
 
 pub(crate) fn require_revision(expected: Option<i64>, actual: Revision) -> Result<(), DomainError> {
@@ -479,26 +472,6 @@ pub(crate) async fn append_events(
 mod tests {
     use super::*;
 
-    fn actor(kind: ActorKind, revoked: bool) -> Actor {
-        let now = "2026-09-14T00:00:00Z".parse().unwrap();
-        Actor {
-            id: ActorId::generate(now),
-            kind,
-            label: "someone".to_string(),
-            revoked,
-            created_at: now,
-        }
-    }
-
-    #[test]
-    fn only_humans_hold_the_owner_capability() {
-        assert!(require_owner(&actor(ActorKind::Human, false)).is_ok());
-        assert!(matches!(
-            require_owner(&actor(ActorKind::Agent, false)),
-            Err(DomainError::Forbidden(_))
-        ));
-    }
-
     #[test]
     fn revision_checks_follow_the_precondition_contract() {
         assert!(require_revision(Some(1), Revision::INITIAL).is_ok());
@@ -558,8 +531,8 @@ mod db_tests {
 
     use super::*;
     use crate::model::{
-        ActorId, Clock, EpicCreate, EpicId, GoalCreate, ProjectCreate, TaskCreate, TaskId,
-        TestClock,
+        ActorId, ActorKind, Clock, EpicCreate, EpicId, GoalCreate, ProjectCreate, TaskCreate,
+        TaskId, TestClock,
     };
     use crate::storage::open;
     use crate::storage::rows::insert_actor;

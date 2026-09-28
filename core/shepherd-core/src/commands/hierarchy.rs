@@ -1,14 +1,14 @@
 use super::{
     CommandContext, CommandResult, PendingEvent, append_events, epic_scope, live_actor,
-    missing_after_write, require_owner, require_revision, task_has_active_work, task_scope,
+    missing_after_write, require_revision, task_has_active_work, task_scope,
 };
 use crate::error::DomainError;
 use crate::model::{
-    BUILTIN_TASK_TYPES, DESCRIPTION_MAX_CHARS, Epic, EpicCreate, EpicId, EpicStatus, Goal,
-    GoalCreate, GoalId, NAME_MAX_CHARS, Project, ProjectCreate, ProjectId, ProjectPatch,
+    BUILTIN_TASK_TYPES, Capability, DESCRIPTION_MAX_CHARS, Epic, EpicCreate, EpicId, EpicStatus,
+    Goal, GoalCreate, GoalId, NAME_MAX_CHARS, Project, ProjectCreate, ProjectId, ProjectPatch,
     ProjectSettings, REASON_MAX_CHARS, Revision, Task, TaskCreate, TaskId, TaskPatch, TaskStatus,
-    TaskType, TaskTypeCreate, TaskTypeId, TaskTypePatch, TextPatch, validate_long_text,
-    validate_required_text, validate_type_key, validate_type_label,
+    TaskType, TaskTypeCreate, TaskTypeId, TaskTypePatch, TextPatch, require_capability,
+    validate_long_text, validate_required_text, validate_type_key, validate_type_label,
 };
 use crate::queries::hierarchy::{
     epic_row, find_epic, find_goal, find_project, find_task, find_task_type, goal_row,
@@ -32,7 +32,7 @@ impl Store {
         self.domain_transaction(move |tx| {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::AdministerProject)?;
                 let name = validate_required_text("name", &input.name, NAME_MAX_CHARS)?;
                 let description = input.description.unwrap_or_default();
                 validate_long_text("description", &description, DESCRIPTION_MAX_CHARS)?;
@@ -97,7 +97,7 @@ impl Store {
                 let current = project_row(tx, &project)
                     .await?
                     .ok_or(DomainError::NotFound)?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::AdministerProject)?;
                 require_revision(ctx.expected_revision, current.revision)?;
                 if current.archived {
                     return Err(DomainError::ArchivedScope);
@@ -164,7 +164,7 @@ impl Store {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 let scope_archived = project_archived(tx, &project).await?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::AdministerProject)?;
                 if scope_archived {
                     return Err(DomainError::ArchivedScope);
                 }
@@ -219,7 +219,7 @@ impl Store {
                 let current = goal_row(tx, &project, &goal)
                     .await?
                     .ok_or(DomainError::NotFound)?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::AdministerProject)?;
                 require_revision(ctx.expected_revision, current.revision)?;
                 if current.archived || project_archived(tx, &project).await? {
                     return Err(DomainError::ArchivedScope);
@@ -284,7 +284,7 @@ impl Store {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 let scope_archived = project_archived(tx, &project).await?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::AdministerProject)?;
                 if scope_archived {
                     return Err(DomainError::ArchivedScope);
                 }
@@ -334,7 +334,7 @@ impl Store {
         .await
     }
 
-    // No require_owner: agents create epics (proposed via proposal_gate).
+    // No capability guard: agents create epics (proposed via proposal_gate).
     pub async fn create_epic(
         &self,
         ctx: CommandContext,
@@ -401,7 +401,7 @@ impl Store {
         .await
     }
 
-    // No require_owner: writers (agents included) edit nonterminal epics (plan/12).
+    // No capability guard: writers (agents included) edit nonterminal epics (plan/12).
     pub async fn update_epic(
         &self,
         ctx: CommandContext,
@@ -489,7 +489,7 @@ impl Store {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 // Membership precedes capability (plan/04): a missing or foreign epic is 404.
                 let scope = epic_scope(tx, &project, &epic).await?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::ResolveWork)?;
                 require_revision(ctx.expected_revision, scope.epic.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.epic.status != EpicStatus::Proposed {
@@ -534,7 +534,7 @@ impl Store {
         .await
     }
 
-    // No require_owner: agents create tasks (proposed via proposal_gate).
+    // No capability guard: agents create tasks (proposed via proposal_gate).
     pub async fn create_task(
         &self,
         ctx: CommandContext,
@@ -662,7 +662,7 @@ impl Store {
                     || patch.plan_review.is_some()
                     || patch.work_review.is_some();
                 if has_policy_change {
-                    require_owner(&actor)?;
+                    require_capability(&actor, Capability::LowerRequirements)?;
                 }
                 require_revision(ctx.expected_revision, current.revision)?;
                 let proj = project_row(tx, &project)
@@ -822,7 +822,7 @@ impl Store {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 // Membership precedes capability (plan/04): a missing or foreign task is 404.
                 let scope = task_scope(tx, &project, &task).await?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::ResolveWork)?;
                 require_revision(ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.epic.status.is_terminal() {
@@ -909,7 +909,7 @@ impl Store {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 let scope = task_scope(tx, &project, &task).await?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::RemoveDependencyOrUnblock)?;
                 require_revision(ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 let Some(block) = &scope.task.block else {
@@ -947,7 +947,7 @@ impl Store {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 let scope = task_scope(tx, &project, &task).await?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::ResolveWork)?;
                 require_revision(ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.task.status.is_terminal() || scope.epic.status.is_terminal() {
@@ -981,7 +981,7 @@ impl Store {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 let scope = task_scope(tx, &project, &task).await?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::ResolveWork)?;
                 require_revision(ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.epic.status.is_terminal() {
@@ -1084,7 +1084,7 @@ impl Store {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 let scope = epic_scope(tx, &project, &epic).await?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::RemoveDependencyOrUnblock)?;
                 require_revision(ctx.expected_revision, scope.epic.revision)?;
                 scope.ensure_unarchived()?;
                 let Some(block) = &scope.epic.block else {
@@ -1129,7 +1129,7 @@ impl Store {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 let scope = epic_scope(tx, &project, &epic).await?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::ResolveWork)?;
                 require_revision(ctx.expected_revision, scope.epic.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.epic.status.is_terminal() {
@@ -1165,7 +1165,7 @@ impl Store {
             Box::pin(async move {
                 let actor = live_actor(tx, &ctx.actor.id).await?;
                 let scope = epic_scope(tx, &project, &epic).await?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::ResolveWork)?;
                 require_revision(ctx.expected_revision, scope.epic.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.epic.status.is_terminal() {
@@ -1295,7 +1295,7 @@ impl Store {
                 let current = find_task_type(tx, &project, &task_type)
                     .await?
                     .ok_or(DomainError::NotFound)?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::AdministerProject)?;
                 require_revision(ctx.expected_revision, current.revision)?;
                 if current.archived || project_archived(tx, &project).await? {
                     return Err(DomainError::ArchivedScope);

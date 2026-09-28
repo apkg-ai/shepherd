@@ -3,13 +3,13 @@ use uuid::Uuid;
 
 use super::{
     CommandContext, CommandResult, PendingEvent, append_events, epic_has_active_work, live_actor,
-    missing_after_write, require_owner, require_revision, task_has_active_work,
+    missing_after_write, require_revision, task_has_active_work,
 };
 use crate::dag;
 use crate::error::DomainError;
 use crate::model::{
-    ActorKind, Dependency, DependencyCreate, DependencyId, DependencyLevel, EpicId, ProjectId,
-    Revision,
+    ActorKind, Capability, Dependency, DependencyCreate, DependencyId, DependencyLevel, EpicId,
+    ProjectId, Revision, require_capability,
 };
 use crate::queries::graph::{dependency_table, find_dependency, scoped_dependent_clause};
 use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
@@ -202,7 +202,7 @@ fn endpoint_events(
 }
 
 impl Store {
-    // No require_owner and no If-Match: both actor kinds add links; creation
+    // No capability guard and no If-Match: both actor kinds add links; creation
     // reloads both ends under the project write lock instead (plan/07, plan/12).
     pub async fn create_dependency(
         &self,
@@ -356,7 +356,7 @@ impl Store {
                 let current = find_dependency(tx, &project, &dependency)
                     .await?
                     .ok_or(DomainError::NotFound)?;
-                require_owner(&actor)?;
+                require_capability(&actor, Capability::RemoveDependencyOrUnblock)?;
                 require_revision(ctx.expected_revision, current.revision)?;
                 let level = current.level;
                 let dependent = load_endpoint(tx, &project, level, current.dependent_id).await?;
