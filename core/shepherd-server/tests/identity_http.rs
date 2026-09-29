@@ -389,6 +389,100 @@ async fn invalid_bearer_never_falls_back_to_cookie() {
 }
 
 #[tokio::test]
+async fn malformed_authorization_never_falls_back_to_cookie() {
+    let f = fixture().await;
+    let session = login(&f).await;
+    for value in [
+        "Basic dXNlcjpwYXNz",
+        "Bearer",
+        "Bearer  ",
+        "bearer",
+        "Token abc",
+    ] {
+        let (status, _, body) = req(Method::GET, "/api/v1/principal")
+            .header(header::AUTHORIZATION.as_str(), value)
+            .header("cookie", &session.cookie)
+            .send(&f.app)
+            .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{value}: {body}");
+        assert_eq!(body["code"], "unauthenticated", "{value}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn bearer_scheme_parses_case_insensitively() {
+    let f = fixture().await;
+    let session = login(&f).await;
+    let (_, agent_token) = create_agent(&f, &session, "builder").await;
+    // The exact repro from review: a lowercase scheme fell through to the
+    // owner cookie and answered 200 human instead of the agent.
+    let (status, _, body) = req(Method::GET, "/api/v1/principal")
+        .header(
+            header::AUTHORIZATION.as_str(),
+            &format!("bearer {agent_token}"),
+        )
+        .header("cookie", &session.cookie)
+        .send(&f.app)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["kind"], "agent");
+}
+
+// ── CORS preflights pass the gate ───────────────────────────────────────
+
+fn preflight(path: &str) -> TestRequest {
+    req(Method::OPTIONS, path)
+        .header("origin", ORIGIN)
+        .header("Access-Control-Request-Method", "POST")
+        .header("Access-Control-Request-Headers", "content-type")
+}
+
+#[tokio::test]
+async fn allowed_preflight_answers_with_gate_headers() {
+    let f = fixture().await;
+    let (status, headers, _) = preflight("/api/v1/agents").send(&f.app).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers["access-control-allow-origin"].to_str().unwrap(),
+        ORIGIN
+    );
+    assert!(headers.contains_key("x-request-id"));
+    assert!(headers.contains_key(header::CONTENT_SECURITY_POLICY));
+}
+
+#[tokio::test]
+async fn preflight_with_untrusted_host_is_rejected_with_gate_headers() {
+    let f = fixture().await;
+    let (status, headers, body) = TestRequest {
+        builder: Request::builder()
+            .method(Method::OPTIONS)
+            .uri("/api/v1/principal")
+            .header(header::HOST, "evil.example.com:7437")
+            .header("origin", ORIGIN)
+            .header("Access-Control-Request-Method", "GET"),
+        body: Body::empty(),
+    }
+    .send(&f.app)
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "malformed_request");
+    assert!(headers.contains_key("x-request-id"));
+    assert!(headers.contains_key(header::CONTENT_SECURITY_POLICY));
+}
+
+#[tokio::test]
+async fn preflight_with_untrusted_origin_is_rejected() {
+    let f = fixture().await;
+    let (status, _, body) = req(Method::OPTIONS, "/api/v1/principal")
+        .header("origin", "https://evil.example.com")
+        .header("Access-Control-Request-Method", "GET")
+        .send(&f.app)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "forbidden");
+}
+
+#[tokio::test]
 async fn bearer_wins_over_cookie() {
     let f = fixture().await;
     let session = login(&f).await;

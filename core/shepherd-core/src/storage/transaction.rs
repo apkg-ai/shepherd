@@ -144,22 +144,34 @@ pub fn write_secret_file(path: &Path, bytes: &[u8]) -> Result<(), StorageError> 
     })?;
     fs::create_dir_all(parent)?;
     fs::set_permissions(parent, Permissions::from_mode(0o700))?;
-    // Same-directory temp file + rename: a crash mid-write can never leave a
-    // truncated secret behind, only the old file or the complete new one.
-    let staging = path.with_extension("tmp");
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&staging)?;
-    // mode() applies only at creation; a pre-existing file keeps its old bits.
-    file.set_permissions(Permissions::from_mode(0o600))?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(&staging, path)?;
-    Ok(())
+    let name = path.file_name().ok_or_else(|| {
+        StorageError::CredentialFile(format!("{} has no file name", path.display()))
+    })?;
+    // Unique unpredictable staging name created with O_CREAT|O_EXCL: a
+    // pre-existing symlink there cannot be followed, and rename() replaces
+    // the target itself, never what a symlink at the target points to.
+    let mut nonce = [0u8; 8];
+    getrandom::fill(&mut nonce).expect("system RNG is available");
+    let staging = parent.join(format!(
+        ".{}.tmp-{}",
+        name.to_string_lossy(),
+        u64::from_be_bytes(nonce)
+    ));
+    let staged = (|| -> std::io::Result<()> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&staging)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&staging, path)
+    })();
+    if staged.is_err() {
+        let _ = fs::remove_file(&staging);
+    }
+    Ok(staged?)
 }
 
 /// Backup-restore parity with plan/13: reject secrets readable by group/others.
@@ -364,6 +376,31 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), b"second");
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn write_secret_file_replaces_a_symlinked_target_without_following_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim");
+        fs::write(&victim, b"do not touch").unwrap();
+        let path = dir.path().join("owner-token");
+        std::os::unix::fs::symlink(&victim, &path).unwrap();
+        write_secret_file(&path, b"new-secret").unwrap();
+        assert_eq!(fs::read(&victim).unwrap(), b"do not touch");
+        assert!(fs::symlink_metadata(&path).unwrap().file_type().is_file());
+        assert_eq!(fs::read(&path).unwrap(), b"new-secret");
+    }
+
+    #[test]
+    fn write_secret_file_leaves_no_staging_file_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("replay-key");
+        write_secret_file(&path, b"material").unwrap();
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(leftovers, vec!["replay-key".to_string()]);
     }
 
     #[test]

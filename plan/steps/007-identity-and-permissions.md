@@ -113,4 +113,13 @@ Full-PR adversarial review after opening; 12 findings, all resolved or explicitl
 - **fs2 replaced by std file locking** [dependency, owner-approved]: fs2 0.4.3 is unmaintained (last release January 2018, issues/PRs ignored); `std::fs::File::try_lock` — stable since Rust 1.89, same `flock` semantics, an explicit `TryLockError::WouldBlock` — replaces it with zero dependencies. `plan/dependencies.md` and plan/12 updated with the substitution rationale.
 - **Dismissed** [owner decision]: `redact_header`/`REDACTED_HEADERS` stay although no logging pipeline calls them yet — the step spec mandates the redaction wrapper and step 025's tracing subscriber is the consumer.
 
+### Review follow-ups, round two (second review pass on PR #89)
+
+Four findings from the follow-up review, each fix gated with its regression.
+
+- **Authorization fall-through to the cookie** [security, P2]: the scheme parsed case-sensitively (`bearer <agent-token>` + owner cookie answered `200 human`) and malformed values silently tried the cookie. The gate now treats any supplied `Authorization` header as decisive: RFC 7235 case-insensitive scheme, and any malformed/unsupported value rejects 401 without the cookie. Regressions: `bearer_scheme_parses_case_insensitively`, `malformed_authorization_never_falls_back_to_cookie`.
+- **CORS preflights bypassed the gate** [security, P2]: the outermost cors layer answered `OPTIONS` before Host/Origin checks, so a preflight with an untrusted Host returned 200 without `X-Request-Id` or CSP. The gate is now outermost (cors answers from inside) and passes credential-less `OPTIONS` through only after its Host/Origin checks; every preflight response carries the gate headers. Regressions: `allowed_preflight_answers_with_gate_headers`, `preflight_with_untrusted_host_is_rejected_with_gate_headers`, `preflight_with_untrusted_origin_is_rejected`.
+- **Staging file symlink in `write_secret_file`** [security, P2]: the predictable `.tmp` path opened with create/truncate followed a pre-existing symlink. Staging is now a unique unpredictable name created with `O_CREAT|O_EXCL` (which refuses symlinks), and failed writes clean up after themselves. Regressions: `write_secret_file_replaces_a_symlinked_target_without_following_it`, `write_secret_file_leaves_no_staging_file_behind`.
+- **Origin comparison ignored password/query/fragment** [security, P3]: `http://localhost:7437?x=1` passed the allowlist. `origin_allowed` now requires the password, query and fragment to be absent (unit cases in `origin_allowlist_is_parsed_exactly`).
+
 Next eligible step: [008](008-proposals-and-policy.md).

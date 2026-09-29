@@ -77,7 +77,10 @@ impl AuthConfig {
                 && parsed.host_str() == expected.host_str()
                 && parsed.port_or_known_default() == expected.port_or_known_default()
                 && parsed.username().is_empty()
+                && parsed.password().is_none()
                 && parsed.path() == "/"
+                && parsed.query().is_none()
+                && parsed.fragment().is_none()
         })
     }
 
@@ -288,9 +291,15 @@ async fn api_gate(
         return reject(StatusCode::SERVICE_UNAVAILABLE, "integrity_failure", reason);
     }
 
+    // A supplied Authorization header decides the credential entirely: the
+    // scheme parses case-insensitively (RFC 7235) and any malformed or
+    // unsupported value rejects without ever trying the cookie.
+    let authorization = req.headers().get(header::AUTHORIZATION);
     let mut principal = None;
     let mut session = None;
-    if !is_public {
+    // OPTIONS carries no credentials: preflights pass (the Host/Origin checks
+    // above already screened them) and the inner cors layer answers.
+    if !is_public && *method != Method::OPTIONS {
         let ServiceState::Normal(store) = state.service.as_ref() else {
             // Diagnostic mode already rejected above; nothing else reaches here.
             return reject(
@@ -299,13 +308,14 @@ async fn api_gate(
                 "service is in diagnostic-only mode",
             );
         };
-        let bearer = req
-            .headers()
-            .get(header::AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix("Bearer "));
-        if let Some(token) = bearer {
-            // Bearer wins; an invalid bearer never falls back to the cookie.
+        if let Some(header_value) = authorization {
+            let Some(token) = header_value.to_str().ok().and_then(bearer_token) else {
+                return reject(
+                    StatusCode::UNAUTHORIZED,
+                    "unauthenticated",
+                    "Authorization header must be `Bearer <token>`",
+                );
+            };
             let token = SecretString::new(token.to_string());
             match store.authenticate_bearer(&token).await {
                 Ok(actor) => principal = Some(actor),
@@ -415,6 +425,12 @@ fn requires_idempotency_key(method: &Method, path: &str) -> bool {
             .strip_prefix("/api/v1/agents/")
             .and_then(|rest| rest.strip_suffix("/revoke"))
             .is_some_and(|id| !id.is_empty() && !id.contains('/'))
+}
+
+fn bearer_token(value: &str) -> Option<&str> {
+    let (scheme, token) = value.split_once(char::is_whitespace)?;
+    let token = token.trim();
+    (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then_some(token)
 }
 
 fn session_cookie(headers: &axum::http::HeaderMap) -> Option<SecretString> {
@@ -612,6 +628,10 @@ mod tests {
         assert!(!config.origin_allowed("http://localhost:7437.evil.com"));
         assert!(!config.origin_allowed("https://localhost:7437"));
         assert!(!config.origin_allowed("http://user@localhost:7437"));
+        assert!(!config.origin_allowed("http://user:pass@localhost:7437"));
+        assert!(!config.origin_allowed("http://:pass@localhost:7437"));
+        assert!(!config.origin_allowed("http://localhost:7437?x=1"));
+        assert!(!config.origin_allowed("http://localhost:7437#frag"));
         let dev = AuthConfig {
             port: 7437,
             dev: true,

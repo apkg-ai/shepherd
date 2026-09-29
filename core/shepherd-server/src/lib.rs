@@ -91,11 +91,13 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
         // The fallback must precede the layers — Router::layer wraps only what comes before it.
         .fallback_service(ServeDir::new(ui_dir.as_ref()))
         .layer(axum::middleware::from_fn(middleware::problem_shaper))
+        // The gate must be outermost so CORS preflights pass its Host/Origin
+        // checks and carry X-Request-Id/CSP too; cors answers them from inside.
+        .layer(cors)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::gate,
         ))
-        .layer(cors)
 }
 
 async fn openapi_spec() -> impl IntoResponse {
