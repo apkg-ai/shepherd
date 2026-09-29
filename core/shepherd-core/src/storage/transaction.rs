@@ -166,7 +166,10 @@ pub fn write_secret_file(path: &Path, bytes: &[u8]) -> Result<(), StorageError> 
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
-        fs::rename(&staging, path)
+        fs::rename(&staging, path)?;
+        // The staging file is durable; make the renamed directory entry durable
+        // too, so a power loss cannot lose the secret the DB now references.
+        fs::File::open(parent)?.sync_all()
     })();
     if staged.is_err() {
         let _ = fs::remove_file(&staging);

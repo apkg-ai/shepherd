@@ -5,7 +5,7 @@ use axum::http::{Method, Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use shepherd_core::commands::IdentityPaths;
-use shepherd_core::model::TestClock;
+use shepherd_core::model::{SecretString, TestClock};
 use shepherd_core::storage::{Store, open, testing};
 use shepherd_server::{AppState, AuthConfig};
 use tower::ServiceExt;
@@ -143,8 +143,13 @@ async fn create_agent(f: &Fixture, session: &OwnerSession, label: &str) -> (Stri
 }
 
 async fn actor_count(f: &Fixture) -> usize {
+    let owner = f
+        .store
+        .authenticate_bearer(&SecretString::new(f.owner_token.clone()))
+        .await
+        .unwrap();
     f.store
-        .list_agents(&shepherd_core::queries::ListParams::default())
+        .list_agents(&owner.id, &shepherd_core::queries::ListParams::default())
         .await
         .unwrap()
         .items

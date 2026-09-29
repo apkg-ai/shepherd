@@ -13,8 +13,8 @@ use axum::routing::get;
 use shepherd_core::commands::CommandContext;
 use shepherd_core::error::DomainError;
 use shepherd_core::model::{
-    Actor as CoreActor, ActorId, ActorKind, AgentCreate as CoreAgentCreate, Capability, CommandId,
-    SecretString, canonical_request_hash, require_capability,
+    Actor as CoreActor, ActorId, ActorKind, AgentCreate as CoreAgentCreate, CommandId,
+    SecretString, canonical_request_hash,
 };
 use shepherd_core::queries::ListParams;
 use shepherd_core::storage::Store;
@@ -287,9 +287,6 @@ impl IdentityApi for AppState {
     async fn list_agents(&self, cursor: Option<String>, limit: Option<i32>) -> ListAgentsResponse {
         let store = require_store!(self, ListAgentsResponse);
         let principal = require_principal!(ListAgentsResponse);
-        if let Err(err) = require_capability(&principal, Capability::ManageCredentials) {
-            return domain_problem!(ListAgentsResponse, err);
-        }
         let params = ListParams {
             // Negatives are unreachable past the generated validation
             // (minimum: 1); 0 falls to effective_limit's range error.
@@ -297,7 +294,7 @@ impl IdentityApi for AppState {
             cursor,
             include_archived: false,
         };
-        match store.list_agents(&params).await {
+        match store.list_agents(&principal.id, &params).await {
             Ok(page) => ListAgentsResponse::Ok(wire::PageActor {
                 items: page.items.iter().map(wire_actor).collect(),
                 next_cursor: page.next_cursor,

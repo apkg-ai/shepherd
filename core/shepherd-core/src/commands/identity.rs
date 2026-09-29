@@ -121,7 +121,8 @@ impl Store {
     }
 
     /// Explicit recovery path: rotates the owner credential and rewrites the
-    /// token file. The owner Actor never changes identity (plan/12).
+    /// token file. The owner Actor never changes identity (plan/12). A failed
+    /// commit restores the previous file so the old credential stays usable.
     pub async fn reissue_owner_token(
         &self,
         paths: &IdentityPaths,
@@ -130,43 +131,59 @@ impl Store {
             return self.ensure_owner(paths).await;
         };
         let token = generate_token();
-        write_secret_file(&paths.owner_token(), token.expose().as_bytes())?;
+        let token_path = paths.owner_token();
+        let previous_file = std::fs::read(&token_path).ok();
+        write_secret_file(&token_path, token.expose().as_bytes())?;
         let digest = token_digest(&token);
         let now = self.clock().now();
         let command_id = CommandId::generate(now);
         let owner_id = actor.id;
-        self.domain_transaction(move |tx| {
-            Box::pin(async move {
-                sqlx::query(
-                    "UPDATE credentials SET revoked_at = ?1 WHERE revoked_at IS NULL \
+        let rotated = self
+            .domain_transaction(move |tx| {
+                Box::pin(async move {
+                    sqlx::query(
+                        "UPDATE credentials SET revoked_at = ?1 WHERE revoked_at IS NULL \
                      AND actor_id IN (SELECT id FROM actors WHERE kind = 'human')",
-                )
-                .bind(format_ts(&now))
-                .execute(&mut **tx)
-                .await?;
-                // Reissue is the compromise-recovery path: sessions minted with
-                // the old token must die with it, like revocation does for agents.
-                sqlx::query(
-                    "DELETE FROM browser_sessions \
+                    )
+                    .bind(format_ts(&now))
+                    .execute(&mut **tx)
+                    .await?;
+                    // Reissue is the compromise-recovery path: sessions minted with
+                    // the old token must die with it, like revocation does for agents.
+                    sqlx::query(
+                        "DELETE FROM browser_sessions \
                      WHERE actor_id IN (SELECT id FROM actors WHERE kind = 'human')",
-                )
-                .execute(&mut **tx)
-                .await?;
-                insert_credential(tx, &owner_id, &digest, &now).await?;
-                security_audit(
-                    tx,
-                    &owner_id,
-                    "reissueOwnerToken",
-                    None,
-                    "",
-                    &command_id,
-                    &now,
-                )
-                .await?;
-                Ok(())
+                    )
+                    .execute(&mut **tx)
+                    .await?;
+                    insert_credential(tx, &owner_id, &digest, &now).await?;
+                    security_audit(
+                        tx,
+                        &owner_id,
+                        "reissueOwnerToken",
+                        None,
+                        "",
+                        &command_id,
+                        &now,
+                    )
+                    .await?;
+                    Ok(())
+                })
             })
-        })
-        .await?;
+            .await;
+        if rotated.is_err() {
+            // The rollback kept the old credential live; put its token back so
+            // the file still matches the DB and the next startup verifies.
+            match &previous_file {
+                Some(previous) => {
+                    let _ = write_secret_file(&token_path, previous);
+                }
+                None => {
+                    let _ = std::fs::remove_file(&token_path);
+                }
+            }
+        }
+        rotated?;
         Ok(OwnerBootstrap {
             actor,
             created: false,
@@ -415,7 +432,16 @@ impl Store {
     }
 
     /// Agents including revoked ones, keyset-paginated like every list (plan/07).
-    pub async fn list_agents(&self, params: &ListParams) -> Result<Page<Actor>, DomainError> {
+    /// Owner-only in core, not just in the HTTP gate: future CLI/MCP callers
+    /// must not bypass the authorization boundary.
+    pub async fn list_agents(
+        &self,
+        caller: &ActorId,
+        params: &ListParams,
+    ) -> Result<Page<Actor>, DomainError> {
+        let mut conn = self.pool().acquire().await.map_err(StorageError::from)?;
+        let actor = live_actor(&mut conn, caller).await?;
+        require_capability(&actor, Capability::ManageCredentials)?;
         let after = params
             .cursor
             .as_deref()
@@ -737,6 +763,30 @@ mod tests {
         assert_eq!(f.count("browser_sessions").await, 0);
         let fresh = f.owner_token().await;
         f.store.login_browser(&fresh, f.clock.now()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_reissue_restores_the_previous_token_file() {
+        let f = fixture().await;
+        f.owner().await;
+        let old_token = f.owner_token().await;
+        let old_bytes = std::fs::read(f.paths().owner_token()).unwrap();
+        // Inject a DB failure inside the rotation: the credential insert is
+        // the first statement that writes the new digest.
+        sqlx::query(
+            "CREATE TRIGGER abort_credential_insert BEFORE INSERT ON credentials \
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END",
+        )
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+        assert!(f.store.reissue_owner_token(&f.paths()).await.is_err());
+        assert_eq!(std::fs::read(f.paths().owner_token()).unwrap(), old_bytes);
+        // The old credential stays live and the file still verifies on boot.
+        assert_eq!(
+            f.store.authenticate_bearer(&old_token).await.unwrap().id,
+            f.store.ensure_owner(&f.paths()).await.unwrap().actor.id
+        );
     }
 
     #[tokio::test]
@@ -1088,10 +1138,13 @@ mod tests {
             .unwrap();
         let page = f
             .store
-            .list_agents(&ListParams {
-                limit: Some(2),
-                ..Default::default()
-            })
+            .list_agents(
+                &owner.id,
+                &ListParams {
+                    limit: Some(2),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         assert_eq!(page.items.len(), 2);
@@ -1100,11 +1153,14 @@ mod tests {
         let cursor = page.next_cursor.expect("second page exists");
         let rest = f
             .store
-            .list_agents(&ListParams {
-                limit: Some(2),
-                cursor: Some(cursor.clone()),
-                ..Default::default()
-            })
+            .list_agents(
+                &owner.id,
+                &ListParams {
+                    limit: Some(2),
+                    cursor: Some(cursor.clone()),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         assert_eq!(rest.items.len(), 1);
@@ -1113,24 +1169,59 @@ mod tests {
 
         let err = f
             .store
-            .list_agents(&ListParams {
-                cursor: Some(format!("{cursor}x")),
-                ..Default::default()
-            })
+            .list_agents(
+                &owner.id,
+                &ListParams {
+                    cursor: Some(format!("{cursor}x")),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, DomainError::InvalidCursor(_)));
         let err = f
             .store
-            .list_agents(&ListParams {
-                limit: Some(0),
-                ..Default::default()
-            })
+            .list_agents(
+                &owner.id,
+                &ListParams {
+                    limit: Some(0),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap_err();
         assert!(matches!(
             err,
             DomainError::Validation { field: "limit", .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn list_agents_is_owner_only_in_core() {
+        let f = fixture().await;
+        let owner = f.owner().await;
+        let grant = f.agent(&owner, "builder").await;
+        let params = ListParams::default();
+        assert!(matches!(
+            f.store.list_agents(&grant.actor.id, &params).await,
+            Err(DomainError::Forbidden(_))
+        ));
+        // A revoked agent gets the same refusal, not a session of its data.
+        f.store
+            .revoke_agent(f.ctx(&owner), grant.actor.id, "rogue".to_string(), "hash")
+            .await
+            .unwrap();
+        assert!(matches!(
+            f.store.list_agents(&grant.actor.id, &params).await,
+            Err(DomainError::Forbidden(_))
+        ));
+        // An unknown caller is rejected too, before any agent rows are read.
+        let unknown = ActorId::generate(f.clock.now());
+        assert!(matches!(
+            f.store.list_agents(&unknown, &params).await,
+            Err(DomainError::Forbidden(_))
+        ));
+        let page = f.store.list_agents(&owner.id, &params).await.unwrap();
+        assert_eq!(page.items.len(), 1);
     }
 }
