@@ -60,9 +60,9 @@ impl Store {
     /// verify the file against the stored digest. The file is written before
     /// the credential row so a crash between the two self-heals on next boot.
     pub async fn ensure_owner(&self, paths: &IdentityPaths) -> Result<OwnerBootstrap, DomainError> {
-        let existing = live_owner_credential(self.pool()).await?;
+        let existing = live_owner_credential_or_actor(self.pool()).await?;
         let token_path = paths.owner_token();
-        let Some((actor, stored_hash)) = existing else {
+        let Some((actor, credential)) = existing else {
             let token = generate_token();
             write_secret_file(&token_path, token.expose().as_bytes())?;
             let now = self.clock().now();
@@ -98,6 +98,14 @@ impl Store {
                 actor: owner,
                 created: true,
             });
+        };
+        let Some(stored_hash) = credential else {
+            // An owner actor exists but every credential is revoked: never
+            // bootstrap a second owner principal over it; reissue recovers.
+            return Err(locked_out(
+                &token_path,
+                "cannot be verified while every owner credential is revoked",
+            ));
         };
         if !token_path.exists() {
             return Err(locked_out(
@@ -715,6 +723,38 @@ mod tests {
         assert_eq!(second.actor.id, first.actor.id);
         assert_eq!(f.count("credentials").await, 1);
         assert_eq!(f.audit_actions().await, vec!["bootstrapOwner".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn ensure_owner_never_duplicates_a_revoked_owner_actor() {
+        let f = fixture().await;
+        let owner = f.owner().await;
+        // Out-of-band state (partial restore, manual edit): the human actor
+        // lives on but every credential is revoked.
+        sqlx::query("UPDATE credentials SET revoked_at = ?1 WHERE actor_id = ?2")
+            .bind(format_ts(&f.clock.now()))
+            .bind(owner.id.to_string())
+            .execute(f.store.pool())
+            .await
+            .unwrap();
+
+        assert_locked_out(f.store.ensure_owner(&f.paths()).await.unwrap_err());
+        assert_eq!(
+            f.count("actors").await,
+            1,
+            "a second owner actor must never be bootstrapped"
+        );
+
+        // Reissue recovers by reusing the existing actor.
+        let reissued = f.store.reissue_owner_token(&f.paths()).await.unwrap();
+        assert_eq!(reissued.actor.id, owner.id);
+        assert_eq!(f.count("actors").await, 1);
+        f.store.ensure_owner(&f.paths()).await.unwrap();
+        let token = f.owner_token().await;
+        assert_eq!(
+            f.store.authenticate_bearer(&token).await.unwrap().id,
+            owner.id
+        );
     }
 
     #[tokio::test]
