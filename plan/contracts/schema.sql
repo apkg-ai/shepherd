@@ -304,6 +304,8 @@ CREATE INDEX tasks_epic ON tasks(epic_id,status,phase,created_at,id);
 
 CREATE INDEX tasks_project ON tasks(project_id,status,phase,created_at,id);
 
+CREATE INDEX tasks_project_page ON tasks(project_id,archived,created_at,id);
+
 CREATE INDEX claims_expiry ON claims(status,expires_at);
 
 CREATE INDEX sessions_task ON sessions(task_id,ended_at,id);

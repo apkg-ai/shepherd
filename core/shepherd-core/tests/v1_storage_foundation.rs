@@ -106,8 +106,9 @@ async fn reopening_v1_database_preserves_data_without_new_migrations() {
         .fetch_one(store.pool())
         .await
         .unwrap();
-    // Baseline plus the step 005 project-scope indexes; a reopen adds nothing.
-    assert_eq!(migrations, 2);
+    // Baseline, the step 005 project-scope indexes, the step 007 task page
+    // index; a reopen adds nothing.
+    assert_eq!(migrations, 3);
 }
 
 async fn assert_rejection_leaves_bytes_untouched(dir: &tempfile::TempDir, db_name: &str) {
@@ -515,4 +516,35 @@ async fn applied_migrations_match_contract_schema() {
     let declared = schema_objects(contract).await;
     assert!(!migrated.is_empty());
     assert_eq!(migrated, declared);
+}
+
+// The default task page must walk the page index in order instead of
+// collecting the project's tasks and sorting each page in a temp B-tree.
+#[tokio::test]
+async fn default_task_page_uses_the_page_index_without_a_temp_sort() {
+    use sqlx::Row as _;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = open_store(&dir, Arc::new(TestClock::new(start_time()))).await;
+    let rows = sqlx::query(
+        "EXPLAIN QUERY PLAN SELECT id FROM tasks \
+         WHERE project_id = 'p' AND archived = 0 \
+         ORDER BY created_at ASC, id ASC LIMIT 51",
+    )
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+    let plan: Vec<String> = rows
+        .iter()
+        .map(|row| row.try_get::<String, _>("detail").unwrap())
+        .collect();
+    let joined = plan.join(" | ");
+    assert!(
+        joined.contains("tasks_project_page"),
+        "the default page query must use the page index, got: {joined}"
+    );
+    assert!(
+        !joined.to_ascii_lowercase().contains("temp b-tree"),
+        "the default page query must not sort in a temp B-tree, got: {joined}"
+    );
 }
