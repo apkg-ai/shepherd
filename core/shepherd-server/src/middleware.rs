@@ -510,17 +510,6 @@ pub async fn problem_shaper(req: Request, next: Next) -> Response<Body> {
     response
 }
 
-// ── Rate-limit header middleware (health only: plan/12 forbids broad fakes) ──
-
-pub async fn health_rate_limit_headers(req: Request, next: Next) -> Response<Body> {
-    let mut response = next.run(req).await;
-    let headers = response.headers_mut();
-    headers.insert("RateLimit-Limit", HeaderValue::from_static("1000"));
-    headers.insert("RateLimit-Remaining", HeaderValue::from_static("999"));
-    headers.insert("RateLimit-Reset", HeaderValue::from_static("60"));
-    response
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

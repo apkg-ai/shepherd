@@ -18,8 +18,8 @@ rules:
   # OWASP 2023 — at default (error) severity except the rules below.
   # ──────────────────────────────────────────────────────────────────────
 
-  # The loopback daemon has no rate limiting, and plan/12 forbids broad
-  # fake RateLimit headers; only /health declares (and sends) them.
+  # The loopback daemon implements no rate limiting and advertises none;
+  # plan/12 forbids fake RateLimit headers.
   owasp:api4:2023-rate-limit: off
 
   # POST /api/v1/session is browser login — necessarily public (plan/12).

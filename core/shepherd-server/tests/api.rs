@@ -93,16 +93,25 @@ async fn openapi_spec_is_served_as_yaml() {
 }
 
 #[tokio::test]
-async fn rate_limit_headers_are_scoped_to_health() {
+async fn no_unenforced_rate_limit_headers_are_served() {
     let f = test_app().await;
-    let response = get_response(&f.app, "/health").await;
-    assert!(response.headers().contains_key("RateLimit-Limit"));
-    assert!(response.headers().contains_key("RateLimit-Remaining"));
-    assert!(response.headers().contains_key("RateLimit-Reset"));
-
-    // plan/12: no broad fake RateLimit headers on the API surface.
-    let response = get_response(&f.app, "/api/v1/principal").await;
-    assert!(!response.headers().contains_key("RateLimit-Limit"));
+    // The daemon enforces no quota, so advertising one would be a lie
+    // (plan/12 forbids fake RateLimit headers) — on any path.
+    for path in ["/health", "/api/v1/principal"] {
+        let response = get_response(&f.app, path).await;
+        assert!(
+            !response.headers().contains_key("RateLimit-Limit"),
+            "{path}"
+        );
+        assert!(
+            !response.headers().contains_key("RateLimit-Remaining"),
+            "{path}"
+        );
+        assert!(
+            !response.headers().contains_key("RateLimit-Reset"),
+            "{path}"
+        );
+    }
 }
 
 #[tokio::test]

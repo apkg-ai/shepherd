@@ -7,9 +7,9 @@ Content-Type: application/health+json
 jsonpath "$.status" == "pass"
 jsonpath "$.version" matches "^\\d+\\.\\d+\\.\\d+"
 jsonpath "$.description" == "shepherd local daemon"
-header "RateLimit-Limit" exists
-header "RateLimit-Remaining" exists
-header "RateLimit-Reset" exists
+header "RateLimit-Limit" not exists
+header "RateLimit-Remaining" not exists
+header "RateLimit-Reset" not exists
 
 # Served OpenAPI spec starts with "openapi:".
 

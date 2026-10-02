@@ -55,12 +55,6 @@ paths:
         "200":
           description: Service is healthy (status pass or warn).
           headers:
-            RateLimit-Limit:
-              $ref: "#/components/headers/RateLimit-Limit"
-            RateLimit-Remaining:
-              $ref: "#/components/headers/RateLimit-Remaining"
-            RateLimit-Reset:
-              $ref: "#/components/headers/RateLimit-Reset"
             Access-Control-Allow-Origin:
               $ref: "#/components/headers/Access-Control-Allow-Origin"
           content:
@@ -75,19 +69,11 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/ValidationError"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
         "500":
           $ref: "#/components/responses/InternalError"
         "503":
           description: Service is unhealthy (status fail).
           headers:
-            RateLimit-Limit:
-              $ref: "#/components/headers/RateLimit-Limit"
-            RateLimit-Remaining:
-              $ref: "#/components/headers/RateLimit-Remaining"
-            RateLimit-Reset:
-              $ref: "#/components/headers/RateLimit-Reset"
             Access-Control-Allow-Origin:
               $ref: "#/components/headers/Access-Control-Allow-Origin"
           content:
@@ -783,38 +769,6 @@ components:
   # ── Reusable headers ─────────────────────────────────────────────────
 
   headers:
-    RateLimit-Limit:
-      description: Maximum number of requests allowed in the current window.
-      required: true
-      schema:
-        type: integer
-        format: int32
-        minimum: 1
-        maximum: 100000
-    RateLimit-Remaining:
-      description: Number of requests remaining in the current window.
-      required: true
-      schema:
-        type: integer
-        format: int32
-        minimum: 0
-        maximum: 100000
-    RateLimit-Reset:
-      description: Seconds until the current rate-limit window resets.
-      required: true
-      schema:
-        type: integer
-        format: int32
-        minimum: 0
-        maximum: 86400
-    Retry-After:
-      description: Seconds to wait before retrying after a 429 response.
-      required: true
-      schema:
-        type: integer
-        format: int32
-        minimum: 0
-        maximum: 86400
     Access-Control-Allow-Origin:
       description: CORS allowed origin.
       required: true
@@ -830,12 +784,6 @@ components:
     Unauthorized:
       description: Authentication required or invalid token.
       headers:
-        RateLimit-Limit:
-          $ref: "#/components/headers/RateLimit-Limit"
-        RateLimit-Remaining:
-          $ref: "#/components/headers/RateLimit-Remaining"
-        RateLimit-Reset:
-          $ref: "#/components/headers/RateLimit-Reset"
         Access-Control-Allow-Origin:
           $ref: "#/components/headers/Access-Control-Allow-Origin"
       content:
@@ -851,12 +799,6 @@ components:
     ValidationError:
       description: Request body or parameters failed validation.
       headers:
-        RateLimit-Limit:
-          $ref: "#/components/headers/RateLimit-Limit"
-        RateLimit-Remaining:
-          $ref: "#/components/headers/RateLimit-Remaining"
-        RateLimit-Reset:
-          $ref: "#/components/headers/RateLimit-Reset"
         Access-Control-Allow-Origin:
           $ref: "#/components/headers/Access-Control-Allow-Origin"
       content:
@@ -876,12 +818,6 @@ components:
     InternalError:
       description: Unexpected server error.
       headers:
-        RateLimit-Limit:
-          $ref: "#/components/headers/RateLimit-Limit"
-        RateLimit-Remaining:
-          $ref: "#/components/headers/RateLimit-Remaining"
-        RateLimit-Reset:
-          $ref: "#/components/headers/RateLimit-Reset"
         Access-Control-Allow-Origin:
           $ref: "#/components/headers/Access-Control-Allow-Origin"
       content:
@@ -893,29 +829,6 @@ components:
             title: Internal Server Error
             status: 500
             detail: An unexpected error occurred.
-
-    TooManyRequests:
-      description: Rate limit exceeded. Retry after the indicated delay.
-      headers:
-        RateLimit-Limit:
-          $ref: "#/components/headers/RateLimit-Limit"
-        RateLimit-Remaining:
-          $ref: "#/components/headers/RateLimit-Remaining"
-        RateLimit-Reset:
-          $ref: "#/components/headers/RateLimit-Reset"
-        Access-Control-Allow-Origin:
-          $ref: "#/components/headers/Access-Control-Allow-Origin"
-        Retry-After:
-          $ref: "#/components/headers/Retry-After"
-      content:
-        application/problem+json:
-          schema:
-            $ref: "#/components/schemas/ProblemDetail"
-          example:
-            type: "urn:shepherd:error:rate-limit-exceeded"
-            title: Too Many Requests
-            status: 429
-            detail: Rate limit exceeded. Try again in 60 seconds.
 
   # ── Schemas ──────────────────────────────────────────────────────────
 

@@ -79,13 +79,9 @@ const OPENAPI_SPEC: &str = include_str!("../../../openapi/shepherd.yaml");
 pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
     let cors = middleware::cors_layer(&state.auth);
     Router::new()
-        // Health keeps its contract-declared RateLimit headers; plan/12
-        // forbids fake rate-limit headers anywhere else.
-        .merge(
-            system_api_router(state.clone()).layer(axum::middleware::from_fn(
-                middleware::health_rate_limit_headers,
-            )),
-        )
+        // No RateLimit headers anywhere: the daemon enforces no quota, and
+        // plan/12 forbids advertising one that is not real.
+        .merge(system_api_router(state.clone()))
         .merge(identity_api_router(state.clone()))
         .route("/api/v1/openapi.yaml", get(openapi_spec))
         // The fallback must precede the layers — Router::layer wraps only what comes before it.
