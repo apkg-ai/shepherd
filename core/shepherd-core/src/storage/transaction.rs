@@ -31,6 +31,10 @@ impl Store {
         Ok(tx)
     }
 
+    // Test-support only (plan step-000 review R-01): production callers must
+    // go through domain_transaction so live_actor, capability and audit
+    // checks cannot be bypassed.
+    #[cfg(any(test, feature = "test-support"))]
     pub async fn command_transaction<T, F>(&self, command: F) -> Result<T, StorageError>
     where
         F: for<'t> FnOnce(&'t mut Transaction<'static, Sqlite>) -> TxFuture<'t, T>,
