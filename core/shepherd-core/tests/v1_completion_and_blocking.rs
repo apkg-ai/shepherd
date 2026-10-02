@@ -1203,3 +1203,51 @@ async fn unblock_clears_stale_block_on_cancelled_task() {
         |(_, _, _, action, reason, _)| action == "unblockTask" && reason == "waiting on design"
     ));
 }
+
+// A linear epic chain cascades one wave per depth level; the completion of
+// the chain's head task must finish every epic in the single command, with
+// each epic bumped exactly once (revision 2) — the set-based pending scan.
+#[tokio::test]
+async fn deep_dependency_chain_cascades_with_one_bump_per_epic() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let depth = 100;
+
+    let mut epics = Vec::new();
+    for index in 0..depth {
+        epics.push(create_epic(&s, project.id, goal.id, &format!("E{index}")).await);
+    }
+    let mut tasks = Vec::new();
+    for epic in &epics {
+        tasks.push(create_task(&s, project.id, epic.id, "T").await);
+    }
+    // Epic i depends on epic i+1: only the tail has no live prerequisite.
+    for pair in epics.windows(2) {
+        link_epics(&s, project.id, pair[0].id, pair[1].id).await;
+    }
+
+    // Completing every task but the tail's leaves all epics blocked.
+    for task in &tasks[..depth - 1] {
+        complete_task(&s, project.id, task.id).await;
+    }
+    for epic in &epics {
+        assert_eq!(epic_state(&s, epic.id).await.0, "open");
+    }
+
+    // The tail's task completes the tail epic and the cascade walks the
+    // whole chain in this one command, bumping each epic exactly once.
+    let mut before = Vec::new();
+    for epic in &epics {
+        before.push(epic_state(&s, epic.id).await.1);
+    }
+    complete_task(&s, project.id, tasks[depth - 1].id).await;
+    for (epic, before) in epics.iter().zip(before) {
+        assert_eq!(
+            epic_state(&s, epic.id).await,
+            ("done".to_string(), before + 1),
+            "epic {} must complete with exactly one bump",
+            epic.id
+        );
+    }
+}
