@@ -192,7 +192,6 @@ async fn untrusted_host_is_rejected_on_every_served_path() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-
 #[tokio::test]
 async fn static_ui_is_served_from_ui_dir() {
     let dir = tempfile::tempdir().unwrap();
