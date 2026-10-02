@@ -155,6 +155,45 @@ async fn cors_allows_exact_local_origins_only() {
 // ── Static UI serving ───────────────────────────────────────────────────
 
 #[tokio::test]
+async fn untrusted_host_is_rejected_on_every_served_path() {
+    let f = test_app().await;
+    // /health and the static shell are local-only content (plan/12): an
+    // off-allowlist Host must never reach them, rebinding page or not.
+    for path in ["/health", "/", "/missing-asset.js"] {
+        let response = f
+            .app
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header(header::HOST, "attacker.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+        assert!(
+            response.headers().contains_key("x-request-id"),
+            "{path} must carry X-Request-Id"
+        );
+        assert!(
+            response
+                .headers()
+                .contains_key(header::CONTENT_SECURITY_POLICY),
+            "{path} must carry the CSP"
+        );
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let json: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["code"], "malformed_request", "{path}");
+    }
+
+    // The allowlisted Host still reaches every path.
+    let response = get_response(&f.app, "/health").await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+
+#[tokio::test]
 async fn static_ui_is_served_from_ui_dir() {
     let dir = tempfile::tempdir().unwrap();
     let store = shepherd_core::storage::open(shepherd_core::storage::testing::store_options(

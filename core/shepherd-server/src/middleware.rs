@@ -216,7 +216,23 @@ pub async fn gate(State(state): State<AppState>, req: Request, next: Next) -> Re
     let is_api = path.starts_with(API_PREFIX);
     let is_public = path == SPEC_PATH || (path == LOGIN_PATH && method == Method::POST);
 
-    let mut response = if !is_api {
+    // Exact Host allowlist (plan/12) on every served path — health and
+    // static assets included, so a rebinding page cannot read local-only
+    // content under an attacker-controlled Host. Parse errors and absence
+    // both reject.
+    let host = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let mut response = if !state.auth.host_allowed(host) {
+        problem_response(
+            StatusCode::BAD_REQUEST,
+            "malformed_request",
+            "Host header is not an allowed local host",
+            request_id,
+        )
+    } else if !is_api {
         let ctx = RequestContext(Arc::new(RequestContextInner {
             request_id,
             principal: None,
@@ -258,20 +274,7 @@ async fn api_gate(
         problem_response(status, code, detail, request_id)
     };
 
-    // Exact Host allowlist (plan/12); parse errors and absence both reject.
-    let host = req
-        .headers()
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("");
     let auth_config = &state.auth;
-    if !auth_config.host_allowed(host) {
-        return reject(
-            StatusCode::BAD_REQUEST,
-            "malformed_request",
-            "Host header is not an allowed local host",
-        );
-    }
 
     // A supplied Origin must be exactly allowlisted even for bearer clients.
     let origin = req
