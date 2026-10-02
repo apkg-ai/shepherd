@@ -286,3 +286,39 @@ fn missing_replay_key_enters_diagnostic_only_mode() {
     // Never silently regenerate the replay key (plan/12).
     assert!(!data_dir.path().join("replay-key").exists());
 }
+
+#[test]
+fn reissue_flag_fails_loudly_without_a_replay_key() {
+    let fake_home = tempfile::tempdir().unwrap();
+    let data_dir = tempfile::tempdir().unwrap();
+    let ui_dist = ui_dir();
+
+    let daemon = spawn_daemon(data_dir.path(), ui_dist.path(), fake_home.path(), &[]);
+    drop(daemon);
+    std::fs::remove_file(data_dir.path().join("replay-key")).unwrap();
+
+    let failed = Command::new(env!("CARGO_BIN_EXE_shepherd-server"))
+        .args([
+            "--port",
+            "0",
+            "--ui-dir",
+            ui_dist.path().to_str().unwrap(),
+            "--data-dir",
+            data_dir.path().to_str().unwrap(),
+            "--reissue-owner-token",
+        ])
+        .env("HOME", fake_home.path())
+        .output()
+        .expect("failed to run daemon");
+    assert!(
+        !failed.status.success(),
+        "reissue without a replay key must abort, not enter diagnostic mode"
+    );
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(
+        stderr.contains("replay key") && stderr.contains("reissue"),
+        "the error must name the replay key and the refused flag, got: {stderr}"
+    );
+    // The owner token must be untouched: no rotation happened.
+    assert!(data_dir.path().join("owner-token").exists());
+}

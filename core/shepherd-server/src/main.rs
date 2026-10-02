@@ -85,6 +85,15 @@ async fn main() -> anyhow::Result<()> {
         Diagnostic(String),
     }
     let bootstrapped = match provider {
+        // Rotation needs the codec's key; silently ignoring the flag here would
+        // let the owner believe a compromised credential was replaced (plan/12).
+        None if config.reissue_owner_token => {
+            return Err(anyhow::anyhow!(
+                "cannot reissue the owner token: the replay key {} is missing; \
+                 restore it from backup first",
+                replay_key_path.display()
+            ));
+        }
         None => Bootstrapped::Diagnostic(format!(
             "replay key {} is missing; restore it from backup to leave \
              diagnostic-only mode",
