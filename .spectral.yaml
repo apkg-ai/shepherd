@@ -25,6 +25,12 @@ rules:
   # POST /api/v1/session is browser login — necessarily public (plan/12).
   owasp:api2:2023-write-restricted: off
 
+  # v1 serves plain HTTP on localhost; TLS is a post-v1 concern (plan/12).
+  # Advertising https here would direct clients at a transport the daemon
+  # never serves.
+  hosts-https-only-oas3: off
+  owasp:api8:2023-no-server-http: off
+
   # ──────────────────────────────────────────────────────────────────────
   # IBM Cloud OpenAPI — disable rules that conflict with shepherd's
   # REST conventions. Rules not listed here run at default severity.
