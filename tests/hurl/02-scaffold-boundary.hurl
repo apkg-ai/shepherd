@@ -1,11 +1,18 @@
-# Future v1 catalog operations are not exposed by the scaffold over live HTTP.
-# GETs fall through to the static dir (404); it serves no other method (405).
+# Future v1 catalog operations are not exposed over live HTTP. API paths
+# reject unauthenticated callers before routing; nothing succeeds as a stub.
 
 GET {{base_url}}/api/v1/projects
-HTTP 404
+HTTP 401
+[Asserts]
+jsonpath "$.code" == "unauthenticated"
+jsonpath "$.request_id" exists
 
 GET {{base_url}}/api/v1/projects/00000000-0000-7000-8000-000000000000/tasks
-HTTP 404
+HTTP 401
 
-POST {{base_url}}/api/v1/session
-HTTP 405
+# Wrong-host requests are rejected outright (plan/12 exact Host allowlist).
+GET {{base_url}}/api/v1/principal
+Host: evil.example.com:7542
+HTTP 400
+[Asserts]
+jsonpath "$.code" == "malformed_request"

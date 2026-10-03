@@ -36,6 +36,14 @@ pub(crate) async fn recompute(
     now: DateTime<Utc>,
 ) -> Result<(), DomainError> {
     let mut frontier: BTreeSet<EpicId> = scope.epics.into_iter().collect();
+    // A command bumps each resource once. Track the pending epic events in a
+    // set: rescanning `events` per epic made a deep completion cascade
+    // quadratic in the number of bumped epics.
+    let mut bumped: BTreeSet<uuid::Uuid> = events
+        .iter()
+        .filter(|event| event.event_type == "epic.changed")
+        .map(|event| event.resource_id)
+        .collect();
     while !frontier.is_empty() {
         let wave: Vec<EpicId> = frontier.iter().copied().collect();
         frontier.clear();
@@ -61,9 +69,7 @@ pub(crate) async fn recompute(
             }
             // A command bumps each resource once: reuse the revision of an
             // epic event already pending from this command's earlier writes.
-            let pending = events.iter().any(|event| {
-                event.event_type == "epic.changed" && event.resource_id == id.as_uuid()
-            });
+            let pending = bumped.contains(&id.as_uuid());
             if pending {
                 sqlx::query("UPDATE epics SET status = ?1 WHERE id = ?2")
                     .bind(EpicStatus::Done.as_str())
@@ -82,6 +88,7 @@ pub(crate) async fn recompute(
                 .execute(&mut *conn)
                 .await?;
                 events.push(PendingEvent::epic(id, next, current.goal_id));
+                bumped.insert(id.as_uuid());
             }
             completed.push(id);
         }

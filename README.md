@@ -2,7 +2,7 @@
 
 A local-first hub for long, multi-session agentic projects. It never spawns or orchestrates agents — it is a passive hub (storage + REST API + UI) that agentic tools query for their next task and report back to.
 
-Current state: the v1 step-000 scaffold — a health-only Rust daemon (axum) serving the built React shell, with the full build, generation, test, and CI pipeline. The stable-v1 domain is rebuilt step by step from the [plan/](plan/steps/README.md) handbook (current step: [000 — scaffold reset](plan/steps/000-scaffold-reset.md)); contracts live in [plan/contracts/](plan/contracts/), and the contract actually served is [openapi/shepherd.yaml](openapi/shepherd.yaml).
+Current state: v1 step 007 — the Rust core implements the domain through local identity and permissions (steps 001-007), and the daemon serves the built React shell plus `/health` and the seven identity operations from [openapi/shepherd.yaml](openapi/shepherd.yaml); the remaining scaffold-era operations are not served yet. The domain is rebuilt step by step from the [plan/](plan/steps/README.md) handbook (current step: [007 — identity and permissions](plan/steps/007-identity-and-permissions.md)); contracts live in [plan/contracts/](plan/contracts/), and the contract actually served is [openapi/shepherd.yaml](openapi/shepherd.yaml).
 
 ## Quickstart
 

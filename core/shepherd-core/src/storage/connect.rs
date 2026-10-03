@@ -22,6 +22,11 @@ const BASELINE_VERSION: i64 = 20_260_914_000_001;
 const PROJECT_SCOPE_INDEXES_SQL: &str =
     include_str!("../../migrations/20260926000001_project_scope_indexes.sql");
 const PROJECT_SCOPE_INDEXES_VERSION: i64 = 20_260_926_000_001;
+// Serves the unfiltered default task page order; tasks_project puts
+// status/phase first, so a plain page list needed a temp B-tree sort.
+const TASKS_PAGE_INDEX_SQL: &str =
+    include_str!("../../migrations/20261002000001_tasks_page_index.sql");
+const TASKS_PAGE_INDEX_VERSION: i64 = 20_261_002_000_001;
 const SQLITE_MAGIC: &[u8] = b"SQLite format 3\0";
 // SQLite file format: 100-byte header, application_id big-endian at offset 68.
 const HEADER_LEN: usize = 100;
@@ -303,6 +308,13 @@ fn migrator() -> Migrator {
             PROJECT_SCOPE_INDEXES_SQL.into_sql_str(),
             false,
         ),
+        Migration::new(
+            TASKS_PAGE_INDEX_VERSION,
+            "tasks_page_index".into(),
+            MigrationType::Simple,
+            TASKS_PAGE_INDEX_SQL.into_sql_str(),
+            false,
+        ),
     ])
 }
 
@@ -427,8 +439,8 @@ mod tests {
             .fetch_one(pool)
             .await
             .unwrap();
-        // Baseline plus the step 005 project-scope indexes.
-        assert_eq!(applied, 2);
+        // Baseline, the step 005 project-scope indexes, the step 007 page index.
+        assert_eq!(applied, 3);
     }
 
     // A database created before the index migration existed upgrades in place:
@@ -453,14 +465,17 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(applied, 2);
-        let index: Option<i64> = sqlx::query_scalar(
-            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'epics_project'",
-        )
-        .fetch_optional(&pool)
-        .await
-        .unwrap();
-        assert!(index.is_some());
+        assert_eq!(applied, 3);
+        for name in ["epics_project", "tasks_project_page"] {
+            let index: Option<i64> = sqlx::query_scalar(
+                "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+            )
+            .bind(name)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+            assert!(index.is_some(), "{name} must exist after upgrade");
+        }
         pool.close().await;
     }
 

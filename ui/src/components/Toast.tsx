@@ -31,16 +31,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const nextId = useRef(0);
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  // Which interaction currently holds each toast open.
+  const holds = useRef(new Map<number, { hover: boolean; focus: boolean }>());
 
   const dismiss = useCallback((id: number) => {
     const timer = timers.current.get(id);
     if (timer !== undefined) clearTimeout(timer);
     timers.current.delete(id);
+    holds.current.delete(id);
     setItems((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   const startTimer = useCallback(
     (id: number) => {
+      const existing = timers.current.get(id);
+      if (existing !== undefined) clearTimeout(existing);
       timers.current.set(
         id,
         setTimeout(() => dismiss(id), AUTO_DISMISS_MS),
@@ -49,12 +54,26 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [dismiss],
   );
 
-  // WCAG 2.2.1: hover/focus pauses auto-dismiss; leaving restarts the full window.
-  const pauseTimer = useCallback((id: number) => {
+  // WCAG 2.2.1: hover and focus each pause auto-dismiss; the full window
+  // restarts only once the last hold on the toast releases.
+  const hold = useCallback((id: number, kind: "hover" | "focus") => {
+    const state = holds.current.get(id) ?? { hover: false, focus: false };
+    state[kind] = true;
+    holds.current.set(id, state);
     const timer = timers.current.get(id);
     if (timer !== undefined) clearTimeout(timer);
     timers.current.delete(id);
   }, []);
+
+  const release = useCallback(
+    (id: number, kind: "hover" | "focus") => {
+      const state = holds.current.get(id);
+      if (state === undefined) return;
+      state[kind] = false;
+      if (!state.hover && !state.focus) startTimer(id);
+    },
+    [startTimer],
+  );
 
   const toast = useCallback(
     (message: string, kind: ToastKind = "info") => {
@@ -76,10 +95,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             key={item.id}
             role={item.kind === "error" ? "alert" : "status"}
             className={`${styles.toast} ${styles[item.kind]}`}
-            onMouseEnter={() => pauseTimer(item.id)}
-            onMouseLeave={() => startTimer(item.id)}
-            onFocusCapture={() => pauseTimer(item.id)}
-            onBlurCapture={() => startTimer(item.id)}
+            onMouseEnter={() => hold(item.id, "hover")}
+            onMouseLeave={() => release(item.id, "hover")}
+            onFocusCapture={() => hold(item.id, "focus")}
+            onBlurCapture={() => release(item.id, "focus")}
           >
             <span>{item.message}</span>
             <button

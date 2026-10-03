@@ -102,7 +102,11 @@ fn push_page_clauses(
         .push_bind(limit + 1);
 }
 
-fn split_page<T>(mut items: Vec<T>, limit: i64, encode: impl Fn(&T) -> String) -> Page<T> {
+pub(crate) fn split_page<T>(
+    mut items: Vec<T>,
+    limit: i64,
+    encode: impl Fn(&T) -> String,
+) -> Page<T> {
     let limit = limit as usize;
     if items.len() > limit {
         items.truncate(limit);

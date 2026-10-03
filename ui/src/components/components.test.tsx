@@ -392,6 +392,41 @@ describe("Toast pause (WCAG 2.2.1)", () => {
       vi.useRealTimers();
     }
   });
+
+  it("stays open while hover or focus holds it and dismisses once both release", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <ToastProvider>
+          <Probe />
+        </ToastProvider>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "fire" }));
+      const toast = screen.getByRole("status");
+      const dismiss = screen.getByRole("button", { name: "Dismiss" });
+
+      // Keyboard user holding focus, pointer user hovering: moving the
+      // pointer away must not dismiss while focus still holds the toast.
+      fireEvent.focus(dismiss);
+      fireEvent.mouseEnter(toast);
+      act(() => vi.advanceTimersByTime(20000));
+      fireEvent.mouseLeave(toast);
+      act(() => vi.advanceTimersByTime(20000));
+      expect(screen.getByRole("status")).toBeInTheDocument();
+
+      // Releasing the last hold restarts the full window — and repeated
+      // leave events never leak an earlier timer.
+      fireEvent.mouseEnter(toast);
+      fireEvent.mouseLeave(toast);
+      fireEvent.blur(dismiss);
+      act(() => vi.advanceTimersByTime(4999));
+      expect(screen.getByRole("status")).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(1));
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("FormField hint exposure", () => {

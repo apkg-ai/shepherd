@@ -1,4 +1,11 @@
 # OSV Scanner ignore list.
 # https://google.github.io/osv-scanner/configuration/
+# Every entry must exist in scripts/npm-audit.sh too, with a revisit condition.
 
 [[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+# braces stack-exhaustion DoS via deeply nested glob patterns. No fix released
+# (braces 3.0.3 is the latest published version); dev-only path through
+# spectral's globbing of our own static files.
+# Revisit: remove when braces ships a patched release.
+

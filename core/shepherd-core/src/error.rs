@@ -4,8 +4,12 @@ use crate::storage::StorageError;
 pub enum DomainError {
     #[error("resource not found")]
     NotFound,
+    #[error("authentication required")]
+    Unauthenticated,
     #[error("forbidden: {0}")]
     Forbidden(String),
+    #[error("idempotency key was reused with a different request")]
+    IdempotencyConflict,
     #[error("revision conflict: expected {expected}, actual {actual}")]
     RevisionConflict { expected: i64, actual: i64 },
     #[error("expected revision required for this command")]
@@ -48,7 +52,9 @@ impl DomainError {
     pub fn code(&self) -> &'static str {
         match self {
             DomainError::NotFound => "not_found",
+            DomainError::Unauthenticated => "unauthenticated",
             DomainError::Forbidden(_) => "forbidden",
+            DomainError::IdempotencyConflict => "idempotency_conflict",
             DomainError::RevisionConflict { .. } => "revision_conflict",
             DomainError::PreconditionRequired => "precondition_required",
             DomainError::Validation { .. } => "validation_error",
@@ -92,7 +98,12 @@ mod tests {
     #[test]
     fn codes_are_stable_problem_identifiers() {
         assert_eq!(DomainError::NotFound.code(), "not_found");
+        assert_eq!(DomainError::Unauthenticated.code(), "unauthenticated");
         assert_eq!(DomainError::Forbidden("agent".into()).code(), "forbidden");
+        assert_eq!(
+            DomainError::IdempotencyConflict.code(),
+            "idempotency_conflict"
+        );
         assert_eq!(
             DomainError::RevisionConflict {
                 expected: 2,

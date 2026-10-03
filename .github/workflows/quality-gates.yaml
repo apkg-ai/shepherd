@@ -586,11 +586,34 @@ jobs:
           "$GITHUB_WORKSPACE/scripts/hurl-e2e.sh"
 
   core-test-fuzz:
-    name: Core / Test (Fuzz)
+    name: Core / Test (Property)
     runs-on: ubuntu-24.04-arm
+
+    defaults:
+      run:
+        working-directory: core
+
     steps:
-      - name: Placeholder
-        run: echo "no fuzz targets yet — cargo-fuzz is a recorded follow-up"
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # dtolnay/rust-toolchain needs an explicit channel; parse it from rust-toolchain.toml.
+      - name: Parse pinned toolchain
+        id: toolchain
+        run: echo "channel=$(grep -m1 '^channel' "$GITHUB_WORKSPACE/rust-toolchain.toml" | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-12
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
+
+      - name: Property invariants
+        run: cargo test --package shepherd-core --test v1_property_invariants
 
   test-e2e:
     name: Test (E2E)

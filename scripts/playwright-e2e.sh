@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${PLAYWRIGHT_PORT:-7543}"
 BASE="http://127.0.0.1:${PORT}"
+DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/shepherd-playwright.XXXXXX")"
 SERVER_PID=""
 
 for tool in curl cargo npx; do
@@ -23,6 +24,7 @@ cleanup() {
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
+  rm -rf "$DATA_DIR"
 }
 trap cleanup EXIT
 
@@ -31,7 +33,8 @@ echo "playwright-e2e: building server..."
 
 "$ROOT/core/target/debug/shepherd-server" \
   --port "$PORT" \
-  --ui-dir "$ROOT/ui/dist" &
+  --ui-dir "$ROOT/ui/dist" \
+  --data-dir "$DATA_DIR" &
 SERVER_PID=$!
 
 booted=false

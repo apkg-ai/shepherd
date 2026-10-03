@@ -130,7 +130,9 @@ pub(crate) async fn waive(
     Ok(next)
 }
 
-// The done transition; step 010's successful execute report reuses this path.
+// The done transition; step 010's successful execute report reuses this path
+// (hence the test-only consumers today).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) async fn complete(
     conn: &mut SqliteConnection,
     ctx: &CommandContext,

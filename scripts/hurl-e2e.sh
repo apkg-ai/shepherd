@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${HURL_PORT:-7542}"
 BASE="http://127.0.0.1:${PORT}"
+DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/shepherd-hurl.XXXXXX")"
 SERVER_PID=""
 
 for tool in hurl curl cargo; do
@@ -18,6 +19,7 @@ cleanup() {
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
+  rm -rf "$DATA_DIR"
 }
 trap cleanup EXIT
 
@@ -26,7 +28,8 @@ echo "hurl-e2e: building server..."
 
 "$ROOT/core/target/debug/shepherd-server" \
   --port "$PORT" \
-  --ui-dir "$ROOT/ui/dist" &
+  --ui-dir "$ROOT/ui/dist" \
+  --data-dir "$DATA_DIR" &
 SERVER_PID=$!
 
 booted=false
@@ -42,12 +45,15 @@ done
 
 echo "hurl-e2e: server running on $BASE (PID $SERVER_PID)"
 
+OWNER_TOKEN="$(cat "$DATA_DIR/owner-token")"
+
 PASS=0
 FAIL=0
 
 while IFS= read -r f; do
   name="$(basename "$f")"
-  if hurl --variable "base_url=$BASE" --test "$f" 2>&1; then
+  if hurl --variable "base_url=$BASE" --variable "origin=$BASE" \
+      --variable "owner_token=$OWNER_TOKEN" --test "$f" 2>&1; then
     PASS=$((PASS + 1))
   else
     FAIL=$((FAIL + 1))

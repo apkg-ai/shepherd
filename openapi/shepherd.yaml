@@ -15,7 +15,7 @@ info:
     identifier: MIT
 
 servers:
-  - url: https://localhost:7437
+  - url: http://localhost:7437
     description: >-
       Local daemon (default port 7437, override with --port or
       SHEPHERD_PORT). v1 runs plain HTTP on localhost; TLS is a
@@ -24,10 +24,13 @@ servers:
 
 security:
   - bearerAuth: []
+  - ownerSession: []
 
 tags:
   - name: system
     description: Health and service metadata.
+  - name: identity
+    description: Owner and agent credentials, browser sessions (plan/12).
 
 # ════════════════════════════════════════════════════════════════════════
 # Paths
@@ -52,12 +55,6 @@ paths:
         "200":
           description: Service is healthy (status pass or warn).
           headers:
-            RateLimit-Limit:
-              $ref: "#/components/headers/RateLimit-Limit"
-            RateLimit-Remaining:
-              $ref: "#/components/headers/RateLimit-Remaining"
-            RateLimit-Reset:
-              $ref: "#/components/headers/RateLimit-Reset"
             Access-Control-Allow-Origin:
               $ref: "#/components/headers/Access-Control-Allow-Origin"
           content:
@@ -72,19 +69,11 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/ValidationError"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
         "500":
           $ref: "#/components/responses/InternalError"
         "503":
           description: Service is unhealthy (status fail).
           headers:
-            RateLimit-Limit:
-              $ref: "#/components/headers/RateLimit-Limit"
-            RateLimit-Remaining:
-              $ref: "#/components/headers/RateLimit-Remaining"
-            RateLimit-Reset:
-              $ref: "#/components/headers/RateLimit-Reset"
             Access-Control-Allow-Origin:
               $ref: "#/components/headers/Access-Control-Allow-Origin"
           content:
@@ -97,6 +86,663 @@ paths:
                 status: 503
                 detail: Health check failed.
 
+
+  # ── Identity (plan/12, step 007) ─────────────────────────────────────
+
+  /api/v1/session:
+    post:
+      operationId: createBrowserSession
+      tags:
+        - identity
+      summary: Create browser session
+      description: See plan workflow and command catalog for authoritative preconditions and effects.
+      x-role: public
+      parameters: []
+      responses:
+        "201":
+          description: Successful operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowserSession"
+              example:
+                actor:
+                  id: 01994a00-0000-7000-8000-000000000001
+                  kind: human
+                  label: Example
+                  revoked: false
+                csrf_token: Example
+                expires_at: "2026-09-14T09:00:00Z"
+        "400":
+          description: Malformed request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication required
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Resource not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Workflow or idempotency conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "413":
+          description: Body too large
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: Unsupported media type
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: Required command header missing
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: Unexpected failure
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Database unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionLogin"
+            example:
+              owner_token: Example
+      security: []
+    get:
+      operationId: getBrowserSession
+      tags:
+        - identity
+      summary: Get browser session
+      description: See plan workflow and command catalog for authoritative preconditions and effects.
+      x-role: reader
+      parameters: []
+      responses:
+        "200":
+          description: Successful operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowserSession"
+              example:
+                actor:
+                  id: 01994a00-0000-7000-8000-000000000001
+                  kind: human
+                  label: Example
+                  revoked: false
+                csrf_token: Example
+                expires_at: "2026-09-14T09:00:00Z"
+        "400":
+          description: Malformed request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication required
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Resource not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Workflow or idempotency conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "413":
+          description: Body too large
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: Unexpected failure
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Database unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    delete:
+      operationId: deleteBrowserSession
+      tags:
+        - identity
+      summary: Delete browser session
+      description: See plan workflow and command catalog for authoritative preconditions and effects.
+      x-role: human
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: false
+          description: Required for cookie-authenticated mutations; bearer clients omit.
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        "200":
+          description: Successful operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+              example:
+                ok: false
+        "400":
+          description: Malformed request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication required
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Resource not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Workflow or idempotency conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "413":
+          description: Body too large
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: Unsupported media type
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: Required command header missing
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: Unexpected failure
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Database unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /api/v1/agents:
+    get:
+      operationId: listAgents
+      tags:
+        - identity
+      summary: List agents
+      description: See plan workflow and command catalog for authoritative preconditions and effects.
+      x-role: human
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 1000
+          description: cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+            format: int32
+          description: limit
+      responses:
+        "200":
+          description: Successful operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PageActor"
+              example:
+                items: []
+        "400":
+          description: Malformed request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication required
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Resource not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Workflow or idempotency conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "413":
+          description: Body too large
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: Unexpected failure
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Database unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    post:
+      operationId: createAgent
+      tags:
+        - identity
+      summary: Create agent
+      description: See plan workflow and command catalog for authoritative preconditions and effects.
+      x-role: human
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: false
+          description: Required for cookie-authenticated mutations; bearer clients omit.
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        "201":
+          description: Successful operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentToken"
+              example:
+                actor:
+                  id: 01994a00-0000-7000-8000-000000000001
+                  kind: human
+                  label: Example
+                  revoked: false
+                token: Example
+        "400":
+          description: Malformed request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication required
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Resource not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Workflow or idempotency conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "413":
+          description: Body too large
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: Unsupported media type
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: Required command header missing
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: Unexpected failure
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Database unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentCreate"
+            example:
+              label: Example
+
+  /api/v1/agents/{agent_id}/revoke:
+    post:
+      operationId: revokeAgent
+      tags:
+        - identity
+      summary: Revoke agent
+      description: See plan workflow and command catalog for authoritative preconditions and effects.
+      x-role: human
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            minLength: 36
+            maxLength: 36
+          description: agent id
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+            minLength: 36
+            maxLength: 36
+          description: Idempotency-Key
+        - name: X-CSRF-Token
+          in: header
+          required: false
+          description: Required for cookie-authenticated mutations; bearer clients omit.
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        "200":
+          description: Successful operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+              example:
+                ok: false
+        "400":
+          description: Malformed request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication required
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Resource not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Workflow or idempotency conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "413":
+          description: Body too large
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: Unsupported media type
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: Required command header missing
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: Unexpected failure
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Database unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReasonInput"
+            example:
+              reason: Example
+
+  /api/v1/principal:
+    get:
+      operationId: getPrincipal
+      tags:
+        - identity
+      summary: Get authenticated principal
+      description: Return authenticated actor derived from credential, never caller labels.
+      x-role: reader
+      parameters: []
+      responses:
+        "200":
+          description: Successful operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Actor"
+              example:
+                id: 01994a00-0000-7000-8000-000000000001
+                kind: human
+                label: Example
+                revoked: false
+        "400":
+          description: Malformed request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication required
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Resource not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Workflow or idempotency conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "413":
+          description: Body too large
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: Unexpected failure
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Database unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
 # ════════════════════════════════════════════════════════════════════════
 # Components
 # ════════════════════════════════════════════════════════════════════════
@@ -108,48 +754,21 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: JWT
       description: >-
-        Placeholder for future authentication. v1 runs on localhost without
-        auth enforcement; see plan/12-security-and-local-identity.md for
-        the auth roadmap. Tokens will follow RFC8725 JSON Web Token Best
-        Current Practices.
+        Owner or agent bearer token: 32 random bytes, base64url, issued at
+        bootstrap (owner-token file) or by createAgent. Opaque, not JWT.
+        See plan/12-security-and-local-identity.md.
+    ownerSession:
+      type: apiKey
+      in: cookie
+      name: shepherd_session
+      description: >-
+        Owner browser session cookie issued by createBrowserSession.
+        Cookie-authenticated mutations also require X-CSRF-Token.
 
   # ── Reusable headers ─────────────────────────────────────────────────
 
   headers:
-    RateLimit-Limit:
-      description: Maximum number of requests allowed in the current window.
-      required: true
-      schema:
-        type: integer
-        format: int32
-        minimum: 1
-        maximum: 100000
-    RateLimit-Remaining:
-      description: Number of requests remaining in the current window.
-      required: true
-      schema:
-        type: integer
-        format: int32
-        minimum: 0
-        maximum: 100000
-    RateLimit-Reset:
-      description: Seconds until the current rate-limit window resets.
-      required: true
-      schema:
-        type: integer
-        format: int32
-        minimum: 0
-        maximum: 86400
-    Retry-After:
-      description: Seconds to wait before retrying after a 429 response.
-      required: true
-      schema:
-        type: integer
-        format: int32
-        minimum: 0
-        maximum: 86400
     Access-Control-Allow-Origin:
       description: CORS allowed origin.
       required: true
@@ -165,12 +784,6 @@ components:
     Unauthorized:
       description: Authentication required or invalid token.
       headers:
-        RateLimit-Limit:
-          $ref: "#/components/headers/RateLimit-Limit"
-        RateLimit-Remaining:
-          $ref: "#/components/headers/RateLimit-Remaining"
-        RateLimit-Reset:
-          $ref: "#/components/headers/RateLimit-Reset"
         Access-Control-Allow-Origin:
           $ref: "#/components/headers/Access-Control-Allow-Origin"
       content:
@@ -186,12 +799,6 @@ components:
     ValidationError:
       description: Request body or parameters failed validation.
       headers:
-        RateLimit-Limit:
-          $ref: "#/components/headers/RateLimit-Limit"
-        RateLimit-Remaining:
-          $ref: "#/components/headers/RateLimit-Remaining"
-        RateLimit-Reset:
-          $ref: "#/components/headers/RateLimit-Reset"
         Access-Control-Allow-Origin:
           $ref: "#/components/headers/Access-Control-Allow-Origin"
       content:
@@ -211,12 +818,6 @@ components:
     InternalError:
       description: Unexpected server error.
       headers:
-        RateLimit-Limit:
-          $ref: "#/components/headers/RateLimit-Limit"
-        RateLimit-Remaining:
-          $ref: "#/components/headers/RateLimit-Remaining"
-        RateLimit-Reset:
-          $ref: "#/components/headers/RateLimit-Reset"
         Access-Control-Allow-Origin:
           $ref: "#/components/headers/Access-Control-Allow-Origin"
       content:
@@ -228,29 +829,6 @@ components:
             title: Internal Server Error
             status: 500
             detail: An unexpected error occurred.
-
-    TooManyRequests:
-      description: Rate limit exceeded. Retry after the indicated delay.
-      headers:
-        RateLimit-Limit:
-          $ref: "#/components/headers/RateLimit-Limit"
-        RateLimit-Remaining:
-          $ref: "#/components/headers/RateLimit-Remaining"
-        RateLimit-Reset:
-          $ref: "#/components/headers/RateLimit-Reset"
-        Access-Control-Allow-Origin:
-          $ref: "#/components/headers/Access-Control-Allow-Origin"
-        Retry-After:
-          $ref: "#/components/headers/Retry-After"
-      content:
-        application/problem+json:
-          schema:
-            $ref: "#/components/schemas/ProblemDetail"
-          example:
-            type: "urn:shepherd:error:rate-limit-exceeded"
-            title: Too Many Requests
-            status: 429
-            detail: Rate limit exceeded. Try again in 60 seconds.
 
   # ── Schemas ──────────────────────────────────────────────────────────
 
@@ -385,3 +963,245 @@ components:
           minLength: 1
           maxLength: 50
           pattern: "^[a-z][a-z0-9_]+$"
+
+    # ─── Identity (plan/12, step 007) ────────────────────────────────
+
+    Problem:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          maxLength: 200
+          description: >-
+            Type. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+        title:
+          type: string
+          maxLength: 200
+          description: >-
+            Title. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+          description: >-
+            Status. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+          format: int32
+        code:
+          type: string
+          maxLength: 80
+          description: >-
+            Code. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+        detail:
+          type: string
+          maxLength: 2000
+          description: >-
+            Detail. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+        request_id:
+          type: string
+          format: uuid
+          description: >-
+            Request id. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+          minLength: 36
+          maxLength: 36
+        errors:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              field:
+                type: string
+                maxLength: 200
+                description: >-
+                  Field. Exact semantics are specified in plan/03-domain-model.md and
+                  plan/04-workflow-state-machines.md.
+              message:
+                type: string
+                maxLength: 500
+                description: >-
+                  Message. Exact semantics are specified in plan/03-domain-model.md and
+                  plan/04-workflow-state-machines.md.
+            required:
+              - field
+              - message
+          maxItems: 16
+          description: >-
+            Errors. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+          minItems: 0
+      required:
+        - type
+        - title
+        - status
+        - code
+        - detail
+        - request_id
+      description: Problem contract; see the domain and workflow specifications for invariants.
+
+    Actor:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: >-
+            Id. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+          minLength: 36
+          maxLength: 36
+        kind:
+          type: string
+          enum:
+            - human
+            - agent
+          description: >-
+            Kind. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+        label:
+          type: string
+          maxLength: 100
+          description: >-
+            Label. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+        revoked:
+          type: boolean
+          description: >-
+            Revoked. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+      required:
+        - id
+        - kind
+        - label
+        - revoked
+      description: Actor contract; see the domain and workflow specifications for invariants.
+
+    SessionLogin:
+      type: object
+      additionalProperties: false
+      properties:
+        owner_token:
+          type: string
+          maxLength: 100
+          description: >-
+            Owner token. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+      required:
+        - owner_token
+      description: SessionLogin contract; see the domain and workflow specifications for invariants.
+
+    BrowserSession:
+      type: object
+      additionalProperties: false
+      properties:
+        actor:
+          $ref: "#/components/schemas/Actor"
+        csrf_token:
+          type: string
+          maxLength: 100
+          description: >-
+            Csrf token. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+        expires_at:
+          type: string
+          format: date-time
+          description: >-
+            Expires at. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+          minLength: 20
+          maxLength: 35
+      required:
+        - actor
+        - csrf_token
+        - expires_at
+      description: BrowserSession contract; see the domain and workflow specifications for invariants.
+
+    AgentCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        label:
+          type: string
+          maxLength: 100
+          minLength: 1
+          description: >-
+            Label. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+      required:
+        - label
+      description: AgentCreate contract; see the domain and workflow specifications for invariants.
+
+    AgentToken:
+      type: object
+      additionalProperties: false
+      properties:
+        actor:
+          $ref: "#/components/schemas/Actor"
+        token:
+          type: string
+          maxLength: 100
+          description: >-
+            Token. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+      required:
+        - actor
+        - token
+      description: AgentToken contract; see the domain and workflow specifications for invariants.
+
+    PageActor:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Actor"
+          maxItems: 200
+          description: >-
+            Items. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+          minItems: 0
+        next_cursor:
+          type: string
+          maxLength: 1000
+          description: >-
+            Next cursor. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+      required:
+        - items
+      description: PageActor contract; see the domain and workflow specifications for invariants.
+
+    Ack:
+      type: object
+      additionalProperties: false
+      properties:
+        ok:
+          type: boolean
+          description: >-
+            Ok. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+      required:
+        - ok
+      description: Ack contract; see the domain and workflow specifications for invariants.
+
+    ReasonInput:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          description: >-
+            Reason. Exact semantics are specified in plan/03-domain-model.md and
+            plan/04-workflow-state-machines.md.
+      required:
+        - reason
+      description: ReasonInput contract; see the domain and workflow specifications for invariants.
