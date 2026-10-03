@@ -56,8 +56,8 @@ jobs:
 
       - name: Audit
         run: |
-          npm audit --audit-level=low
-          npm audit --audit-level=low --prefix ui
+          "$GITHUB_WORKSPACE/scripts/npm-audit.sh"
+          "$GITHUB_WORKSPACE/scripts/npm-audit.sh" ui
 
   audit-cargo:
     name: Audit (cargo)
