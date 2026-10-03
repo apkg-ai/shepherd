@@ -38,7 +38,7 @@ async fn fixture_with(dev: bool) -> Fixture {
         .await
         .unwrap();
     let owner_token = std::fs::read_to_string(dir.path().join("owner-token")).unwrap();
-    let state = AppState::new(store.clone(), AuthConfig { port: 7437, dev });
+    let state = AppState::new(store.clone(), AuthConfig::new(7437, dev));
     let app = shepherd_server::router(state, "does-not-exist");
     Fixture {
         _dir: dir,
@@ -582,10 +582,7 @@ async fn problems_carry_request_id_and_responses_carry_security_headers() {
 async fn missing_replay_key_enters_diagnostic_only_mode() {
     let state = AppState::diagnostic(
         "replay key /tmp/replay-key is missing".to_string(),
-        AuthConfig {
-            port: 7437,
-            dev: false,
-        },
+        AuthConfig::new(7437, false),
     );
     let app = shepherd_server::router(state, "does-not-exist");
 

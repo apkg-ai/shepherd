@@ -25,13 +25,7 @@ async fn test_app() -> Fixture {
     ))
     .await
     .unwrap();
-    let state = AppState::new(
-        Arc::new(store),
-        AuthConfig {
-            port: 7437,
-            dev: false,
-        },
-    );
+    let state = AppState::new(Arc::new(store), AuthConfig::new(7437, false));
     Fixture {
         _dir: dir,
         app: shepherd_server::router(state, "does-not-exist"),
@@ -218,13 +212,7 @@ async fn static_ui_is_served_from_ui_dir() {
     )
     .unwrap();
 
-    let state = AppState::new(
-        Arc::new(store),
-        AuthConfig {
-            port: 7437,
-            dev: false,
-        },
-    );
+    let state = AppState::new(Arc::new(store), AuthConfig::new(7437, false));
     let app = shepherd_server::router(state, ui_dir.path());
     let response = get_response(&app, "/").await;
     assert_eq!(response.status(), StatusCode::OK);

@@ -132,10 +132,7 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("failed to bind {addr}"))?;
     let local_addr = listener.local_addr().context("failed to read bound addr")?;
     // The Host/Origin allowlist uses the actual bound port (`--port 0` picks one).
-    let auth = AuthConfig {
-        port: local_addr.port(),
-        dev: config.dev,
-    };
+    let auth = AuthConfig::new(local_addr.port(), config.dev);
     let state = match bootstrapped {
         Bootstrapped::Normal(store) => AppState::new(store, auth),
         Bootstrapped::Diagnostic(reason) => AppState::diagnostic(reason, auth),
