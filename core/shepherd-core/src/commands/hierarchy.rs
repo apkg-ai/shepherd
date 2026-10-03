@@ -2020,8 +2020,9 @@ mod tests {
         assert_eq!(renamed.revision.value(), 2);
         assert_eq!(renamed.label, "Operations");
         assert_eq!(renamed.key, "ops");
+        assert!(!renamed.archived);
 
-        // Archived registry entries are frozen until step 008 owns their lifecycle.
+        // Archived registry entries are frozen; the flag is one-way.
         sqlx::query("UPDATE task_types SET archived = 1 WHERE id = ?1")
             .bind(custom.id.to_string())
             .execute(f.store.pool())

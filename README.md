@@ -2,7 +2,7 @@
 
 A local-first hub for long, multi-session agentic projects. It never spawns or orchestrates agents — it is a passive hub (storage + REST API + UI) that agentic tools query for their next task and report back to.
 
-Current state: v1 step 007 — the Rust core implements the domain through local identity and permissions (steps 001-007), and the daemon serves the built React shell plus `/health` and the seven identity operations from [openapi/shepherd.yaml](openapi/shepherd.yaml); the remaining scaffold-era operations are not served yet. The domain is rebuilt step by step from the [plan/](plan/steps/README.md) handbook (current step: [007 — identity and permissions](plan/steps/007-identity-and-permissions.md)); contracts live in [plan/contracts/](plan/contracts/), and the contract actually served is [openapi/shepherd.yaml](openapi/shepherd.yaml).
+Current state: v1 step 008 — the Rust core implements the domain through proposals and policy configuration (steps 001-008), and the daemon serves the built React shell plus `/health` and the seven identity operations from [openapi/shepherd.yaml](openapi/shepherd.yaml); the remaining scaffold-era operations are not served yet. The domain is rebuilt step by step from the [plan/](plan/steps/README.md) handbook (current step: [008 — proposals and policy](plan/steps/008-proposals-and-policy.md)); contracts live in [plan/contracts/](plan/contracts/), and the contract actually served is [openapi/shepherd.yaml](openapi/shepherd.yaml).
 
 ## Quickstart
 

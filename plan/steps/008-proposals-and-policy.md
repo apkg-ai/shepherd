@@ -70,8 +70,8 @@ Branch `v1-008-proposals-and-policy` (PR pending).
 
 ### Files changed
 
-- New: `core/shepherd-core/tests/v1_proposals_and_policy.rs` — the four acceptance sentences as named regressions at the public command boundary, plus the task-type archive negatives (one-way flag, double archive, archived project, agent forbidden).
-- Amended: `core/shepherd-core/src/model/project.rs` (`TaskTypePatch.archived: Option<bool>` — the contract patch field), `core/shepherd-core/src/commands/hierarchy.rs` (`update_task_type` applies the archived flag in the same revision bump/event as a label rename; `Some(false)` is rejected because archive is one-way), `core/shepherd-core/src/commands/archive.rs` (the draft `archive_task_type` command was removed in review — see below), `core/shepherd-core/tests/v1_projects_and_goals.rs` and `core/shepherd-core/tests/v1_identity_and_permissions.rs` (existing `TaskTypePatch` literals gained `..Default::default()`).
+- New: `core/shepherd-core/tests/v1_proposals_and_policy.rs` — the four acceptance sentences as named regressions at the public command boundary, plus the task-type archive negatives (one-way flag, double archive, archived project, agent forbidden, event action/type pinned to the contract).
+- Amended: `core/shepherd-core/src/model/project.rs` (`TaskTypePatch.archived: Option<bool>` — the contract patch field), `core/shepherd-core/src/commands/hierarchy.rs` (`update_task_type` applies the archived flag in the same revision bump/event as a label rename; `Some(false)` is rejected because archive is one-way), `core/shepherd-core/src/commands/archive.rs` (the draft `archive_task_type` command was removed in review — see below), `core/shepherd-core/tests/v1_projects_and_goals.rs` and `core/shepherd-core/tests/v1_identity_and_permissions.rs` (existing `TaskTypePatch` literals gained `..Default::default()`), `README.md` (current-state line bumped to step 008, as the step 007 review required for that step).
 
 ### What was built
 
@@ -79,12 +79,15 @@ The step's behavior was mostly in place from steps 004–007 (proposal gate on c
 
 ### Test commands and results
 
-- From `core/`: `cargo fmt --check` clean; `cargo clippy --all-targets -- -D warnings` clean; `cargo test --workspace` — 430 passed, 0 failed, exit code checked directly (never piped).
-- Repository root: `python3 plan/validate.py` PASS (29 step DAG, 70 operations).
-- Acceptance sentences → named tests: gate default/disabled — `proposal_gate_defaults_on_and_owner_disables` (persisted rows prove old proposed items are untouched after the gate flips); accept cascade — `accepting_epic_leaves_proposed_tasks_proposed` (task revision/status asserted unchanged); policy floors — `policy_downgrade_fails_for_agents_human_edit_fails_during_active_work` (create and update downgrades forbidden for agents, owner edit blocked by an active claim, event-count invariant proves failed commands leak no events); archived type — `archived_type_cannot_be_assigned_but_existing_task_renders_label` (plus `archived: Some(false)` rejection, double archive, archived project, agent forbidden).
+- From `core/`: `cargo fmt --check` clean; `cargo clippy --all-targets -- -D warnings` clean; `cargo test --workspace` — 430 passed, 0 failed, exit code checked directly (never piped); `cargo test --workspace --doc` clean.
+- Coverage (CI commands): unit 98.4% (≥95), integration 93.1% (≥70), union 98.2% (≥92) — `scripts/coverage-report.ts --check` passes with all four artifacts.
+- Repository root: `python3 plan/validate.py` PASS (29 step DAG, 70 operations); `scripts/check-v1-contracts.sh` PASS (plan validation, examples, spectral OpenAPI+AsyncAPI, contract smoke, operation freeze, four negative mutations, generated Rust models/server + Orval output compile); `node --run typecheck` and `node --run lint:spec` clean; `node scripts/check-operation-freeze.ts` PASS; `shellcheck scripts/*.sh` clean; `semgrep scan --error` with the nine CI rule packs — 303 rules, 0 findings; `scripts/npm-audit.sh` (root + ui) clean against the allowlist.
+- Live boundary: `scripts/smoke.sh` OK; `scripts/hurl-e2e.sh` 3/3; `scripts/playwright-e2e.sh` 7/7 (with `E2E_COVERAGE=1`, ui coverage unit 97.9% / e2e 67.7% / union 95.5% — all above thresholds).
+- Acceptance sentences → named tests: gate default/disabled — `proposal_gate_defaults_on_and_owner_disables` (persisted rows prove old proposed items are untouched after the gate flips); accept cascade — `accepting_epic_leaves_proposed_tasks_proposed` (task revision/status asserted unchanged); policy floors — `policy_downgrade_fails_for_agents_human_edit_fails_during_active_work` (create and update downgrades forbidden for agents, owner edit blocked by an active claim, event-count invariant proves failed commands leak no events); archived type — `archived_type_cannot_be_assigned_but_existing_task_renders_label` (plus `archived: Some(false)` rejection, double archive, archived project, agent forbidden, event action `updateTaskType` + type `task_type.changed`).
 
 ### Limitations and temporary interfaces
 
+- osv-scanner and cargo-audit are CI-only (not installed locally); this step changes no dependency manifests or lockfiles, so those gates are unaffected.
 - REST wiring for `updateTaskType` (and `listTaskTypes` with `include_archived`) lands in step 015; the generated wire `TaskTypePatch` already carries `archived` from the contract, so the core patch maps one-to-one.
 - No temporary interfaces; no migration (the `archived` flag ships in the baseline `task_types` schema).
 

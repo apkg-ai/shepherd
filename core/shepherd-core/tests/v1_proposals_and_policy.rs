@@ -634,6 +634,18 @@ async fn archived_type_cannot_be_assigned_but_existing_task_renders_label() {
     assert_eq!(archived.key, "ops");
     assert_eq!(archived.label, "Operations");
 
+    // The event records the contract operationId and task_type.changed
+    // (plan/08: action = operationId; no archiveTaskType operation exists).
+    let (action, event_type, resource_revision): (String, String, i64) = sqlx::query_as(
+        "SELECT action, type, resource_revision FROM events ORDER BY id DESC LIMIT 1",
+    )
+    .fetch_one(f.store.pool())
+    .await
+    .unwrap();
+    assert_eq!(action, "updateTaskType");
+    assert_eq!(event_type, "task_type.changed");
+    assert_eq!(resource_revision, 2);
+
     // Double-archive is rejected.
     let err = f
         .store
