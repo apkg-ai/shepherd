@@ -203,15 +203,19 @@ impl Store {
                 let expires_text = format_ts(&expires_at);
                 let task_rev = scope.task.revision.value();
 
+                let submission_id_str = input.submission_id.map(|id| id.to_string());
+
                 sqlx::query(
-                    "INSERT INTO claims (id, task_id, actor_id, phase, acquired_at, \
-                     expires_at, status, task_revision, plan_revision_id, lease_hash) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7, ?8, ?9)",
+                    "INSERT INTO claims (id, task_id, actor_id, phase, submission_id, \
+                     acquired_at, expires_at, status, task_revision, plan_revision_id, \
+                     lease_hash) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active', ?8, ?9, ?10)",
                 )
                 .bind(claim_id.to_string())
                 .bind(task_id.to_string())
                 .bind(actor_id.to_string())
                 .bind(phase.as_str())
+                .bind(&submission_id_str)
                 .bind(&now_text)
                 .bind(&expires_text)
                 .bind(task_rev)
@@ -317,7 +321,7 @@ impl Store {
                 if !lease::verify_lease(&token, &row.lease_hash) {
                     return Err(DomainError::LeaseInvalid);
                 }
-                if row.status != "active" {
+                if row.status != ClaimStatus::Active.as_str() {
                     return Err(DomainError::LeaseInvalid);
                 }
                 if row.expires_at <= now {
@@ -389,7 +393,7 @@ impl Store {
                 let now_text = format_ts(&now);
 
                 let initial = load_claim_row(tx, &claim_id, &project).await?;
-                reconcile_task_claims(tx, initial.task_id, &now_text).await?;
+                let reconciled = reconcile_task_claims(tx, initial.task_id, &now_text).await?;
 
                 // Re-load after reconciliation: the claim may have been expired.
                 let row = load_claim_row(tx, &claim_id, &project).await?;
@@ -400,7 +404,7 @@ impl Store {
                 if !lease::verify_lease(&token, &row.lease_hash) {
                     return Err(DomainError::LeaseInvalid);
                 }
-                if row.status != "active" {
+                if row.status != ClaimStatus::Active.as_str() {
                     return Err(DomainError::LeaseInvalid);
                 }
 
@@ -421,19 +425,16 @@ impl Store {
                     expected_revision: None,
                     now,
                 };
-                append_events(
-                    tx,
-                    &project,
-                    &ctx_for_events,
-                    "releaseClaim",
-                    "",
-                    vec![PendingEvent::claim(
-                        claim_id,
-                        row.task_revision,
-                        row.task_id,
-                    )],
-                )
-                .await?;
+                let mut pending: Vec<PendingEvent> = reconciled
+                    .iter()
+                    .map(|c| PendingEvent::claim(c.id, c.task_revision, c.task_id))
+                    .collect();
+                pending.push(PendingEvent::claim(
+                    claim_id,
+                    row.task_revision,
+                    row.task_id,
+                ));
+                append_events(tx, &project, &ctx_for_events, "releaseClaim", "", pending).await?;
 
                 Ok(claim_from_row(&row, ClaimStatus::Released))
             })
