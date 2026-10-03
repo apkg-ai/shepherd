@@ -5,11 +5,10 @@ use super::{
 use crate::error::DomainError;
 use crate::model::{
     Capability, Epic, EpicId, Goal, GoalId, Project, ProjectId, REASON_MAX_CHARS, Revision, Task,
-    TaskId, TaskType, TaskTypeId, require_capability, validate_required_text,
+    TaskId, require_capability, validate_required_text,
 };
 use crate::queries::hierarchy::{
-    find_epic, find_goal, find_project, find_task, find_task_type, goal_row, project_archived,
-    project_row,
+    find_epic, find_goal, find_project, find_task, goal_row, project_archived, project_row,
 };
 use crate::storage::Store;
 use crate::storage::rows::format_ts;
@@ -309,55 +308,6 @@ impl Store {
                 let updated = find_task(tx, &project, &task)
                     .await?
                     .ok_or_else(|| missing_after_write("task"))?;
-                Ok(CommandResult {
-                    value: updated,
-                    events,
-                })
-            })
-        })
-        .await
-    }
-
-    // task_types has no lifecycle columns; archived is a boolean flag only.
-    pub async fn archive_task_type(
-        &self,
-        ctx: CommandContext,
-        project: ProjectId,
-        task_type: TaskTypeId,
-    ) -> Result<CommandResult<TaskType>, DomainError> {
-        self.domain_transaction(move |tx| {
-            Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
-                let current = find_task_type(tx, &project, &task_type)
-                    .await?
-                    .ok_or(DomainError::NotFound)?;
-                require_capability(&actor, Capability::AdministerProject)?;
-                require_revision(ctx.expected_revision, current.revision)?;
-                if current.archived || project_archived(tx, &project).await? {
-                    return Err(DomainError::ArchivedScope);
-                }
-                let next = current.revision.next();
-                sqlx::query(
-                    "UPDATE task_types SET revision = ?1, updated_at = ?2, archived = 1 \
-                     WHERE id = ?3",
-                )
-                .bind(next.value())
-                .bind(format_ts(&ctx.now))
-                .bind(task_type.to_string())
-                .execute(&mut **tx)
-                .await?;
-                let events = append_events(
-                    tx,
-                    &project,
-                    &ctx,
-                    "archiveTaskType",
-                    "",
-                    vec![PendingEvent::task_type(task_type, next)],
-                )
-                .await?;
-                let updated = find_task_type(tx, &project, &task_type)
-                    .await?
-                    .ok_or_else(|| missing_after_write("task type"))?;
                 Ok(CommandResult {
                     value: updated,
                     events,

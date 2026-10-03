@@ -5,7 +5,7 @@ use shepherd_core::error::DomainError;
 use shepherd_core::model::{
     Actor, ActorId, ActorKind, Clock, CommandId, EpicCreate, EpicStatus, GoalCreate, ProjectCreate,
     ProjectPatch, ProjectSettings, ReviewPolicy, TaskCreate, TaskPatch, TaskStatus, TaskTypeCreate,
-    TaskTypeId, TestClock,
+    TaskTypeId, TaskTypePatch, TestClock,
 };
 use shepherd_core::storage::rows::{format_ts, insert_actor};
 use shepherd_core::storage::{Store, open, testing};
@@ -574,20 +574,58 @@ async fn archived_type_cannot_be_assigned_but_existing_task_renders_label() {
         .unwrap()
         .value;
 
+    // The archived flag is one-way: clearing it is rejected.
+    let err = f
+        .store
+        .update_task_type(
+            ctx(&f.owner, &f.clock, Some(1)),
+            project.id,
+            ops_type.id,
+            TaskTypePatch {
+                archived: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "archived",
+            ..
+        }
+    ));
+
     // Agents cannot archive types (AdministerProject is owner-only).
     let agent = make_actor(&f.clock, ActorKind::Agent, "agent");
     register(&f.store, &agent).await;
     let err = f
         .store
-        .archive_task_type(ctx(&agent, &f.clock, Some(1)), project.id, ops_type.id)
+        .update_task_type(
+            ctx(&agent, &f.clock, Some(1)),
+            project.id,
+            ops_type.id,
+            TaskTypePatch {
+                archived: Some(true),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, DomainError::Forbidden(_)));
 
-    // Archive the ops type.
+    // Archive the ops type via the contract patch field.
     let archived = f
         .store
-        .archive_task_type(ctx(&f.owner, &f.clock, Some(1)), project.id, ops_type.id)
+        .update_task_type(
+            ctx(&f.owner, &f.clock, Some(1)),
+            project.id,
+            ops_type.id,
+            TaskTypePatch {
+                archived: Some(true),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap()
         .value;
@@ -599,7 +637,15 @@ async fn archived_type_cannot_be_assigned_but_existing_task_renders_label() {
     // Double-archive is rejected.
     let err = f
         .store
-        .archive_task_type(ctx(&f.owner, &f.clock, Some(2)), project.id, ops_type.id)
+        .update_task_type(
+            ctx(&f.owner, &f.clock, Some(2)),
+            project.id,
+            ops_type.id,
+            TaskTypePatch {
+                archived: Some(true),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, DomainError::ArchivedScope));
@@ -624,7 +670,15 @@ async fn archived_type_cannot_be_assigned_but_existing_task_renders_label() {
     .unwrap();
     let err = f
         .store
-        .archive_task_type(ctx(&f.owner, &f.clock, Some(1)), project.id, code_type)
+        .update_task_type(
+            ctx(&f.owner, &f.clock, Some(1)),
+            project.id,
+            code_type,
+            TaskTypePatch {
+                archived: Some(true),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, DomainError::ArchivedScope));

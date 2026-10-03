@@ -116,6 +116,8 @@ pub struct TaskTypeCreate {
 #[derive(Debug, Clone, Default)]
 pub struct TaskTypePatch {
     pub label: Option<String>,
+    // Contract TaskTypePatch field; archive is one-way, so only Some(true) is valid.
+    pub archived: Option<bool>,
 }
 
 // Contract pattern ^[a-z][a-z0-9_]{0,39}$; keys are immutable once created.
