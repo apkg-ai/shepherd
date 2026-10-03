@@ -1,9 +1,14 @@
+mod claim;
 mod epic;
 mod goal;
 mod identity;
 mod project;
 mod task;
 
+pub use claim::{
+    Claim, ClaimGrant, ClaimInput, ClaimPhase, ClaimStatus, DEFAULT_TTL_SECONDS, MAX_TTL_SECONDS,
+    MIN_TTL_SECONDS, RenewInput, validate_ttl,
+};
 pub use epic::{Epic, EpicCreate, EpicId, EpicStatus};
 pub use goal::{Goal, GoalCreate, GoalId, TextPatch, goal_completed};
 pub use identity::{

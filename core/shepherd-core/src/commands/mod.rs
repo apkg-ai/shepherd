@@ -1,4 +1,5 @@
 mod archive;
+mod claims;
 mod dependencies;
 mod hierarchy;
 mod identity;

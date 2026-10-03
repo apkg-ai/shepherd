@@ -1,6 +1,7 @@
 pub mod commands;
 mod dag;
 pub mod error;
+pub mod lease;
 pub mod model;
 pub mod queries;
 pub mod storage;
