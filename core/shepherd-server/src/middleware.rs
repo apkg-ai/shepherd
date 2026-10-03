@@ -84,8 +84,12 @@ impl AuthConfig {
         })
     }
 
+    // RFC 9110: host names compare case-insensitively (the Origin path
+    // already lowercases through Url::parse).
     fn host_allowed(&self, host: &str) -> bool {
-        self.allowed_hosts().iter().any(|allowed| allowed == host)
+        self.allowed_hosts()
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(host))
     }
 }
 
@@ -198,12 +202,15 @@ fn problem_response(
     detail: &str,
     request_id: Uuid,
 ) -> Response<Body> {
-    let body =
-        serde_json::to_vec(&problem(status, code, detail, request_id)).expect("problem serializes");
+    problem_body_response(status, &problem(status, code, detail, request_id))
+}
+
+fn problem_body_response(status: StatusCode, body: &wire::Problem) -> Response<Body> {
+    let bytes = serde_json::to_vec(body).expect("problem serializes");
     Response::builder()
         .status(status)
         .header(header::CONTENT_TYPE, "application/problem+json")
-        .body(Body::from(body))
+        .body(Body::from(bytes))
         .expect("problem response builds")
 }
 
@@ -413,12 +420,7 @@ async fn api_gate(
 
 fn domain_reject(err: &DomainError, request_id: Uuid) -> Response<Body> {
     let (status, body) = problem_for(err, request_id);
-    let bytes = serde_json::to_vec(&body).expect("problem serializes");
-    Response::builder()
-        .status(status)
-        .header(header::CONTENT_TYPE, "application/problem+json")
-        .body(Body::from(bytes))
-        .expect("problem response builds")
+    problem_body_response(status, &body)
 }
 
 // The 007 surface has exactly one replayable command (revokeAgent).
@@ -463,10 +465,15 @@ pub async fn problem_shaper(req: Request, next: Next) -> Response<Body> {
     if !is_problem {
         return response;
     }
-    let (parts, body) = response.into_parts();
+    let (mut parts, body) = response.into_parts();
     let bytes = match body.collect().await {
         Ok(collected) => collected.to_bytes(),
-        Err(_) => return Response::from_parts(parts, Body::empty()),
+        Err(_) => {
+            // The inner body is gone; a stale Content-Length would make the
+            // empty replacement unreadable at the HTTP framing layer.
+            parts.headers.remove(header::CONTENT_LENGTH);
+            return Response::from_parts(parts, Body::empty());
+        }
     };
     let Ok(rejection) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
         return Response::from_parts(parts, Body::from(bytes));
@@ -606,6 +613,21 @@ mod tests {
             request_id,
         );
         assert_eq!(body.detail, "internal storage error");
+    }
+
+    #[test]
+    fn host_allowlist_is_case_insensitive_and_exact() {
+        let config = AuthConfig {
+            port: 7437,
+            dev: false,
+        };
+        assert!(config.host_allowed("127.0.0.1:7437"));
+        assert!(config.host_allowed("localhost:7437"));
+        assert!(config.host_allowed("LocalHost:7437"));
+        assert!(config.host_allowed("LOCALHOST:7437"));
+        assert!(!config.host_allowed("localhost:7438"));
+        assert!(!config.host_allowed("localhost"));
+        assert!(!config.host_allowed("evil.example.com:7437"));
     }
 
     #[test]
