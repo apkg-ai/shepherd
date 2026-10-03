@@ -4,6 +4,11 @@
 # osv-scanner.toml; anything not listed fails the gate (GHAS policy).
 set -uo pipefail
 
+command -v jq >/dev/null 2>&1 || {
+  echo "npm-audit: jq is required" >&2
+  exit 1
+}
+
 ignored=(
   # GHSA-vfj7-8cjw-p6xm — braces stack-exhaustion DoS via deeply nested glob
   # patterns. No fix released (braces 3.0.3 is the latest published version);
@@ -26,15 +31,26 @@ if [[ $# -gt 0 ]]; then
   prefix_args=(--prefix "$1")
 fi
 
-# npm audit exits nonzero when it finds anything, so capture and decide here.
-report=$(npm audit --audit-level=low ${prefix_args[@]+"${prefix_args[@]}"} --json 2>/dev/null) || true
+# npm audit exits nonzero when it finds anything; that exit code is only
+# trustworthy when it produced a parseable report, so the gate fails closed
+# on operational errors (registry down, bad --prefix) instead of passing
+# with nothing audited.
+npm_status=0
+report=$(npm audit --audit-level=low ${prefix_args[@]+"${prefix_args[@]}"} --json) || npm_status=$?
+if ! jq -e 'type == "object" and (has("error") | not)' <<<"$report" >/dev/null 2>&1; then
+  echo "npm-audit: npm audit failed (exit $npm_status) without a usable report" >&2
+  printf '%s\n' "$report" >&2
+  exit 1
+fi
 
+# Advisories without a url fall back to the package name; an object with
+# neither still fails the gate rather than slipping through unreviewed.
 ids=$(jq -r '
   .vulnerabilities // {}
   | to_entries
   | map(.value.via // [])
   | flatten
-  | map(select(type == "object") | .url // empty)
+  | map(select(type == "object") | (.url // .name // "advisory-without-identifier"))
   | unique
   | .[]
 ' <<<"$report")
