@@ -155,7 +155,10 @@ impl Store {
             .push_bind(limit + 1);
         let rows = builder
             .build()
-            .fetch_all(self.pool())
+            // The held connection: acquiring a second one here could hold every
+            // pool connection at the authorization stage and stall concurrent
+            // page queries until the acquire timeout.
+            .fetch_all(&mut *conn)
             .await
             .map_err(StorageError::from)?;
         let items = rows

@@ -651,3 +651,41 @@ async fn list_agents_is_owner_only_in_core() {
     let page = f.store.list_agents(&owner.id, &params).await.unwrap();
     assert_eq!(page.items.len(), 1);
 }
+
+// Eight concurrent owner listings must all succeed: holding one pool
+// connection for the authorization check and acquiring a second for the
+// page query would wedge every connection at the acquire-timeout wall.
+#[tokio::test]
+async fn concurrent_list_agents_share_the_pool_without_stalling() {
+    let f = fixture().await;
+    let owner = f.owner().await;
+    f.agent(&owner, "A").await;
+    let params = ListParams {
+        limit: Some(10),
+        cursor: None,
+        include_archived: false,
+    };
+
+    let (one, two, three, four, five, six, seven, eight) = tokio::join!(
+        f.store.list_agents(&owner.id, &params),
+        f.store.list_agents(&owner.id, &params),
+        f.store.list_agents(&owner.id, &params),
+        f.store.list_agents(&owner.id, &params),
+        f.store.list_agents(&owner.id, &params),
+        f.store.list_agents(&owner.id, &params),
+        f.store.list_agents(&owner.id, &params),
+        f.store.list_agents(&owner.id, &params),
+    );
+    for (name, page) in [
+        ("one", one),
+        ("two", two),
+        ("three", three),
+        ("four", four),
+        ("five", five),
+        ("six", six),
+        ("seven", seven),
+        ("eight", eight),
+    ] {
+        assert_eq!(page.unwrap().items.len(), 1, "{name} must list the agent");
+    }
+}
