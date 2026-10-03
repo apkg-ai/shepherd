@@ -471,6 +471,26 @@ async fn same_key_different_actor_does_not_replay_foreign_response() {
 }
 
 #[tokio::test]
+async fn undecryptable_session_fails_authentication_not_the_server() {
+    let f = fixture().await;
+    f.owner().await;
+    let token = f.owner_token().await;
+    let login = f.store.login_browser(&token, f.clock.now()).await.unwrap();
+    // A mismatched replay-key restore leaves ciphertext the current key
+    // cannot open; simulate by corrupting the stored CSRF ciphertext.
+    sqlx::query("UPDATE browser_sessions SET csrf_ciphertext = x'00010203'")
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+    let err = f
+        .store
+        .browser_session(&login.session_token, f.clock.now())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::Unauthenticated), "{err:?}");
+}
+
+#[tokio::test]
 async fn browser_sessions_are_fixed_ttl_without_sliding() {
     let f = fixture().await;
     f.owner().await;

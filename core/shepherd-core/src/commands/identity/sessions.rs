@@ -103,7 +103,13 @@ impl Store {
             ciphertext: row.try_get("csrf_ciphertext").map_err(StorageError::from)?,
             nonce: row.try_get("csrf_nonce").map_err(StorageError::from)?,
         };
-        let csrf = self.codec().open_bytes(session_id.as_bytes(), &sealed)?;
+        // A session sealed under a different replay key (mismatched backup
+        // restore) is a dead credential, not a server fault: authentication
+        // fails and the row ages out at its fixed expiry.
+        let csrf = self
+            .codec()
+            .open_bytes(session_id.as_bytes(), &sealed)
+            .map_err(|_| DomainError::Unauthenticated)?;
         let csrf = String::from_utf8(csrf)
             .map_err(|_| StorageError::Corrupt("browser_sessions.csrf_ciphertext".into()))?;
         Ok(BrowserSession {
