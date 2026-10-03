@@ -576,6 +576,7 @@ async fn update_bumps_revision_exactly_once() {
             code_type.id,
             TaskTypePatch {
                 label: Some("Code work".to_string()),
+                ..Default::default()
             },
         )
         .await

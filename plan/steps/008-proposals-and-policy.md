@@ -1,6 +1,6 @@
 # 008 — Proposal and policy configuration
 
-Status: not started. Requirements: REVIEW-01 AUTH-01.
+Status: implemented on branch `v1-008-proposals-and-policy` (PR pending). Requirements: REVIEW-01 AUTH-01.
 
 ## Objective and prerequisites
 
@@ -57,13 +57,38 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Completion checklist
 
-- [ ] Referenced requirements and every acceptance sentence implemented.
-- [ ] Schemas, permissions, transitions and clients remain consistent.
-- [ ] Success and rejection behavior verified at the public boundary.
-- [ ] Required commands pass; material environmental limitation recorded accurately.
-- [ ] Temporary code and next-step dependencies documented.
-- [ ] Handoff below completed; next eligible step linked.
+- [x] Referenced requirements and every acceptance sentence implemented.
+- [x] Schemas, permissions, transitions and clients remain consistent.
+- [x] Success and rejection behavior verified at the public boundary.
+- [x] Required commands pass; material environmental limitation recorded accurately.
+- [x] Temporary code and next-step dependencies documented.
+- [x] Handoff below completed; next eligible step linked.
 
 ## Implementation handoff record
 
-Fill when implementing, not during planning: commit/branch; files changed; test commands and results; any reproduced limitation; temporary interfaces; next eligible step IDs. If an acceptance criterion cannot pass, leave this step incomplete and explain the concrete blocker. Do not mark complete for code that merely compiles.
+Branch `v1-008-proposals-and-policy` (PR pending).
+
+### Files changed
+
+- New: `core/shepherd-core/tests/v1_proposals_and_policy.rs` — the four acceptance sentences as named regressions at the public command boundary, plus the task-type archive negatives (one-way flag, double archive, archived project, agent forbidden, event action/type pinned to the contract).
+- Amended: `core/shepherd-core/src/model/project.rs` (`TaskTypePatch.archived: Option<bool>` — the contract patch field), `core/shepherd-core/src/commands/hierarchy.rs` (`update_task_type` applies the archived flag in the same revision bump/event as a label rename; `Some(false)` is rejected because archive is one-way), `core/shepherd-core/src/commands/archive.rs` (the draft `archive_task_type` command was removed in review — see below), `core/shepherd-core/tests/v1_projects_and_goals.rs` and `core/shepherd-core/tests/v1_identity_and_permissions.rs` (existing `TaskTypePatch` literals gained `..Default::default()`), `README.md` (current-state line bumped to step 008, as the step 007 review required for that step).
+
+### What was built
+
+The step's behavior was mostly in place from steps 004–007 (proposal gate on create, policy snapshots with agent downgrade floors in `workflow/policy.rs`, accept-epic cascade that leaves proposed tasks proposed, task-type create/rename). This step closed the one missing command surface — task-type archiving — and pinned all four acceptance sentences as named regressions. Design note from review: the contract has no `archiveTaskType` operation; archiving rides `updateTaskType` via `TaskTypePatch.archived` (`plan/contracts/openapi.yaml`), so the draft separate command was folded into `update_task_type`. The event action stays `updateTaskType` per plan/08 (action = operationId or system.*), event type `task_type.changed`, empty reason — the contract has no `ReasonInput` for task types. Archived types stay assignable on neither create nor edit (`Validation` on `type_key`), existing tasks keep their `type_key`, and the registry row keeps key and label so reads still render it.
+
+### Test commands and results
+
+- From `core/`: `cargo fmt --check` clean; `cargo clippy --all-targets -- -D warnings` clean; `cargo test --workspace` — 430 passed, 0 failed, exit code checked directly (never piped); `cargo test --workspace --doc` clean.
+- Coverage (CI commands): unit 98.4% (≥95), integration 93.1% (≥70), union 98.2% (≥92) — `scripts/coverage-report.ts --check` passes with all four artifacts.
+- Repository root: `python3 plan/validate.py` PASS (29 step DAG, 70 operations); `scripts/check-v1-contracts.sh` PASS (plan validation, examples, spectral OpenAPI+AsyncAPI, contract smoke, operation freeze, four negative mutations, generated Rust models/server + Orval output compile); `node --run typecheck` and `node --run lint:spec` clean; `node scripts/check-operation-freeze.ts` PASS; `shellcheck scripts/*.sh` clean; `semgrep scan --error` with the nine CI rule packs — 303 rules, 0 findings; `scripts/npm-audit.sh` (root + ui) clean against the allowlist.
+- Live boundary: `scripts/smoke.sh` OK; `scripts/hurl-e2e.sh` 3/3; `scripts/playwright-e2e.sh` 7/7 (with `E2E_COVERAGE=1`, ui coverage unit 97.9% / e2e 67.7% / union 95.5% — all above thresholds).
+- Acceptance sentences → named tests: gate default/disabled — `proposal_gate_defaults_on_and_owner_disables` (persisted rows prove old proposed items are untouched after the gate flips); accept cascade — `accepting_epic_leaves_proposed_tasks_proposed` (task revision/status asserted unchanged); policy floors — `policy_downgrade_fails_for_agents_human_edit_fails_during_active_work` (create and update downgrades forbidden for agents, owner edit blocked by an active claim, event-count invariant proves failed commands leak no events); archived type — `archived_type_cannot_be_assigned_but_existing_task_renders_label` (plus `archived: Some(false)` rejection, double archive, archived project, agent forbidden, event action `updateTaskType` + type `task_type.changed`).
+
+### Limitations and temporary interfaces
+
+- osv-scanner and cargo-audit are CI-only (not installed locally); this step changes no dependency manifests or lockfiles, so those gates are unaffected.
+- REST wiring for `updateTaskType` (and `listTaskTypes` with `include_archived`) lands in step 015; the generated wire `TaskTypePatch` already carries `archived` from the contract, so the core patch maps one-to-one.
+- No temporary interfaces; no migration (the `archived` flag ships in the baseline `task_types` schema).
+
+Next eligible step: [009](009-phase-claims.md).

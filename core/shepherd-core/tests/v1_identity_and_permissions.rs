@@ -202,6 +202,7 @@ async fn agent_cannot_weaken_review_gates_via_registry() {
             type_id,
             TaskTypePatch {
                 label: Some("weakened".into()),
+                ..Default::default()
             },
         )
         .await

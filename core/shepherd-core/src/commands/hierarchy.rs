@@ -1281,7 +1281,8 @@ impl Store {
         .await
     }
 
-    // Keys are immutable; this renames the label only. Archiving arrives in step 008.
+    // Keys are immutable; this renames the label and archives (contract
+    // TaskTypePatch). task_types has no lifecycle columns, archived is a flag.
     pub async fn update_task_type(
         &self,
         ctx: CommandContext,
@@ -1300,10 +1301,16 @@ impl Store {
                 if current.archived || project_archived(tx, &project).await? {
                     return Err(DomainError::ArchivedScope);
                 }
-                if patch.label.is_none() {
+                if patch.label.is_none() && patch.archived.is_none() {
                     return Err(DomainError::Validation {
                         field: "patch",
                         message: "at least one field must be provided".into(),
+                    });
+                }
+                if patch.archived == Some(false) {
+                    return Err(DomainError::Validation {
+                        field: "archived",
+                        message: "archive is one-way and cannot be cleared".into(),
                     });
                 }
                 let label = match &patch.label {
@@ -1312,12 +1319,13 @@ impl Store {
                 };
                 let next = current.revision.next();
                 sqlx::query(
-                    "UPDATE task_types SET revision = ?1, updated_at = ?2, label = ?3 \
-                     WHERE id = ?4",
+                    "UPDATE task_types SET revision = ?1, updated_at = ?2, label = ?3, \
+                     archived = ?4 WHERE id = ?5",
                 )
                 .bind(next.value())
                 .bind(format_ts(&ctx.now))
                 .bind(&label)
+                .bind(i64::from(patch.archived.unwrap_or(false)))
                 .bind(task_type.to_string())
                 .execute(&mut **tx)
                 .await?;
@@ -1717,6 +1725,7 @@ mod tests {
                 code_type,
                 TaskTypePatch {
                     label: Some("Renamed".to_string()),
+                    ..Default::default()
                 },
             )
             .await
@@ -2002,6 +2011,7 @@ mod tests {
                 custom.id,
                 TaskTypePatch {
                     label: Some("Operations".to_string()),
+                    ..Default::default()
                 },
             )
             .await
@@ -2010,8 +2020,9 @@ mod tests {
         assert_eq!(renamed.revision.value(), 2);
         assert_eq!(renamed.label, "Operations");
         assert_eq!(renamed.key, "ops");
+        assert!(!renamed.archived);
 
-        // Archived registry entries are frozen until step 008 owns their lifecycle.
+        // Archived registry entries are frozen; the flag is one-way.
         sqlx::query("UPDATE task_types SET archived = 1 WHERE id = ?1")
             .bind(custom.id.to_string())
             .execute(f.store.pool())
