@@ -382,7 +382,8 @@ mod contract {
         assert_eq!(served, load_spec(), "served spec must be the embedded one");
 
         let paths = served["paths"].as_object().unwrap();
-        // serde_yaml maps sort keys; compare as sets.
+        // serde_yaml sorts map keys, so this expected list must stay in
+        // alphabetical order.
         assert_eq!(
             paths.keys().collect::<Vec<_>>(),
             [

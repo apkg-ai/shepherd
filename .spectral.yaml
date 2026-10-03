@@ -22,9 +22,6 @@ rules:
   # plan/12 forbids fake RateLimit headers.
   owasp:api4:2023-rate-limit: off
 
-  # POST /api/v1/session is browser login — necessarily public (plan/12).
-  owasp:api2:2023-write-restricted: off
-
   # v1 serves plain HTTP on localhost; TLS is a post-v1 concern (plan/12).
   # Advertising https here would direct clients at a transport the daemon
   # never serves.
@@ -113,3 +110,10 @@ rules:
   # X-CSRF-Token is the contract-fixed CSRF header name (plan/12).
   no-x-headers: off
 
+overrides:
+  # POST /api/v1/session is browser login — necessarily public (plan/12).
+  # Scoped here so every other write operation keeps the security-scheme lint.
+  - files:
+      - "openapi/shepherd.yaml#/paths/~1api~1v1~1session/post"
+    rules:
+      owasp:api2:2023-write-restricted: off
