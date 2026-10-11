@@ -3,6 +3,7 @@ mod claims;
 mod dependencies;
 mod hierarchy;
 mod identity;
+mod reports;
 
 pub use identity::IdentityPaths;
 
@@ -526,6 +527,16 @@ impl PendingEvent {
             kind_rank: 7,
             resource_id: id,
             resource_revision: revision,
+            affected_ids: vec![task.as_uuid()],
+        }
+    }
+
+    pub(crate) fn session(id: Uuid, task: TaskId) -> Self {
+        Self {
+            event_type: "session.recorded",
+            kind_rank: 8,
+            resource_id: id,
+            resource_revision: 0,
             affected_ids: vec![task.as_uuid()],
         }
     }

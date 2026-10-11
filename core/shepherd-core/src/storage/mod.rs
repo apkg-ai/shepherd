@@ -23,6 +23,8 @@ pub struct Store {
     pool: SqlitePool,
     clock: Arc<dyn Clock>,
     codec: Arc<dyn IdempotencyCodec>,
+    #[cfg(any(test, feature = "test-support"))]
+    pub report_failpoint: std::sync::atomic::AtomicU8,
 }
 
 impl Store {
@@ -31,7 +33,13 @@ impl Store {
         clock: Arc<dyn Clock>,
         codec: Arc<dyn IdempotencyCodec>,
     ) -> Self {
-        Self { pool, clock, codec }
+        Self {
+            pool,
+            clock,
+            codec,
+            #[cfg(any(test, feature = "test-support"))]
+            report_failpoint: std::sync::atomic::AtomicU8::new(0),
+        }
     }
 
     // crate-internal in production: downstream crates must not bypass command_transaction.
@@ -205,6 +213,24 @@ impl IdempotencyCodec for TestCodec {
 }
 
 #[cfg(any(test, feature = "test-support"))]
+pub mod failpoint {
+    pub const AFTER_LEASE_CLOSE: u8 = 1;
+    pub const AFTER_SESSION_INSERT: u8 = 2;
+    pub const AFTER_TASK_UPDATE: u8 = 3;
+    pub const AFTER_EVENT_INSERT: u8 = 4;
+
+    pub fn check(active: u8, point: u8) -> Result<(), super::StorageError> {
+        if active == point {
+            Err(super::StorageError::Corrupt(format!(
+                "failpoint triggered: {point}"
+            )))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
 pub mod testing {
     use std::path::Path;
     use std::sync::Arc;
@@ -277,6 +303,47 @@ pub mod testing {
         .await
         .unwrap();
         id
+    }
+
+    /// Direct-SQL document + revision fixture for report tests.
+    pub async fn seed_task_document(
+        pool: &sqlx::SqlitePool,
+        project: crate::model::ProjectId,
+        task: crate::model::TaskId,
+        actor: crate::model::ActorId,
+        kind: &str,
+        now: &str,
+    ) -> (String, String) {
+        let doc_id = test_uuid();
+        let rev_id = test_uuid();
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query(
+            "INSERT INTO documents (id, revision, created_at, updated_at, project_id, \
+             owner_kind, owner_id, kind, title, latest_revision_id) \
+             VALUES (?1, 1, ?2, ?2, ?3, 'task', ?4, ?5, ?5, ?6)",
+        )
+        .bind(&doc_id)
+        .bind(now)
+        .bind(project.to_string())
+        .bind(task.to_string())
+        .bind(kind)
+        .bind(&rev_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO document_revisions (id, document_id, number, body, links, \
+             actor_id, created_at) VALUES (?1, ?2, 1, '', '[]', ?3, ?4)",
+        )
+        .bind(&rev_id)
+        .bind(&doc_id)
+        .bind(actor.to_string())
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        (doc_id, rev_id)
     }
 
     /// Direct-SQL session + submission fixture: commands land in steps 010/011.
