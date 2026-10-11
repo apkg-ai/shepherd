@@ -508,8 +508,8 @@ impl PendingEvent {
         }
     }
 
-    // Claims have no revision column; the event carries the task revision
-    // pinned at acquisition (revisit when the claim model lands in step 009).
+    // Claims pin the task revision at acquisition (claims.task_revision);
+    // claim.changed carries that pinned revision, not the task's current one.
     pub(crate) fn claim(id: Uuid, task_revision: i64, task: TaskId) -> Self {
         Self {
             event_type: "claim.changed",

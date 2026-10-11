@@ -4,11 +4,12 @@ use chrono::{DateTime, TimeDelta, Utc};
 use shepherd_core::commands::CommandContext;
 use shepherd_core::error::DomainError;
 use shepherd_core::model::{
-    Actor, ActorId, ActorKind, ClaimInput, ClaimPhase, ClaimStatus, Clock, CommandId,
+    Actor, ActorId, ActorKind, Claim, ClaimInput, ClaimPhase, ClaimStatus, Clock, CommandId,
     DependencyCreate, Epic, EpicCreate, EpicId, EpicStatus, Goal, GoalCreate, GoalId, Project,
     ProjectCreate, ProjectId, RenewInput, Task, TaskCreate, TaskId, TaskStatus, TestClock,
 };
-use shepherd_core::storage::rows::insert_actor;
+use shepherd_core::queries::{ClaimListFilters, ListParams, Page};
+use shepherd_core::storage::rows::{format_ts, insert_actor};
 use shepherd_core::storage::{Store, StoreOptions, open, testing};
 use uuid::Uuid;
 
@@ -240,17 +241,23 @@ async fn ten_simultaneous_claims_yield_one_active_winner() {
         }));
     }
 
+    // The write lock serializes the ten commands: the winner commits first,
+    // and every loser then fails the revision check against the bumped task.
     let mut successes = 0;
-    let mut failures = 0;
+    let mut conflicts = 0;
     for handle in handles {
         match handle.await.unwrap() {
             Ok(_) => successes += 1,
-            Err(_) => failures += 1,
+            Err(DomainError::RevisionConflict { .. }) => conflicts += 1,
+            Err(other) => panic!("unexpected claim error: {other:?}"),
         }
     }
 
     assert_eq!(successes, 1, "exactly one claim must succeed");
-    assert_eq!(failures, 9, "nine claims must fail");
+    assert_eq!(
+        conflicts, 9,
+        "losers must fail on the winner's revision bump"
+    );
     assert_eq!(count_active_claims(&s.store, task.id).await, 1);
 }
 
@@ -597,4 +604,497 @@ async fn lost_claim_response_replay_returns_same_lease_release_does_not_erase_sa
     let post_grant = post_release.into_inner();
     assert_eq!(post_grant.lease_token, original_token);
     assert_eq!(post_grant.claim.id, original_claim_id);
+}
+
+// --- Input validation ---
+
+#[tokio::test]
+async fn review_phase_and_submission_id_are_rejected_until_supported() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    s.clock.advance(TimeDelta::milliseconds(1));
+
+    let err = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(task.revision.value())),
+            project.id,
+            task.id,
+            ClaimInput {
+                phase: ClaimPhase::Review,
+                submission_id: None,
+                ttl_seconds: None,
+            },
+            "review-hash",
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, DomainError::Validation { field: "phase", .. }),
+        "expected phase validation, got: {err:?}"
+    );
+
+    // plan/04: only review claims reference a submission.
+    let err = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(task.revision.value())),
+            project.id,
+            task.id,
+            ClaimInput {
+                phase: ClaimPhase::Plan,
+                submission_id: Some(Uuid::nil()),
+                ttl_seconds: None,
+            },
+            "submission-hash",
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            DomainError::Validation {
+                field: "submission_id",
+                ..
+            }
+        ),
+        "expected submission_id validation, got: {err:?}"
+    );
+}
+
+// --- Renewal semantics (plan/04: expiry = now + TTL) ---
+
+#[tokio::test]
+async fn renew_resets_the_ttl_from_now_rather_than_extending() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    s.clock.advance(TimeDelta::milliseconds(1));
+    let grant = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(task.revision.value())),
+            project.id,
+            task.id,
+            claim_input(ClaimPhase::Execute, Some(900)),
+            "claim-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    s.clock.advance(TimeDelta::seconds(1));
+    let renew_at = s.clock.now();
+    let renewed = s
+        .store
+        .renew_claim(
+            ctx(&s.owner, renew_at, None),
+            project.id,
+            grant.claim.id,
+            &grant.lease_token,
+            RenewInput {
+                ttl_seconds: Some(30),
+            },
+            "renew-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Renewal resets the lease to now + TTL, even when that truncates a
+    // longer remaining window.
+    assert_eq!(renewed.expires_at, renew_at + TimeDelta::seconds(30));
+    assert!(renewed.expires_at < grant.claim.expires_at);
+}
+
+// --- Expiry reconciliation on a later claim ---
+
+#[tokio::test]
+async fn claiming_after_expiry_sweeps_the_stale_claim_and_emits_both_events() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    s.clock.advance(TimeDelta::milliseconds(1));
+    let grant = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(task.revision.value())),
+            project.id,
+            task.id,
+            claim_input(ClaimPhase::Execute, Some(30)),
+            "first-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Let the lease lapse. The stale row still says 'active', so the sweep
+    // must expire it before the insert can satisfy the one-active-claim
+    // partial index.
+    s.clock.advance(TimeDelta::seconds(31));
+    let updated = reload_task(&s, project.id, task.id).await;
+    let regrant = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(updated.revision.value())),
+            project.id,
+            task.id,
+            claim_input(ClaimPhase::Execute, None),
+            "second-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    let (status, closed_at, reason) = claim_status(&s.store, grant.claim.id).await;
+    assert_eq!(status, "expired");
+    assert!(closed_at.is_some());
+    assert_eq!(reason, "");
+    assert_eq!(count_active_claims(&s.store, task.id).await, 1);
+
+    // The swept claim has two claim.changed events (grant + expiry), the
+    // replacement exactly one (its grant).
+    for (claim_id, expected) in [(grant.claim.id, 2), (regrant.claim.id, 1)] {
+        let emitted: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM events WHERE type = 'claim.changed' AND resource_id = ?1",
+        )
+        .bind(claim_id.to_string())
+        .fetch_one(s.store.pool())
+        .await
+        .unwrap();
+        assert_eq!(emitted, expected);
+    }
+}
+
+// --- Read model: effective expiry, filters, cursor pagination ---
+
+async fn list_page(
+    s: &Setup,
+    project: ProjectId,
+    filters: &ClaimListFilters,
+    params: &ListParams,
+) -> Page<Claim> {
+    s.store
+        .list_claims(&project, filters, params)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn list_claims_computes_effective_expiry_and_honors_filters() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task_a = create_task(&s, project.id, epic.id, "A").await;
+    // Planning-required so the plan-phase claim is eligible.
+    let task_b = create_task_with_planning(&s, project.id, epic.id, "B", true).await;
+
+    s.clock.advance(TimeDelta::milliseconds(1));
+    let grant_a = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(task_a.revision.value())),
+            project.id,
+            task_a.id,
+            claim_input(ClaimPhase::Execute, None),
+            "a-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    s.clock.advance(TimeDelta::milliseconds(1));
+    s.store
+        .release_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            grant_a.claim.id,
+            &grant_a.lease_token,
+            "release-a-hash",
+        )
+        .await
+        .unwrap();
+
+    s.clock.advance(TimeDelta::milliseconds(1));
+    let grant_b = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(task_b.revision.value())),
+            project.id,
+            task_b.id,
+            claim_input(ClaimPhase::Plan, Some(30)),
+            "b-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    // No write command runs past this point: B's row stays 'active' while
+    // its expiry has passed, so only the read model can report it expired.
+    s.clock.advance(TimeDelta::seconds(31));
+    assert_eq!(claim_status(&s.store, grant_b.claim.id).await.0, "active");
+
+    let empty = ListParams::default();
+    let all = list_page(&s, project.id, &ClaimListFilters::default(), &empty).await;
+    assert_eq!(all.items.len(), 2);
+    // Newest first.
+    assert_eq!(all.items[0].id, grant_b.claim.id);
+    assert_eq!(all.items[0].status, ClaimStatus::Expired);
+    assert_eq!(all.items[1].id, grant_a.claim.id);
+    assert_eq!(all.items[1].status, ClaimStatus::Released);
+
+    let expired = list_page(
+        &s,
+        project.id,
+        &ClaimListFilters {
+            status: Some(ClaimStatus::Expired),
+            ..Default::default()
+        },
+        &empty,
+    )
+    .await;
+    assert_eq!(expired.items.len(), 1);
+    assert_eq!(expired.items[0].id, grant_b.claim.id);
+
+    // Effectively expired rows are not 'active' even though the column says so.
+    let active = list_page(
+        &s,
+        project.id,
+        &ClaimListFilters {
+            status: Some(ClaimStatus::Active),
+            ..Default::default()
+        },
+        &empty,
+    )
+    .await;
+    assert!(active.items.is_empty());
+
+    let plan_phase = list_page(
+        &s,
+        project.id,
+        &ClaimListFilters {
+            phase: Some(ClaimPhase::Plan),
+            ..Default::default()
+        },
+        &empty,
+    )
+    .await;
+    assert_eq!(plan_phase.items.len(), 1);
+    assert_eq!(plan_phase.items[0].id, grant_b.claim.id);
+
+    let by_task = list_page(
+        &s,
+        project.id,
+        &ClaimListFilters {
+            task_id: Some(task_a.id),
+            ..Default::default()
+        },
+        &empty,
+    )
+    .await;
+    assert_eq!(by_task.items.len(), 1);
+    assert_eq!(by_task.items[0].id, grant_a.claim.id);
+}
+
+#[tokio::test]
+async fn list_claims_paginates_by_acquired_at_without_overlap() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task(&s, project.id, epic.id, "T").await;
+
+    // Three claims on one task: claim, release, claim, release, claim.
+    let mut claim_ids = Vec::new();
+    for i in 0..3 {
+        s.clock.advance(TimeDelta::milliseconds(1));
+        let revision = reload_task(&s, project.id, task.id).await.revision;
+        let grant = s
+            .store
+            .claim_task(
+                ctx(&s.owner, s.clock.now(), Some(revision.value())),
+                project.id,
+                task.id,
+                claim_input(ClaimPhase::Execute, None),
+                &format!("claim-hash-{i}"),
+            )
+            .await
+            .unwrap()
+            .into_inner();
+        claim_ids.push(grant.claim.id);
+        if i < 2 {
+            s.clock.advance(TimeDelta::milliseconds(1));
+            s.store
+                .release_claim(
+                    ctx(&s.owner, s.clock.now(), None),
+                    project.id,
+                    grant.claim.id,
+                    &grant.lease_token,
+                    &format!("release-hash-{i}"),
+                )
+                .await
+                .unwrap();
+        }
+    }
+
+    let limited = ListParams {
+        limit: Some(2),
+        ..Default::default()
+    };
+    let page_one = list_page(&s, project.id, &ClaimListFilters::default(), &limited).await;
+    assert_eq!(page_one.items.len(), 2);
+    // Newest first: the still-active claim, then the second released one.
+    assert_eq!(page_one.items[0].id, claim_ids[2]);
+    assert_eq!(page_one.items[1].id, claim_ids[1]);
+
+    let cursor = page_one.next_cursor.expect("three claims exceed one page");
+    let page_two = list_page(
+        &s,
+        project.id,
+        &ClaimListFilters::default(),
+        &ListParams {
+            limit: Some(2),
+            cursor: Some(cursor),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(page_two.items.len(), 1);
+    assert_eq!(page_two.items[0].id, claim_ids[0]);
+    assert_eq!(page_two.next_cursor, None);
+}
+
+// --- Plan revision pinning ---
+
+/// Direct-SQL fixture: an accepted plan submission carrying two document
+/// revisions, with the task moved to execution and the second revision
+/// selected. Document and submission commands land in steps 010/011.
+async fn seed_accepted_plan(
+    s: &Setup,
+    project: ProjectId,
+    task: TaskId,
+    actor: ActorId,
+    revisions: [Uuid; 2],
+    selected: Uuid,
+) {
+    let now = format_ts(&s.clock.now());
+    let document = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    let session = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    let submission = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    let revision_json = format!(r#"["{}","{}"]"#, revisions[0], revisions[1]);
+    let mut tx = s.store.pool().begin().await.unwrap();
+    sqlx::query(
+        "INSERT INTO documents (id, revision, created_at, updated_at, project_id, \
+         owner_kind, owner_id, kind, title, latest_revision_id) \
+         VALUES (?1, 1, ?2, ?2, ?3, 'task', ?4, 'plan', 'Plan', ?5)",
+    )
+    .bind(document.to_string())
+    .bind(&now)
+    .bind(project.to_string())
+    .bind(task.to_string())
+    .bind(revisions[0].to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    for (number, id) in revisions.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO document_revisions (id, document_id, number, body, links, \
+             actor_id, created_at) VALUES (?1, ?2, ?3, '', '[]', ?4, ?5)",
+        )
+        .bind(id.to_string())
+        .bind(document.to_string())
+        .bind(number as i64 + 1)
+        .bind(actor.to_string())
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO sessions (id, task_id, claim_id, actor_id, phase, started_at, \
+         ended_at, outcome, summary, failure_reason, document_revision_ids, links) \
+         VALUES (?1, ?2, 'claim', ?3, 'plan', ?4, ?4, 'succeeded', '', '', '[]', '[]')",
+    )
+    .bind(session.to_string())
+    .bind(task.to_string())
+    .bind(actor.to_string())
+    .bind(&now)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO submissions (id, revision, created_at, updated_at, task_id, kind, \
+         producer_id, document_revision_ids, session_id, policy, status, \
+         created_context_revision) VALUES (?1, 1, ?2, ?2, ?3, 'plan', ?4, ?5, ?6, \
+         'none', 'accepted', 1)",
+    )
+    .bind(submission.to_string())
+    .bind(&now)
+    .bind(task.to_string())
+    .bind(actor.to_string())
+    .bind(&revision_json)
+    .bind(session.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE tasks SET phase = 'execution', accepted_plan_submission_id = ?1, \
+         selected_plan_revision_id = ?2 WHERE id = ?3",
+    )
+    .bind(submission.to_string())
+    .bind(selected.to_string())
+    .bind(task.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+}
+
+#[tokio::test]
+async fn execute_claim_pins_the_selected_plan_revision() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal.id, "E").await;
+    let task = create_task_with_planning(&s, project.id, epic.id, "T", true).await;
+
+    // The accepted plan carries two revisions; the owner selected the second.
+    let first = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    let second = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    seed_accepted_plan(&s, project.id, task.id, s.owner.id, [first, second], second).await;
+
+    s.clock.advance(TimeDelta::milliseconds(1));
+    let updated = reload_task(&s, project.id, task.id).await;
+    let grant = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(updated.revision.value())),
+            project.id,
+            task.id,
+            claim_input(ClaimPhase::Execute, None),
+            "exec-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(grant.claim.plan_revision_ids, vec![second]);
+    let pinned: Option<String> =
+        sqlx::query_scalar("SELECT plan_revision_id FROM claims WHERE id = ?1")
+            .bind(grant.claim.id.to_string())
+            .fetch_one(s.store.pool())
+            .await
+            .unwrap();
+    assert_eq!(pinned, Some(second.to_string()));
 }

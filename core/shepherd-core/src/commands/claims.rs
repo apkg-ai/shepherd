@@ -147,6 +147,15 @@ impl Store {
                 message: "review claims are not yet supported".into(),
             });
         }
+        // plan/04: only review claims reference a submission.
+        if input.submission_id.is_some() {
+            return Err(DomainError::Validation {
+                field: "submission_id",
+                message: "submission_id is only valid for review claims, which are not yet \
+                          supported"
+                    .into(),
+            });
+        }
         let ttl = validate_ttl(input.ttl_seconds)?;
         let phase = input.phase;
         let actor_id = ctx.actor.id;
@@ -192,8 +201,10 @@ impl Store {
                 let lease_token = lease::generate_lease_token();
                 let hash = lease::lease_hash(&lease_token);
 
+                // Eligibility gates on the selected revision being accepted;
+                // the claim must pin that same revision.
                 let plan_revision_id: Option<Uuid> = if phase == ClaimPhase::Execute {
-                    snapshot.accepted_plan_revision_ids.first().copied()
+                    snapshot.selected_plan_revision_id
                 } else {
                     None
                 };
@@ -282,7 +293,7 @@ impl Store {
                         task_id,
                         actor_id,
                         phase,
-                        submission_ids: Vec::new(),
+                        submission_ids: input.submission_id.into_iter().collect(),
                         acquired_at: now,
                         expires_at,
                         status: ClaimStatus::Active,
