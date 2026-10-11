@@ -226,7 +226,7 @@ fn success_input(rev_id: &str) -> ReportInput {
 fn failed_input() -> ReportInput {
     ReportInput {
         outcome: SessionOutcome::Failed,
-        summary: String::new(),
+        summary: "attempt failed".into(),
         failure_reason: "something went wrong".into(),
         document_revision_ids: Vec::new(),
         links: serde_json::json!([]),
@@ -1286,4 +1286,302 @@ async fn successful_execute_report_with_human_policy_advances_to_work_review() {
     assert_eq!(sub_status, "pending");
     assert_eq!(sub_kind, "work");
     assert_eq!(sub_policy, "human");
+}
+
+// --- Review-fix regressions ---
+
+#[tokio::test]
+async fn successful_plan_report_rejects_non_plan_revision() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal, "E").await;
+    let task = create_task_full(
+        &s,
+        project.id,
+        epic.id,
+        "T",
+        true,
+        ReviewPolicy::None,
+        ReviewPolicy::None,
+    )
+    .await;
+    let now_text = format_ts(&s.clock.now());
+    let (_, plan_rev) = testing::seed_task_document(
+        s.store.pool(),
+        project.id,
+        task.id,
+        s.owner.id,
+        "plan",
+        &now_text,
+    )
+    .await;
+    let (_, finding_rev) = testing::seed_task_document(
+        s.store.pool(),
+        project.id,
+        task.id,
+        s.owner.id,
+        "finding",
+        &now_text,
+    )
+    .await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let grant = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(task.revision.value())),
+            project.id,
+            task.id,
+            ClaimInput {
+                phase: ClaimPhase::Plan,
+                submission_id: None,
+                ttl_seconds: None,
+            },
+            "claim-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let finding_uuid: Uuid = finding_rev.parse().unwrap();
+    let err = s
+        .store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            grant.claim.id,
+            &grant.lease_token,
+            ReportInput {
+                outcome: SessionOutcome::Succeeded,
+                summary: "planned".into(),
+                failure_reason: String::new(),
+                document_revision_ids: vec![finding_uuid],
+                links: serde_json::json!([]),
+                selected_plan_revision_id: Some(finding_uuid),
+            },
+            "report-hash",
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "selected_plan_revision_id",
+            ..
+        }
+    ));
+    assert_eq!(claim_status(&s.store, grant.claim.id).await, "active");
+    assert_eq!(session_count(&s.store, task.id).await, 0);
+    let _ = plan_rev;
+}
+
+#[tokio::test]
+async fn duplicate_revision_ids_are_reported_once() {
+    let s = setup().await;
+    let (project, _, task, claim_id, token, rev_id) =
+        claim_and_report_setup(&s, ReviewPolicy::None).await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let rev_uuid: Uuid = rev_id.parse().unwrap();
+    let session = s
+        .store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project,
+            claim_id,
+            &token,
+            ReportInput {
+                outcome: SessionOutcome::Succeeded,
+                summary: "done".into(),
+                failure_reason: String::new(),
+                document_revision_ids: vec![rev_uuid, rev_uuid],
+                links: serde_json::json!([]),
+                selected_plan_revision_id: None,
+            },
+            "report-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(session.document_revision_ids, vec![rev_uuid]);
+    let stored: String =
+        sqlx::query_scalar("SELECT document_revision_ids FROM sessions WHERE id = ?1")
+            .bind(session.id.to_string())
+            .fetch_one(s.store.pool())
+            .await
+            .unwrap();
+    let parsed: Vec<String> = serde_json::from_str(&stored).unwrap();
+    assert_eq!(parsed, vec![rev_id]);
+    let _ = task;
+}
+
+// --- Independent-pool concurrency (acceptance: file-backed SQLite, two pools) ---
+
+#[tokio::test]
+async fn independent_pools_share_one_active_claim_and_expiry() {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = testing::test_clock();
+    let store_a = open_store(&dir, clock.clone()).await;
+    let store_b = open_store(&dir, clock.clone()).await;
+    let owner = actor(clock.now(), ActorKind::Human, "owner");
+    register(&store_a, &owner).await;
+
+    let project = store_a
+        .create_project(
+            ctx(&owner, clock.now(), None),
+            ProjectCreate {
+                name: "P".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value
+        .id;
+    let goal = store_a
+        .create_goal(
+            ctx(&owner, clock.now(), None),
+            project,
+            GoalCreate {
+                title: "G".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value
+        .id;
+    let epic = store_a
+        .create_epic(
+            ctx(&owner, clock.now(), None),
+            project,
+            goal,
+            EpicCreate {
+                title: "E".to_string(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value
+        .id;
+    let task = store_a
+        .create_task(
+            ctx(&owner, clock.now(), None),
+            project,
+            epic,
+            TaskCreate {
+                title: "T".to_string(),
+                description: None,
+                type_key: "code".to_string(),
+                planning_required: Some(false),
+                plan_review: Some(ReviewPolicy::None),
+                work_review: Some(ReviewPolicy::None),
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    let now_text = format_ts(&clock.now());
+    let (_, rev_id) = testing::seed_task_document(
+        store_a.pool(),
+        project,
+        task.id,
+        owner.id,
+        "finding",
+        &now_text,
+    )
+    .await;
+
+    // Pool A claims; pool B sees the active claim and is not eligible.
+    clock.advance(TimeDelta::milliseconds(2));
+    let grant_a = store_a
+        .claim_task(
+            ctx(&owner, clock.now(), Some(task.revision.value())),
+            project,
+            task.id,
+            ClaimInput {
+                phase: ClaimPhase::Execute,
+                submission_id: None,
+                ttl_seconds: None,
+            },
+            "claim-a",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let rev_after_claim = task.revision.value() + 1;
+    let err = store_b
+        .claim_task(
+            ctx(&owner, clock.now(), Some(rev_after_claim)),
+            project,
+            task.id,
+            ClaimInput {
+                phase: ClaimPhase::Execute,
+                submission_id: None,
+                ttl_seconds: None,
+            },
+            "claim-b1",
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotEligible(_)));
+
+    // Once A's lease expires, pool B can claim; A's stale report is rejected.
+    clock.advance(TimeDelta::seconds(1_000));
+    let grant_b = store_b
+        .claim_task(
+            ctx(&owner, clock.now(), Some(rev_after_claim)),
+            project,
+            task.id,
+            ClaimInput {
+                phase: ClaimPhase::Execute,
+                submission_id: None,
+                ttl_seconds: None,
+            },
+            "claim-b2",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let err = store_a
+        .report_claim(
+            ctx(&owner, clock.now(), None),
+            project,
+            grant_a.claim.id,
+            &grant_a.lease_token,
+            success_input(&rev_id),
+            "report-a",
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::LeaseInvalid));
+
+    // Pool B reports; exactly one session is recorded for the task.
+    clock.advance(TimeDelta::milliseconds(2));
+    store_b
+        .report_claim(
+            ctx(&owner, clock.now(), None),
+            project,
+            grant_b.claim.id,
+            &grant_b.lease_token,
+            success_input(&rev_id),
+            "report-b",
+        )
+        .await
+        .unwrap();
+    let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions WHERE task_id = ?1")
+        .bind(task.id.to_string())
+        .fetch_one(store_b.pool())
+        .await
+        .unwrap();
+    assert_eq!(sessions, 1);
+    let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = ?1")
+        .bind(task.id.to_string())
+        .fetch_one(store_a.pool())
+        .await
+        .unwrap();
+    assert_eq!(status, "done");
 }

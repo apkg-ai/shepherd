@@ -13,10 +13,7 @@ use crate::storage::rows::format_ts;
 use crate::workflow;
 
 use super::claims::{load_claim_row, reconcile_task_claims};
-use super::{
-    CommandContext, PendingEvent, Replay, append_events, live_actor, missing_after_write,
-    task_scope,
-};
+use super::{CommandContext, PendingEvent, Replay, append_events, missing_after_write, task_scope};
 
 /// Validate that every UUID in `revision_ids` belongs to a document owned by the task.
 async fn validate_document_revisions(
@@ -55,13 +52,23 @@ async fn validate_document_revisions(
         let missing = revision_ids
             .iter()
             .find(|id| !found_set.contains(id.to_string().as_str()))
-            .expect("length mismatch guarantees at least one missing");
+            .map(Uuid::to_string)
+            .unwrap_or_else(|| "unknown".into());
         return Err(DomainError::Validation {
             field: "document_revision_ids",
             message: format!("revision {missing} does not belong to a document owned by this task"),
         });
     }
     Ok(())
+}
+
+/// Submissions are accepted inline under policy none, pending otherwise.
+fn submission_status(policy: ReviewPolicy) -> &'static str {
+    if policy == ReviewPolicy::None {
+        "accepted"
+    } else {
+        "pending"
+    }
 }
 
 impl Store {
@@ -78,6 +85,7 @@ impl Store {
         let now = ctx.now;
         let command_id = ctx.command_id;
         let token = lease_token.to_string();
+        let actor = ctx.actor.clone();
 
         #[cfg(any(test, feature = "test-support"))]
         let fp = self
@@ -86,10 +94,13 @@ impl Store {
 
         self.idempotent_transaction(&ctx, request_hash, 201, move |tx| {
             Box::pin(async move {
+                let mut input = input;
                 let now_text = format_ts(&now);
 
                 let initial = load_claim_row(tx, &claim_id, &project).await?;
-                let expired = reconcile_task_claims(tx, initial.task_id, &now_text).await?;
+                // one_active_claim_per_task: this reconcile can only expire the
+                // reported claim itself, making the reloaded row reject it.
+                reconcile_task_claims(tx, initial.task_id, &now_text).await?;
                 // Re-load: the claim may have been reconciled to expired.
                 let row = load_claim_row(tx, &claim_id, &project).await?;
 
@@ -123,14 +134,19 @@ impl Store {
                     )));
                 }
 
+                // Duplicates pass the wire contract but must not reach the
+                // session row or the ownership query.
+                let mut seen = std::collections::HashSet::new();
+                input.document_revision_ids.retain(|id| seen.insert(*id));
+                validate_document_revisions(
+                    tx,
+                    &project,
+                    &row.task_id,
+                    &input.document_revision_ids,
+                )
+                .await?;
+
                 if input.outcome == SessionOutcome::Succeeded {
-                    validate_document_revisions(
-                        tx,
-                        &project,
-                        &row.task_id,
-                        &input.document_revision_ids,
-                    )
-                    .await?;
                     if row.phase == ClaimPhase::Execute && input.document_revision_ids.is_empty() {
                         return Err(DomainError::Validation {
                             field: "document_revision_ids",
@@ -145,6 +161,20 @@ impl Store {
                             return Err(DomainError::Validation {
                                 field: "selected_plan_revision_id",
                                 message: "must be one of the reported document_revision_ids".into(),
+                            });
+                        }
+                        let kind: Option<String> = sqlx::query_scalar(
+                            "SELECT d.kind FROM documents d \
+                             JOIN document_revisions dr ON dr.document_id = d.id \
+                             WHERE dr.id = ?1",
+                        )
+                        .bind(selected.to_string())
+                        .fetch_optional(&mut **tx)
+                        .await?;
+                        if kind.as_deref() != Some("plan") {
+                            return Err(DomainError::Validation {
+                                field: "selected_plan_revision_id",
+                                message: "must belong to a plan document".into(),
                             });
                         }
                     }
@@ -205,16 +235,15 @@ impl Store {
                 let mut submission_id: Option<Uuid> = None;
                 let mut did_complete = false;
 
-                for closed in &expired {
-                    pending.push(PendingEvent::claim(
-                        closed.id,
-                        closed.task_revision,
-                        closed.task_id,
-                    ));
-                }
-
-                // Load the actor once; clone before consuming in complete_ctx.
-                let actor = live_actor(tx, &actor_id).await?;
+                // idempotent_transaction re-checks the actor inside this
+                // transaction, so the context snapshot is safe here.
+                let events_ctx = CommandContext {
+                    actor,
+                    command_id,
+                    idempotency_key: Uuid::nil(),
+                    expected_revision: None,
+                    now,
+                };
 
                 match (row.phase, input.outcome) {
                     (ClaimPhase::Plan, SessionOutcome::Failed) => {
@@ -230,11 +259,7 @@ impl Store {
                     (ClaimPhase::Plan, SessionOutcome::Succeeded) => {
                         let sub_id = crate::model::new_v7(now);
                         let review_policy = scope.task.plan_review;
-                        let sub_status = if review_policy == ReviewPolicy::None {
-                            "accepted"
-                        } else {
-                            "pending"
-                        };
+                        let sub_status = submission_status(review_policy);
                         let next_phase = if review_policy == ReviewPolicy::None {
                             TaskPhase::Execution
                         } else {
@@ -259,31 +284,20 @@ impl Store {
                         )
                         .await?;
 
-                        if review_policy == ReviewPolicy::None {
-                            sqlx::query(
-                                "UPDATE tasks SET revision = revision + 1, updated_at = ?1, \
-                                 phase = ?2, selected_plan_revision_id = ?3, \
-                                 accepted_plan_submission_id = ?4 WHERE id = ?5",
-                            )
-                            .bind(&now_text)
-                            .bind(next_phase.as_str())
-                            .bind(selected.to_string())
-                            .bind(sub_id.to_string())
-                            .bind(row.task_id.to_string())
-                            .execute(&mut **tx)
-                            .await?;
-                        } else {
-                            sqlx::query(
-                                "UPDATE tasks SET revision = revision + 1, updated_at = ?1, \
-                                 phase = ?2, selected_plan_revision_id = ?3 WHERE id = ?4",
-                            )
-                            .bind(&now_text)
-                            .bind(next_phase.as_str())
-                            .bind(selected.to_string())
-                            .bind(row.task_id.to_string())
-                            .execute(&mut **tx)
-                            .await?;
-                        }
+                        // Policy none accepts inline; the accepted submission id
+                        // is only written for that policy.
+                        sqlx::query(
+                            "UPDATE tasks SET revision = revision + 1, updated_at = ?1, \
+                             phase = ?2, selected_plan_revision_id = ?3, \
+                             accepted_plan_submission_id = ?4 WHERE id = ?5",
+                        )
+                        .bind(&now_text)
+                        .bind(next_phase.as_str())
+                        .bind(selected.to_string())
+                        .bind((review_policy == ReviewPolicy::None).then_some(sub_id.to_string()))
+                        .bind(row.task_id.to_string())
+                        .execute(&mut **tx)
+                        .await?;
 
                         submission_id = Some(sub_id);
                     }
@@ -300,11 +314,7 @@ impl Store {
                     (ClaimPhase::Execute, SessionOutcome::Succeeded) => {
                         let sub_id = crate::model::new_v7(now);
                         let review_policy = scope.task.work_review;
-                        let sub_status = if review_policy == ReviewPolicy::None {
-                            "accepted"
-                        } else {
-                            "pending"
-                        };
+                        let sub_status = submission_status(review_policy);
 
                         insert_submission(
                             tx,
@@ -336,14 +346,7 @@ impl Store {
                             let refreshed = task_row(tx, &project, &row.task_id)
                                 .await?
                                 .ok_or_else(|| missing_after_write("task"))?;
-                            let complete_ctx = CommandContext {
-                                actor: actor.clone(),
-                                command_id,
-                                idempotency_key: Uuid::nil(),
-                                expected_revision: None,
-                                now,
-                            };
-                            workflow::task::complete(tx, &complete_ctx, &refreshed, &mut pending)
+                            workflow::task::complete(tx, &events_ctx, &refreshed, &mut pending)
                                 .await?;
                             did_complete = true;
                         } else {
@@ -401,13 +404,6 @@ impl Store {
                 }
                 pending.push(PendingEvent::session(session_id, row.task_id));
 
-                let events_ctx = CommandContext {
-                    actor,
-                    command_id,
-                    idempotency_key: Uuid::nil(),
-                    expected_revision: None,
-                    now,
-                };
                 append_events(tx, &project, &events_ctx, "reportClaim", "", pending).await?;
 
                 #[cfg(any(test, feature = "test-support"))]
@@ -472,4 +468,656 @@ async fn insert_submission(
     .execute(&mut *conn)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use chrono::TimeDelta;
+
+    use super::*;
+    use crate::model::{
+        Actor, ActorKind, Clock, CommandId, EpicCreate, GoalCreate, ProjectCreate, Task,
+        TaskCreate, TaskStatus, TestClock,
+    };
+    use crate::storage::open;
+    use crate::storage::rows::insert_actor;
+    use crate::storage::testing::{seed_actor, seed_task_document, store_options, test_clock};
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        clock: Arc<TestClock>,
+        store: Store,
+        owner: Actor,
+        project: ProjectId,
+        task: Task,
+        plan_rev: Uuid,
+        finding_rev: Uuid,
+    }
+
+    fn ctx(actor: &Actor, clock: &TestClock, revision: Option<i64>) -> CommandContext {
+        CommandContext {
+            actor: actor.clone(),
+            command_id: CommandId::generate(clock.now()),
+            idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            expected_revision: revision,
+            now: clock.now(),
+        }
+    }
+
+    async fn fixture(
+        planning_required: bool,
+        plan_review: ReviewPolicy,
+        work_review: ReviewPolicy,
+    ) -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = test_clock();
+        let store = open(store_options(dir.path(), "shepherd.db", clock.clone()))
+            .await
+            .unwrap();
+        let owner = Actor {
+            id: crate::model::ActorId::generate(clock.now()),
+            kind: ActorKind::Human,
+            label: "owner".to_string(),
+            revoked: false,
+            created_at: clock.now(),
+        };
+        let registered = owner.clone();
+        store
+            .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &registered).await }))
+            .await
+            .unwrap();
+        let project = store
+            .create_project(
+                ctx(&owner, &clock, None),
+                ProjectCreate {
+                    name: "P".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let goal = store
+            .create_goal(
+                ctx(&owner, &clock, None),
+                project,
+                GoalCreate {
+                    title: "G".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let epic = store
+            .create_epic(
+                ctx(&owner, &clock, None),
+                project,
+                goal,
+                EpicCreate {
+                    title: "E".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let task = store
+            .create_task(
+                ctx(&owner, &clock, None),
+                project,
+                epic,
+                TaskCreate {
+                    title: "T".to_string(),
+                    description: None,
+                    type_key: "code".to_string(),
+                    planning_required: Some(planning_required),
+                    plan_review: Some(plan_review),
+                    work_review: Some(work_review),
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        let now_text = format_ts(&clock.now());
+        let (_, plan_rev) =
+            seed_task_document(store.pool(), project, task.id, owner.id, "plan", &now_text).await;
+        let (_, finding_rev) = seed_task_document(
+            store.pool(),
+            project,
+            task.id,
+            owner.id,
+            "finding",
+            &now_text,
+        )
+        .await;
+        Fixture {
+            _dir: dir,
+            clock,
+            store,
+            owner,
+            project,
+            task,
+            plan_rev: plan_rev.parse().unwrap(),
+            finding_rev: finding_rev.parse().unwrap(),
+        }
+    }
+
+    async fn claim(f: &Fixture, phase: ClaimPhase) -> (Uuid, String) {
+        let grant = f
+            .store
+            .claim_task(
+                ctx(&f.owner, &f.clock, Some(f.task.revision.value())),
+                f.project,
+                f.task.id,
+                crate::model::ClaimInput {
+                    phase,
+                    submission_id: None,
+                    ttl_seconds: None,
+                },
+                "claim-hash",
+            )
+            .await
+            .unwrap()
+            .into_inner();
+        (grant.claim.id, grant.lease_token)
+    }
+
+    fn success_input(revisions: Vec<Uuid>, selected: Option<Uuid>) -> ReportInput {
+        ReportInput {
+            outcome: SessionOutcome::Succeeded,
+            summary: "done".into(),
+            failure_reason: String::new(),
+            document_revision_ids: revisions,
+            links: serde_json::json!([]),
+            selected_plan_revision_id: selected,
+        }
+    }
+
+    fn failed_input() -> ReportInput {
+        ReportInput {
+            outcome: SessionOutcome::Failed,
+            summary: "attempt failed".into(),
+            failure_reason: "boom".into(),
+            document_revision_ids: Vec::new(),
+            links: serde_json::json!([]),
+            selected_plan_revision_id: None,
+        }
+    }
+
+    async fn report(
+        f: &Fixture,
+        actor: &Actor,
+        claim_id: Uuid,
+        token: &str,
+        input: ReportInput,
+    ) -> Result<Replay<Session>, DomainError> {
+        f.store
+            .report_claim(
+                ctx(actor, &f.clock, None),
+                f.project,
+                claim_id,
+                token,
+                input,
+                "report-hash",
+            )
+            .await
+    }
+
+    async fn task_state(f: &Fixture) -> (i64, String, String, i64) {
+        let row: (i64, String, String, i64) = sqlx::query_as(
+            "SELECT revision, status, phase, attempt_count FROM tasks WHERE id = ?1",
+        )
+        .bind(f.task.id.to_string())
+        .fetch_one(f.store.pool())
+        .await
+        .unwrap();
+        row
+    }
+
+    async fn claim_status(f: &Fixture, claim_id: Uuid) -> String {
+        sqlx::query_scalar("SELECT status FROM claims WHERE id = ?1")
+            .bind(claim_id.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap()
+    }
+
+    async fn session_revisions(f: &Fixture) -> Vec<String> {
+        let text: String =
+            sqlx::query_scalar("SELECT document_revision_ids FROM sessions WHERE task_id = ?1")
+                .bind(f.task.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        serde_json::from_str(&text).unwrap()
+    }
+
+    async fn report_event_types(f: &Fixture) -> Vec<String> {
+        sqlx::query_scalar("SELECT type FROM events WHERE action = 'reportClaim' ORDER BY id")
+            .fetch_all(f.store.pool())
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn execute_report_success_completes_task_and_cascades() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Execute).await;
+        let session = report(
+            &f,
+            &f.owner,
+            claim_id,
+            &token,
+            success_input(vec![f.finding_rev], None),
+        )
+        .await
+        .unwrap()
+        .into_inner();
+        assert_eq!(session.outcome, SessionOutcome::Succeeded);
+        assert_eq!(claim_status(&f, claim_id).await, "reported");
+        let (revision, status, phase, attempts) = task_state(&f).await;
+        assert_eq!(status, TaskStatus::Done.as_str());
+        assert_eq!(phase, TaskPhase::Complete.as_str());
+        assert_eq!(attempts, 1);
+        assert!(revision > f.task.revision.value());
+        let (kind, sub_status): (String, String) =
+            sqlx::query_as("SELECT kind, status FROM submissions WHERE task_id = ?1")
+                .bind(f.task.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!((kind.as_str(), sub_status.as_str()), ("work", "accepted"));
+        let epic_status: String = sqlx::query_scalar(
+            "SELECT status FROM epics WHERE id = (SELECT epic_id FROM tasks WHERE id = ?1)",
+        )
+        .bind(f.task.id.to_string())
+        .fetch_one(f.store.pool())
+        .await
+        .unwrap();
+        assert_eq!(epic_status, "done");
+        let events = report_event_types(&f).await;
+        assert!(events.contains(&"task.changed".to_string()));
+        assert!(events.contains(&"claim.changed".to_string()));
+        assert!(events.contains(&"submission.changed".to_string()));
+        assert!(events.contains(&"session.recorded".to_string()));
+        assert!(events.contains(&"epic.changed".to_string()));
+    }
+
+    #[tokio::test]
+    async fn execute_report_success_with_review_pends_work_submission() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::Human).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Execute).await;
+        report(
+            &f,
+            &f.owner,
+            claim_id,
+            &token,
+            success_input(vec![f.finding_rev], None),
+        )
+        .await
+        .unwrap();
+        let (_, status, phase, attempts) = task_state(&f).await;
+        assert_eq!(phase, TaskPhase::WorkReview.as_str());
+        assert_eq!(status, TaskStatus::Active.as_str());
+        assert_eq!(attempts, 1);
+        let (kind, sub_status, policy): (String, String, String) =
+            sqlx::query_as("SELECT kind, status, policy FROM submissions WHERE task_id = ?1")
+                .bind(f.task.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            (kind.as_str(), sub_status.as_str(), policy.as_str()),
+            ("work", "pending", "human")
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_report_failed_counts_attempt_and_keeps_phase() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Execute).await;
+        report(&f, &f.owner, claim_id, &token, failed_input())
+            .await
+            .unwrap();
+        let (revision, status, phase, attempts) = task_state(&f).await;
+        assert_eq!(phase, TaskPhase::Execution.as_str());
+        assert_eq!(status, TaskStatus::Active.as_str());
+        assert_eq!(attempts, 1);
+        assert!(revision > f.task.revision.value());
+        assert_eq!(claim_status(&f, claim_id).await, "reported");
+        let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(sessions, 1);
+    }
+
+    #[tokio::test]
+    async fn plan_report_failed_bumps_revision_without_attempt() {
+        let f = fixture(true, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Plan).await;
+        report(&f, &f.owner, claim_id, &token, failed_input())
+            .await
+            .unwrap();
+        let (revision, status, phase, attempts) = task_state(&f).await;
+        assert_eq!(phase, TaskPhase::Planning.as_str());
+        assert_eq!(status, TaskStatus::Active.as_str());
+        assert_eq!(attempts, 0);
+        assert!(revision > 2);
+        let submissions: i64 = sqlx::query_scalar("SELECT count(*) FROM submissions")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(submissions, 0);
+    }
+
+    #[tokio::test]
+    async fn plan_report_success_without_review_accepts_submission() {
+        let f = fixture(true, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Plan).await;
+        report(
+            &f,
+            &f.owner,
+            claim_id,
+            &token,
+            success_input(vec![f.plan_rev], Some(f.plan_rev)),
+        )
+        .await
+        .unwrap();
+        let (_, status, phase, attempts) = task_state(&f).await;
+        assert_eq!(phase, TaskPhase::Execution.as_str());
+        assert_eq!(status, TaskStatus::Active.as_str());
+        assert_eq!(attempts, 0);
+        let (selected, accepted): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT selected_plan_revision_id, accepted_plan_submission_id \
+             FROM tasks WHERE id = ?1",
+        )
+        .bind(f.task.id.to_string())
+        .fetch_one(f.store.pool())
+        .await
+        .unwrap();
+        assert_eq!(selected.as_deref(), Some(f.plan_rev.to_string().as_str()));
+        assert!(accepted.is_some());
+        let (kind, sub_status): (String, String) =
+            sqlx::query_as("SELECT kind, status FROM submissions WHERE task_id = ?1")
+                .bind(f.task.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!((kind.as_str(), sub_status.as_str()), ("plan", "accepted"));
+    }
+
+    #[tokio::test]
+    async fn plan_report_success_with_review_pends_submission() {
+        let f = fixture(true, ReviewPolicy::Human, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Plan).await;
+        report(
+            &f,
+            &f.owner,
+            claim_id,
+            &token,
+            success_input(vec![f.plan_rev], Some(f.plan_rev)),
+        )
+        .await
+        .unwrap();
+        let (_, status, phase, _) = task_state(&f).await;
+        assert_eq!(phase, TaskPhase::PlanReview.as_str());
+        assert_eq!(status, TaskStatus::Active.as_str());
+        let (kind, sub_status, policy): (String, String, String) =
+            sqlx::query_as("SELECT kind, status, policy FROM submissions WHERE task_id = ?1")
+                .bind(f.task.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            (kind.as_str(), sub_status.as_str(), policy.as_str()),
+            ("plan", "pending", "human")
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_report_rejects_non_plan_selection() {
+        let f = fixture(true, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Plan).await;
+        let err = report(
+            &f,
+            &f.owner,
+            claim_id,
+            &token,
+            success_input(vec![f.finding_rev], Some(f.finding_rev)),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "selected_plan_revision_id",
+                ..
+            }
+        ));
+        assert_eq!(claim_status(&f, claim_id).await, "active");
+        let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(sessions, 0);
+    }
+
+    #[tokio::test]
+    async fn duplicate_revision_ids_are_deduplicated() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Execute).await;
+        report(
+            &f,
+            &f.owner,
+            claim_id,
+            &token,
+            success_input(vec![f.finding_rev, f.finding_rev, f.finding_rev], None),
+        )
+        .await
+        .unwrap();
+        assert_eq!(session_revisions(&f).await, vec![f.finding_rev.to_string()]);
+    }
+
+    #[tokio::test]
+    async fn foreign_revision_ids_are_rejected_for_both_outcomes() {
+        for (outcome, failure_reason) in [
+            (SessionOutcome::Succeeded, String::new()),
+            (SessionOutcome::Failed, "boom".to_string()),
+        ] {
+            let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
+            let (claim_id, token) = claim(&f, ClaimPhase::Execute).await;
+            let other = fixture(true, ReviewPolicy::None, ReviewPolicy::None).await;
+            let input = ReportInput {
+                outcome,
+                summary: "s".into(),
+                failure_reason,
+                document_revision_ids: vec![other.finding_rev],
+                links: serde_json::json!([]),
+                selected_plan_revision_id: None,
+            };
+            let err = report(&f, &f.owner, claim_id, &token, input)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    DomainError::Validation {
+                        field: "document_revision_ids",
+                        ..
+                    }
+                ),
+                "outcome {outcome:?} must reject foreign revisions"
+            );
+            assert_eq!(claim_status(&f, claim_id).await, "active");
+        }
+    }
+
+    #[tokio::test]
+    async fn expired_claim_report_is_lease_invalid_and_reconciles() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Execute).await;
+        f.clock.advance(TimeDelta::seconds(1_000));
+        let err = report(
+            &f,
+            &f.owner,
+            claim_id,
+            &token,
+            success_input(vec![f.finding_rev], None),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, DomainError::LeaseInvalid));
+        // The rejection rolls the reconciliation back with the transaction.
+        assert_eq!(claim_status(&f, claim_id).await, "active");
+        let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(sessions, 0);
+    }
+
+    #[tokio::test]
+    async fn wrong_actor_and_wrong_token_reports_are_lease_invalid() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Execute).await;
+        let other = seed_actor(&f.store, ActorKind::Agent, "other").await;
+        let err = report(
+            &f,
+            &other,
+            claim_id,
+            &token,
+            success_input(vec![f.finding_rev], None),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, DomainError::LeaseInvalid));
+        let err = report(
+            &f,
+            &f.owner,
+            claim_id,
+            "wrong-token",
+            success_input(vec![f.finding_rev], None),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, DomainError::LeaseInvalid));
+        assert_eq!(claim_status(&f, claim_id).await, "active");
+    }
+
+    #[tokio::test]
+    async fn phase_mismatch_is_invalid_state() {
+        let f = fixture(true, ReviewPolicy::None, ReviewPolicy::None).await;
+        // A claim whose phase cannot match the task phase; the lease hash must
+        // verify so the mismatch guard is what rejects the report.
+        let claim_id = crate::model::new_v7(f.clock.now());
+        let hash = crate::lease::lease_hash("seed-token");
+        sqlx::query(
+            "INSERT INTO claims (id, task_id, actor_id, phase, acquired_at, expires_at, \
+             status, task_revision, lease_hash) VALUES (?1, ?2, ?3, 'execute', ?4, ?5, \
+             'active', ?6, ?7)",
+        )
+        .bind(claim_id.to_string())
+        .bind(f.task.id.to_string())
+        .bind(f.owner.id.to_string())
+        .bind(format_ts(&f.clock.now()))
+        .bind(format_ts(&(f.clock.now() + TimeDelta::seconds(300))))
+        .bind(1)
+        .bind(&hash)
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+        let err = report(
+            &f,
+            &f.owner,
+            claim_id,
+            "seed-token",
+            success_input(vec![f.finding_rev], None),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidState(_)));
+        assert_eq!(claim_status(&f, claim_id).await, "active");
+    }
+
+    #[tokio::test]
+    async fn execute_report_success_requires_a_revision() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Execute).await;
+        let err = report(
+            &f,
+            &f.owner,
+            claim_id,
+            &token,
+            success_input(Vec::new(), None),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "document_revision_ids",
+                ..
+            }
+        ));
+        assert_eq!(claim_status(&f, claim_id).await, "active");
+    }
+
+    #[tokio::test]
+    async fn plan_report_selection_must_be_among_reported_revisions() {
+        let f = fixture(true, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Plan).await;
+        let err = report(
+            &f,
+            &f.owner,
+            claim_id,
+            &token,
+            success_input(vec![f.finding_rev], Some(f.plan_rev)),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "selected_plan_revision_id",
+                ..
+            }
+        ));
+        assert_eq!(claim_status(&f, claim_id).await, "active");
+    }
+
+    #[tokio::test]
+    async fn review_claim_report_is_unsupported() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
+        let claim_id = crate::model::new_v7(f.clock.now());
+        let hash = crate::lease::lease_hash("seed-token");
+        sqlx::query(
+            "INSERT INTO claims (id, task_id, actor_id, phase, acquired_at, expires_at, \
+             status, task_revision, lease_hash) VALUES (?1, ?2, ?3, 'review', ?4, ?5, \
+             'active', ?6, ?7)",
+        )
+        .bind(claim_id.to_string())
+        .bind(f.task.id.to_string())
+        .bind(f.owner.id.to_string())
+        .bind(format_ts(&f.clock.now()))
+        .bind(format_ts(&(f.clock.now() + TimeDelta::seconds(300))))
+        .bind(1)
+        .bind(&hash)
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+        let err = report(&f, &f.owner, claim_id, "seed-token", failed_input())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation { field: "phase", .. }
+        ));
+    }
 }

@@ -8,6 +8,11 @@ use crate::error::DomainError;
 
 pub(crate) const SUMMARY_MAX_CHARS: usize = 10_000;
 pub(crate) const FAILURE_REASON_MAX_CHARS: usize = 2_000;
+// Wire limits from plan/contracts ReportInput: maxItems on both arrays and
+// maxLength on each link entry.
+pub(crate) const MAX_DOCUMENT_REVISION_IDS: usize = 50;
+pub(crate) const MAX_LINKS: usize = 50;
+pub(crate) const LINK_MAX_CHARS: usize = 2_048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionOutcome {
@@ -63,6 +68,8 @@ pub struct ReportInput {
     pub failure_reason: String,
     pub document_revision_ids: Vec<Uuid>,
     pub links: serde_json::Value,
+    // Step-010 seam: step 011's selectTaskPlan persists the selection on the
+    // task; reportClaim then reads it instead of receiving it here.
     /// Required when outcome=Succeeded and phase=Plan.
     pub selected_plan_revision_id: Option<Uuid>,
 }
@@ -72,6 +79,12 @@ pub(crate) fn validate_report_input(
     phase: ClaimPhase,
 ) -> Result<(), DomainError> {
     super::validate_long_text("summary", &input.summary, SUMMARY_MAX_CHARS)?;
+    if input.summary.is_empty() {
+        return Err(DomainError::Validation {
+            field: "summary",
+            message: "must not be empty".into(),
+        });
+    }
     match input.outcome {
         SessionOutcome::Failed => {
             let trimmed = input.failure_reason.trim();
@@ -102,11 +115,48 @@ pub(crate) fn validate_report_input(
             }
         }
     }
-    if !input.links.is_array() {
+    if input.selected_plan_revision_id.is_some()
+        && !(input.outcome == SessionOutcome::Succeeded && phase == ClaimPhase::Plan)
+    {
         return Err(DomainError::Validation {
-            field: "links",
-            message: "must be a JSON array".into(),
+            field: "selected_plan_revision_id",
+            message: "only valid for successful plan reports".into(),
         });
+    }
+    if input.document_revision_ids.len() > MAX_DOCUMENT_REVISION_IDS {
+        return Err(DomainError::Validation {
+            field: "document_revision_ids",
+            message: format!("must contain at most {MAX_DOCUMENT_REVISION_IDS} entries"),
+        });
+    }
+    match input.links.as_array() {
+        Some(links) => {
+            if links.len() > MAX_LINKS {
+                return Err(DomainError::Validation {
+                    field: "links",
+                    message: format!("must contain at most {MAX_LINKS} entries"),
+                });
+            }
+            for link in links {
+                if !link
+                    .as_str()
+                    .is_some_and(|value| value.chars().count() <= LINK_MAX_CHARS)
+                {
+                    return Err(DomainError::Validation {
+                        field: "links",
+                        message: format!(
+                            "each entry must be a string of at most {LINK_MAX_CHARS} characters"
+                        ),
+                    });
+                }
+            }
+        }
+        None => {
+            return Err(DomainError::Validation {
+                field: "links",
+                message: "must be a JSON array".into(),
+            });
+        }
     }
     Ok(())
 }
@@ -157,7 +207,7 @@ mod tests {
     fn validate_rejects_blank_failure_reason_on_failed_report() {
         let input = ReportInput {
             outcome: SessionOutcome::Failed,
-            summary: String::new(),
+            summary: "s".into(),
             failure_reason: String::new(),
             document_revision_ids: Vec::new(),
             links: serde_json::json!([]),
@@ -177,7 +227,7 @@ mod tests {
     fn validate_rejects_nonempty_failure_reason_on_succeeded_report() {
         let input = ReportInput {
             outcome: SessionOutcome::Succeeded,
-            summary: String::new(),
+            summary: "s".into(),
             failure_reason: "oops".into(),
             document_revision_ids: Vec::new(),
             links: serde_json::json!([]),
@@ -197,7 +247,7 @@ mod tests {
     fn validate_requires_selected_plan_revision_for_successful_plan() {
         let input = ReportInput {
             outcome: SessionOutcome::Succeeded,
-            summary: String::new(),
+            summary: "s".into(),
             failure_reason: String::new(),
             document_revision_ids: Vec::new(),
             links: serde_json::json!([]),
@@ -217,7 +267,7 @@ mod tests {
     fn validate_rejects_non_array_links() {
         let input = ReportInput {
             outcome: SessionOutcome::Failed,
-            summary: String::new(),
+            summary: "s".into(),
             failure_reason: "boom".into(),
             document_revision_ids: Vec::new(),
             links: serde_json::json!({}),
@@ -228,5 +278,102 @@ mod tests {
             err,
             DomainError::Validation { field: "links", .. }
         ));
+    }
+
+    #[test]
+    fn validate_rejects_blank_summary() {
+        let input = ReportInput {
+            outcome: SessionOutcome::Failed,
+            summary: String::new(),
+            failure_reason: "boom".into(),
+            document_revision_ids: Vec::new(),
+            links: serde_json::json!([]),
+            selected_plan_revision_id: None,
+        };
+        let err = validate_report_input(&input, ClaimPhase::Execute).unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "summary",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_more_than_50_revisions() {
+        let input = ReportInput {
+            outcome: SessionOutcome::Failed,
+            summary: "s".into(),
+            failure_reason: "boom".into(),
+            document_revision_ids: vec![Uuid::nil(); MAX_DOCUMENT_REVISION_IDS + 1],
+            links: serde_json::json!([]),
+            selected_plan_revision_id: None,
+        };
+        let err = validate_report_input(&input, ClaimPhase::Execute).unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "document_revision_ids",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_oversized_and_non_string_links() {
+        for links in [
+            serde_json::json!(["ok", 7]),
+            serde_json::json!([{"uri": "x"}]),
+            serde_json::json!(["x".repeat(LINK_MAX_CHARS + 1)]),
+            serde_json::json!((0..MAX_LINKS + 1).map(|_| "x").collect::<Vec<_>>()),
+        ] {
+            let input = ReportInput {
+                outcome: SessionOutcome::Failed,
+                summary: "s".into(),
+                failure_reason: "boom".into(),
+                document_revision_ids: Vec::new(),
+                links: links.clone(),
+                selected_plan_revision_id: None,
+            };
+            let err = validate_report_input(&input, ClaimPhase::Execute).unwrap_err();
+            assert!(
+                matches!(err, DomainError::Validation { field: "links", .. }),
+                "links {links} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_rejects_selected_plan_revision_outside_plan_success() {
+        for (outcome, phase) in [
+            (SessionOutcome::Failed, ClaimPhase::Plan),
+            (SessionOutcome::Succeeded, ClaimPhase::Execute),
+        ] {
+            let failure_reason = if outcome == SessionOutcome::Failed {
+                "boom".to_string()
+            } else {
+                String::new()
+            };
+            let input = ReportInput {
+                outcome,
+                summary: "s".into(),
+                failure_reason,
+                document_revision_ids: Vec::new(),
+                links: serde_json::json!([]),
+                selected_plan_revision_id: Some(Uuid::nil()),
+            };
+            let err = validate_report_input(&input, phase).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    DomainError::Validation {
+                        field: "selected_plan_revision_id",
+                        ..
+                    }
+                ),
+                "outcome {outcome:?} phase {phase:?} must be rejected"
+            );
+        }
     }
 }
