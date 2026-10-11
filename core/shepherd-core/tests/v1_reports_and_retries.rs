@@ -276,7 +276,20 @@ async fn submission_row(store: &Store, task_id: TaskId) -> (String, String, Stri
 
 // --- Rollback tests ---
 
-async fn assert_rollback(s: &Setup, project: ProjectId, task: &Task, claim_id: Uuid) {
+async fn event_count(store: &Store) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM events")
+        .fetch_one(store.pool())
+        .await
+        .unwrap()
+}
+
+async fn assert_rollback(
+    s: &Setup,
+    project: ProjectId,
+    task: &Task,
+    claim_id: Uuid,
+    events_before: i64,
+) {
     assert_eq!(claim_status(&s.store, claim_id).await, "active");
     assert_eq!(session_count(&s.store, task.id).await, 0);
     assert_eq!(submission_count(&s.store, task.id).await, 0);
@@ -284,6 +297,8 @@ async fn assert_rollback(s: &Setup, project: ProjectId, task: &Task, claim_id: U
     assert_eq!(reloaded.attempt_count, task.attempt_count);
     assert_eq!(reloaded.phase, task.phase);
     assert_eq!(reloaded.status, task.status);
+    assert_eq!(reloaded.revision, task.revision);
+    assert_eq!(event_count(&s.store).await, events_before);
 }
 
 #[tokio::test]
@@ -292,6 +307,7 @@ async fn failure_after_lease_close_rolls_back_everything() {
     let (project, _, task, claim_id, token, rev_id) =
         claim_and_report_setup(&s, ReviewPolicy::None).await;
     let task = reload_task(&s, project, task.id).await;
+    let events_before = event_count(&s.store).await;
 
     s.store.report_failpoint.store(
         failpoint::AFTER_LEASE_CLOSE,
@@ -311,7 +327,7 @@ async fn failure_after_lease_close_rolls_back_everything() {
         .await
         .unwrap_err();
     assert!(matches!(err, DomainError::Storage(_)));
-    assert_rollback(&s, project, &task, claim_id).await;
+    assert_rollback(&s, project, &task, claim_id, events_before).await;
 }
 
 #[tokio::test]
@@ -320,6 +336,7 @@ async fn failure_after_session_insert_rolls_back_everything() {
     let (project, _, task, claim_id, token, rev_id) =
         claim_and_report_setup(&s, ReviewPolicy::None).await;
     let task = reload_task(&s, project, task.id).await;
+    let events_before = event_count(&s.store).await;
 
     s.store.report_failpoint.store(
         failpoint::AFTER_SESSION_INSERT,
@@ -339,7 +356,7 @@ async fn failure_after_session_insert_rolls_back_everything() {
         .await
         .unwrap_err();
     assert!(matches!(err, DomainError::Storage(_)));
-    assert_rollback(&s, project, &task, claim_id).await;
+    assert_rollback(&s, project, &task, claim_id, events_before).await;
 }
 
 #[tokio::test]
@@ -348,6 +365,7 @@ async fn failure_after_task_update_rolls_back_everything() {
     let (project, _, task, claim_id, token, rev_id) =
         claim_and_report_setup(&s, ReviewPolicy::None).await;
     let task = reload_task(&s, project, task.id).await;
+    let events_before = event_count(&s.store).await;
 
     s.store.report_failpoint.store(
         failpoint::AFTER_TASK_UPDATE,
@@ -367,7 +385,7 @@ async fn failure_after_task_update_rolls_back_everything() {
         .await
         .unwrap_err();
     assert!(matches!(err, DomainError::Storage(_)));
-    assert_rollback(&s, project, &task, claim_id).await;
+    assert_rollback(&s, project, &task, claim_id, events_before).await;
 }
 
 #[tokio::test]
@@ -376,6 +394,7 @@ async fn failure_after_event_insert_rolls_back_everything() {
     let (project, _, task, claim_id, token, rev_id) =
         claim_and_report_setup(&s, ReviewPolicy::None).await;
     let task = reload_task(&s, project, task.id).await;
+    let events_before = event_count(&s.store).await;
 
     s.store.report_failpoint.store(
         failpoint::AFTER_EVENT_INSERT,
@@ -395,7 +414,7 @@ async fn failure_after_event_insert_rolls_back_everything() {
         .await
         .unwrap_err();
     assert!(matches!(err, DomainError::Storage(_)));
-    assert_rollback(&s, project, &task, claim_id).await;
+    assert_rollback(&s, project, &task, claim_id, events_before).await;
 }
 
 // --- Idempotency tests ---
@@ -1210,4 +1229,61 @@ async fn failed_reports_leave_phase_unchanged() {
     let t = reload_task(&s, project.id, task.id).await;
     assert_eq!(t.phase, shepherd_core::model::TaskPhase::Execution);
     assert_eq!(t.attempt_count, 1);
+}
+
+// --- Lease token verification ---
+
+#[tokio::test]
+async fn wrong_lease_token_report_fails_with_lease_invalid() {
+    let s = setup().await;
+    let (project, _, task, claim_id, _token, rev_id) =
+        claim_and_report_setup(&s, ReviewPolicy::None).await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let err = s
+        .store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project,
+            claim_id,
+            "definitely-not-the-right-token",
+            success_input(&rev_id),
+            "report-hash",
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::LeaseInvalid));
+    assert_eq!(session_count(&s.store, task.id).await, 0);
+}
+
+// --- Execute + review-required path ---
+
+#[tokio::test]
+async fn successful_execute_report_with_human_policy_advances_to_work_review() {
+    let s = setup().await;
+    let (project, _, task, claim_id, token, rev_id) =
+        claim_and_report_setup(&s, ReviewPolicy::Human).await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    s.store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project,
+            claim_id,
+            &token,
+            success_input(&rev_id),
+            "report-hash",
+        )
+        .await
+        .unwrap();
+
+    let t = reload_task(&s, project, task.id).await;
+    assert_eq!(t.phase, shepherd_core::model::TaskPhase::WorkReview);
+    assert_eq!(t.status, TaskStatus::Active);
+    assert_eq!(t.attempt_count, 1);
+
+    let (sub_status, sub_kind, sub_policy) = submission_row(&s.store, task.id).await;
+    assert_eq!(sub_status, "pending");
+    assert_eq!(sub_kind, "work");
+    assert_eq!(sub_policy, "human");
 }

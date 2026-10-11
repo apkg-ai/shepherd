@@ -1,4 +1,4 @@
-use sqlx::SqliteConnection;
+use sqlx::{QueryBuilder, Sqlite, SqliteConnection};
 use uuid::Uuid;
 
 use crate::error::DomainError;
@@ -28,24 +28,38 @@ async fn validate_document_revisions(
     if revision_ids.is_empty() {
         return Ok(());
     }
+    let task_str = task.to_string();
+    let project_str = project.to_string();
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT dr.id FROM document_revisions dr \
+         JOIN documents d ON d.id = dr.document_id \
+         WHERE d.owner_kind = 'task' AND d.owner_id = ",
+    );
+    builder.push_bind(&task_str);
+    builder.push(" AND d.project_id = ");
+    builder.push_bind(&project_str);
+    builder.push(" AND dr.id IN (");
+    let mut separated = builder.separated(", ");
     for id in revision_ids {
-        let found: Option<(String,)> = sqlx::query_as(
-            "SELECT dr.id FROM document_revisions dr \
-             JOIN documents d ON d.id = dr.document_id \
-             WHERE dr.id = ?1 AND d.owner_kind = 'task' AND d.owner_id = ?2 \
-             AND d.project_id = ?3",
-        )
-        .bind(id.to_string())
-        .bind(task.to_string())
-        .bind(project.to_string())
-        .fetch_optional(&mut *conn)
-        .await?;
-        if found.is_none() {
-            return Err(DomainError::Validation {
-                field: "document_revision_ids",
-                message: format!("revision {id} does not belong to a document owned by this task"),
-            });
-        }
+        separated.push_bind(id.to_string());
+    }
+    builder.push(")");
+    let found: Vec<(String,)> = builder
+        .build_query_as()
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(crate::storage::StorageError::from)?;
+    if found.len() != revision_ids.len() {
+        let found_set: std::collections::HashSet<&str> =
+            found.iter().map(|r| r.0.as_str()).collect();
+        let missing = revision_ids
+            .iter()
+            .find(|id| !found_set.contains(id.to_string().as_str()))
+            .expect("length mismatch guarantees at least one missing");
+        return Err(DomainError::Validation {
+            field: "document_revision_ids",
+            message: format!("revision {missing} does not belong to a document owned by this task"),
+        });
     }
     Ok(())
 }
@@ -74,16 +88,11 @@ impl Store {
             Box::pin(async move {
                 let now_text = format_ts(&now);
 
-                // Step 1: load claim to get task_id.
                 let initial = load_claim_row(tx, &claim_id, &project).await?;
-
-                // Step 2: reconcile expired claims on the task.
                 let expired = reconcile_task_claims(tx, initial.task_id, &now_text).await?;
-
-                // Step 3: re-load (may now be expired).
+                // Re-load: the claim may have been reconciled to expired.
                 let row = load_claim_row(tx, &claim_id, &project).await?;
 
-                // Step 4: verify lease.
                 if row.actor_id != actor_id {
                     return Err(DomainError::LeaseInvalid);
                 }
@@ -94,7 +103,6 @@ impl Store {
                     return Err(DomainError::LeaseInvalid);
                 }
 
-                // Step 5: load task scope, validate phase alignment.
                 validate_report_input(&input, row.phase)?;
                 let scope = task_scope(tx, &project, &row.task_id).await?;
                 let expected_phase = match row.phase {
@@ -115,7 +123,6 @@ impl Store {
                     )));
                 }
 
-                // Step 6: validate document revisions for succeeded reports.
                 if input.outcome == SessionOutcome::Succeeded {
                     validate_document_revisions(
                         tx,
@@ -143,7 +150,6 @@ impl Store {
                     }
                 }
 
-                // Step 7: close claim as reported.
                 sqlx::query(
                     "UPDATE claims SET status = 'reported', closed_at = ?1, \
                      close_reason = '' WHERE id = ?2",
@@ -156,7 +162,6 @@ impl Store {
                 #[cfg(any(test, feature = "test-support"))]
                 crate::storage::failpoint::check(fp, crate::storage::failpoint::AFTER_LEASE_CLOSE)?;
 
-                // Step 8: insert immutable session.
                 let session_id = crate::model::new_v7(now);
                 let doc_rev_json: Vec<String> = input
                     .document_revision_ids
@@ -195,10 +200,10 @@ impl Store {
                     crate::storage::failpoint::AFTER_SESSION_INSERT,
                 )?;
 
-                // Step 9: determine phase transition, create submission, update task.
                 let mut pending = Vec::new();
                 let context_revision = scope.task.revision.value();
                 let mut submission_id: Option<Uuid> = None;
+                let mut did_complete = false;
 
                 for closed in &expired {
                     pending.push(PendingEvent::claim(
@@ -208,9 +213,11 @@ impl Store {
                     ));
                 }
 
+                // Load the actor once; clone before consuming in complete_ctx.
+                let actor = live_actor(tx, &actor_id).await?;
+
                 match (row.phase, input.outcome) {
                     (ClaimPhase::Plan, SessionOutcome::Failed) => {
-                        // No phase change, no attempt_count change.
                         sqlx::query(
                             "UPDATE tasks SET revision = revision + 1, updated_at = ?1 \
                              WHERE id = ?2",
@@ -317,8 +324,8 @@ impl Store {
                         .await?;
 
                         if review_policy == ReviewPolicy::None {
-                            // Increment attempt_count, then use complete() for
-                            // the done/complete transition and its PendingEvent.
+                            // Increment attempt_count separately; complete()
+                            // owns the done/complete transition and revision bump.
                             sqlx::query(
                                 "UPDATE tasks SET attempt_count = attempt_count + 1 \
                                  WHERE id = ?1",
@@ -329,9 +336,8 @@ impl Store {
                             let refreshed = task_row(tx, &project, &row.task_id)
                                 .await?
                                 .ok_or_else(|| missing_after_write("task"))?;
-                            let actor = live_actor(tx, &actor_id).await?;
                             let complete_ctx = CommandContext {
-                                actor,
+                                actor: actor.clone(),
                                 command_id,
                                 idempotency_key: Uuid::nil(),
                                 expected_revision: None,
@@ -339,6 +345,7 @@ impl Store {
                             };
                             workflow::task::complete(tx, &complete_ctx, &refreshed, &mut pending)
                                 .await?;
+                            did_complete = true;
                         } else {
                             sqlx::query(
                                 "UPDATE tasks SET revision = revision + 1, updated_at = ?1, \
@@ -359,11 +366,7 @@ impl Store {
                 #[cfg(any(test, feature = "test-support"))]
                 crate::storage::failpoint::check(fp, crate::storage::failpoint::AFTER_TASK_UPDATE)?;
 
-                // Step 10: cascade (execute + done + review=none).
-                if row.phase == ClaimPhase::Execute
-                    && input.outcome == SessionOutcome::Succeeded
-                    && scope.task.work_review == ReviewPolicy::None
-                {
+                if did_complete {
                     workflow::recompute(
                         tx,
                         workflow::AffectedScope {
@@ -376,13 +379,8 @@ impl Store {
                     .await?;
                 }
 
-                // Step 11: collect events.
-                // For execute+done, complete() already pushed a task event.
-                // For all other paths, push it now.
-                let needs_task_event = !(row.phase == ClaimPhase::Execute
-                    && input.outcome == SessionOutcome::Succeeded
-                    && scope.task.work_review == ReviewPolicy::None);
-                if needs_task_event {
+                // complete() already pushed a task event; all other paths push here.
+                if !did_complete {
                     let updated = task_row(tx, &project, &row.task_id)
                         .await?
                         .ok_or_else(|| missing_after_write("task"))?;
@@ -403,7 +401,6 @@ impl Store {
                 }
                 pending.push(PendingEvent::session(session_id, row.task_id));
 
-                let actor = live_actor(tx, &actor_id).await?;
                 let events_ctx = CommandContext {
                     actor,
                     command_id,

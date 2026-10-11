@@ -1230,8 +1230,7 @@ impl Store {
         .await
     }
 
-    // Temporary interface (step 006): drives the real done transition and the
-    // cascade in one transaction until execute reports land in step 010.
+    // Test-only driver for the done transition and cascade; production path is reportClaim.
     #[cfg(any(test, feature = "test-support"))]
     pub async fn complete_task_for_test(
         &self,
