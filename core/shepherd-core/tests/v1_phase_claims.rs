@@ -848,11 +848,11 @@ async fn list_claims_computes_effective_expiry_and_honors_filters() {
     let empty = ListParams::default();
     let all = list_page(&s, project.id, &ClaimListFilters::default(), &empty).await;
     assert_eq!(all.items.len(), 2);
-    // Newest first.
-    assert_eq!(all.items[0].id, grant_b.claim.id);
-    assert_eq!(all.items[0].status, ClaimStatus::Expired);
-    assert_eq!(all.items[1].id, grant_a.claim.id);
-    assert_eq!(all.items[1].status, ClaimStatus::Released);
+    // Oldest first (plan/07 list order).
+    assert_eq!(all.items[0].id, grant_a.claim.id);
+    assert_eq!(all.items[0].status, ClaimStatus::Released);
+    assert_eq!(all.items[1].id, grant_b.claim.id);
+    assert_eq!(all.items[1].status, ClaimStatus::Expired);
 
     let expired = list_page(
         &s,
@@ -954,8 +954,8 @@ async fn list_claims_paginates_by_acquired_at_without_overlap() {
     };
     let page_one = list_page(&s, project.id, &ClaimListFilters::default(), &limited).await;
     assert_eq!(page_one.items.len(), 2);
-    // Newest first: the still-active claim, then the second released one.
-    assert_eq!(page_one.items[0].id, claim_ids[2]);
+    // Oldest first: the first released claim, then the second released one.
+    assert_eq!(page_one.items[0].id, claim_ids[0]);
     assert_eq!(page_one.items[1].id, claim_ids[1]);
 
     let cursor = page_one.next_cursor.expect("three claims exceed one page");
@@ -971,7 +971,7 @@ async fn list_claims_paginates_by_acquired_at_without_overlap() {
     )
     .await;
     assert_eq!(page_two.items.len(), 1);
-    assert_eq!(page_two.items[0].id, claim_ids[0]);
+    assert_eq!(page_two.items[0].id, claim_ids[2]);
     assert_eq!(page_two.next_cursor, None);
 }
 

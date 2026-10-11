@@ -111,16 +111,16 @@ pub(crate) async fn list_claims(
     }
     if let Some((acquired_at, id)) = &after {
         builder
-            .push(" AND (acquired_at < ")
+            .push(" AND (acquired_at > ")
             .push_bind(acquired_at.clone())
             .push(" OR (acquired_at = ")
             .push_bind(acquired_at.clone())
-            .push(" AND id < ")
+            .push(" AND id > ")
             .push_bind(id.clone())
             .push("))");
     }
     builder
-        .push(" ORDER BY acquired_at DESC, id DESC LIMIT ")
+        .push(" ORDER BY acquired_at ASC, id ASC LIMIT ")
         .push_bind(limit + 1);
 
     let rows = builder.build().fetch_all(&mut *conn).await?;
