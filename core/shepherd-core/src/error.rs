@@ -37,6 +37,10 @@ pub enum DomainError {
     GraphTooLarge { nodes: i64, dependencies: i64 },
     #[error("invalid state transition: {0}")]
     InvalidState(String),
+    #[error("lease token is invalid or the claim is not active")]
+    LeaseInvalid,
+    #[error("task is not eligible: {0}")]
+    NotEligible(String),
     #[error(transparent)]
     Storage(#[from] StorageError),
 }
@@ -69,6 +73,8 @@ impl DomainError {
             // 422 per plan/05; plan/07's API-02 table omits it — recorded in the step handoff.
             DomainError::GraphTooLarge { .. } => "graph_too_large",
             DomainError::InvalidState(_) => "invalid_state",
+            DomainError::LeaseInvalid => "lease_invalid",
+            DomainError::NotEligible(_) => "not_eligible",
             DomainError::Storage(StorageError::Corrupt(_)) => "integrity_failure",
             // SQLITE_BUSY arrives as the low byte of the sqlite extended code.
             DomainError::Storage(StorageError::Sqlx(sqlx::Error::Database(db)))
@@ -150,6 +156,11 @@ mod tests {
         assert_eq!(
             DomainError::InvalidState("wrong".into()).code(),
             "invalid_state"
+        );
+        assert_eq!(DomainError::LeaseInvalid.code(), "lease_invalid");
+        assert_eq!(
+            DomainError::NotEligible("claimed".into()).code(),
+            "not_eligible"
         );
     }
 
