@@ -622,7 +622,9 @@ mod tests {
         let first_type = TaskTypeId::generate(now);
         let second_type = TaskTypeId::generate(now);
         let task = TaskId::generate(now);
+        let document = DocumentId::generate(now);
         let mut events = [
+            PendingEvent::document(document, Revision::INITIAL, task.as_uuid()),
             PendingEvent::submission(Uuid::nil(), 1, task),
             PendingEvent::claim(Uuid::nil(), 1, task),
             PendingEvent::task_type(second_type, Revision::INITIAL),
@@ -635,6 +637,7 @@ mod tests {
         assert_eq!(events[2].resource_id, second_type.as_uuid());
         assert_eq!(events[3].event_type, "claim.changed");
         assert_eq!(events[4].event_type, "submission.changed");
+        assert_eq!(events[5].event_type, "document.changed");
     }
 
     #[test]
@@ -647,6 +650,18 @@ mod tests {
         let submission = PendingEvent::submission(Uuid::nil(), 2, task);
         assert_eq!(submission.resource_revision, 2);
         assert_eq!(submission.affected_ids, vec![task.as_uuid()]);
+    }
+
+    #[test]
+    fn document_events_reference_the_owning_entity() {
+        let now = "2026-09-14T00:00:00Z".parse().unwrap();
+        let document = DocumentId::generate(now);
+        let owner = TaskId::generate(now).as_uuid();
+        let event = PendingEvent::document(document, Revision::INITIAL.next(), owner);
+        assert_eq!(event.event_type, "document.changed");
+        assert_eq!(event.resource_id, document.as_uuid());
+        assert_eq!(event.resource_revision, 2);
+        assert_eq!(event.affected_ids, vec![owner]);
     }
 }
 
