@@ -305,48 +305,7 @@ pub mod testing {
         id
     }
 
-    /// Direct-SQL document + revision fixture for report tests.
-    pub async fn seed_task_document(
-        pool: &sqlx::SqlitePool,
-        project: crate::model::ProjectId,
-        task: crate::model::TaskId,
-        actor: crate::model::ActorId,
-        kind: &str,
-        now: &str,
-    ) -> (String, String) {
-        let doc_id = test_uuid();
-        let rev_id = test_uuid();
-        let mut tx = pool.begin().await.unwrap();
-        sqlx::query(
-            "INSERT INTO documents (id, revision, created_at, updated_at, project_id, \
-             owner_kind, owner_id, kind, title, latest_revision_id) \
-             VALUES (?1, 1, ?2, ?2, ?3, 'task', ?4, ?5, ?5, ?6)",
-        )
-        .bind(&doc_id)
-        .bind(now)
-        .bind(project.to_string())
-        .bind(task.to_string())
-        .bind(kind)
-        .bind(&rev_id)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO document_revisions (id, document_id, number, body, links, \
-             actor_id, created_at) VALUES (?1, ?2, 1, '', '[]', ?3, ?4)",
-        )
-        .bind(&rev_id)
-        .bind(&doc_id)
-        .bind(actor.to_string())
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
-        (doc_id, rev_id)
-    }
-
-    /// Direct-SQL session + submission fixture: commands land in steps 010/011.
+    /// Direct-SQL session + submission fixture: review rows land in step 012.
     pub async fn seed_submission(
         pool: &sqlx::SqlitePool,
         task: crate::model::TaskId,

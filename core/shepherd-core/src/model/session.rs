@@ -6,13 +6,12 @@ use super::claim::{serde_actor_id, serde_datetime, serde_task_id, serde_uuid, se
 use super::{ActorId, ClaimPhase, TaskId};
 use crate::error::DomainError;
 
+use super::content::{MAX_LINKS, validate_link_entry};
+
 pub(crate) const SUMMARY_MAX_CHARS: usize = 10_000;
 pub(crate) const FAILURE_REASON_MAX_CHARS: usize = 2_000;
-// Wire limits from plan/contracts ReportInput: maxItems on both arrays and
-// maxLength on each link entry.
+// Wire limit from plan/contracts ReportInput: maxItems on the revision array.
 pub(crate) const MAX_DOCUMENT_REVISION_IDS: usize = 50;
-pub(crate) const MAX_LINKS: usize = 50;
-pub(crate) const LINK_MAX_CHARS: usize = 2_048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionOutcome {
@@ -68,16 +67,9 @@ pub struct ReportInput {
     pub failure_reason: String,
     pub document_revision_ids: Vec<Uuid>,
     pub links: serde_json::Value,
-    // Step-010 seam: step 011's selectTaskPlan persists the selection on the
-    // task; reportClaim then reads it instead of receiving it here.
-    /// Required when outcome=Succeeded and phase=Plan.
-    pub selected_plan_revision_id: Option<Uuid>,
 }
 
-pub(crate) fn validate_report_input(
-    input: &ReportInput,
-    phase: ClaimPhase,
-) -> Result<(), DomainError> {
+pub(crate) fn validate_report_input(input: &ReportInput) -> Result<(), DomainError> {
     super::validate_long_text("summary", &input.summary, SUMMARY_MAX_CHARS)?;
     if input.summary.trim().is_empty() {
         return Err(DomainError::Validation {
@@ -107,21 +99,7 @@ pub(crate) fn validate_report_input(
                     message: "must be empty for successful reports".into(),
                 });
             }
-            if phase == ClaimPhase::Plan && input.selected_plan_revision_id.is_none() {
-                return Err(DomainError::Validation {
-                    field: "selected_plan_revision_id",
-                    message: "required for successful plan reports".into(),
-                });
-            }
         }
-    }
-    if input.selected_plan_revision_id.is_some()
-        && !(input.outcome == SessionOutcome::Succeeded && phase == ClaimPhase::Plan)
-    {
-        return Err(DomainError::Validation {
-            field: "selected_plan_revision_id",
-            message: "only valid for successful plan reports".into(),
-        });
     }
     if input.document_revision_ids.len() > MAX_DOCUMENT_REVISION_IDS {
         return Err(DomainError::Validation {
@@ -138,17 +116,13 @@ pub(crate) fn validate_report_input(
                 });
             }
             for link in links {
-                if !link
-                    .as_str()
-                    .is_some_and(|value| value.chars().count() <= LINK_MAX_CHARS)
-                {
+                let Some(value) = link.as_str() else {
                     return Err(DomainError::Validation {
                         field: "links",
-                        message: format!(
-                            "each entry must be a string of at most {LINK_MAX_CHARS} characters"
-                        ),
+                        message: "each entry must be a string".into(),
                     });
-                }
+                };
+                validate_link_entry("links", value)?;
             }
         }
         None => {
@@ -211,9 +185,8 @@ mod tests {
             failure_reason: String::new(),
             document_revision_ids: Vec::new(),
             links: serde_json::json!([]),
-            selected_plan_revision_id: None,
         };
-        let err = validate_report_input(&input, ClaimPhase::Execute).unwrap_err();
+        let err = validate_report_input(&input).unwrap_err();
         assert!(matches!(
             err,
             DomainError::Validation {
@@ -231,33 +204,12 @@ mod tests {
             failure_reason: "oops".into(),
             document_revision_ids: Vec::new(),
             links: serde_json::json!([]),
-            selected_plan_revision_id: None,
         };
-        let err = validate_report_input(&input, ClaimPhase::Execute).unwrap_err();
+        let err = validate_report_input(&input).unwrap_err();
         assert!(matches!(
             err,
             DomainError::Validation {
                 field: "failure_reason",
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn validate_requires_selected_plan_revision_for_successful_plan() {
-        let input = ReportInput {
-            outcome: SessionOutcome::Succeeded,
-            summary: "s".into(),
-            failure_reason: String::new(),
-            document_revision_ids: Vec::new(),
-            links: serde_json::json!([]),
-            selected_plan_revision_id: None,
-        };
-        let err = validate_report_input(&input, ClaimPhase::Plan).unwrap_err();
-        assert!(matches!(
-            err,
-            DomainError::Validation {
-                field: "selected_plan_revision_id",
                 ..
             }
         ));
@@ -271,9 +223,8 @@ mod tests {
             failure_reason: "boom".into(),
             document_revision_ids: Vec::new(),
             links: serde_json::json!({}),
-            selected_plan_revision_id: None,
         };
-        let err = validate_report_input(&input, ClaimPhase::Execute).unwrap_err();
+        let err = validate_report_input(&input).unwrap_err();
         assert!(matches!(
             err,
             DomainError::Validation { field: "links", .. }
@@ -288,9 +239,8 @@ mod tests {
             failure_reason: "boom".into(),
             document_revision_ids: Vec::new(),
             links: serde_json::json!([]),
-            selected_plan_revision_id: None,
         };
-        let err = validate_report_input(&input, ClaimPhase::Execute).unwrap_err();
+        let err = validate_report_input(&input).unwrap_err();
         assert!(matches!(
             err,
             DomainError::Validation {
@@ -308,9 +258,8 @@ mod tests {
             failure_reason: "boom".into(),
             document_revision_ids: Vec::new(),
             links: serde_json::json!([]),
-            selected_plan_revision_id: None,
         };
-        let err = validate_report_input(&input, ClaimPhase::Execute).unwrap_err();
+        let err = validate_report_input(&input).unwrap_err();
         assert!(matches!(
             err,
             DomainError::Validation {
@@ -328,9 +277,8 @@ mod tests {
             failure_reason: String::new(),
             document_revision_ids: Vec::new(),
             links: serde_json::json!([]),
-            selected_plan_revision_id: None,
         };
-        let err = validate_report_input(&oversize_summary, ClaimPhase::Execute).unwrap_err();
+        let err = validate_report_input(&oversize_summary).unwrap_err();
         assert!(matches!(
             err,
             DomainError::Validation {
@@ -344,9 +292,8 @@ mod tests {
             failure_reason: "x".repeat(FAILURE_REASON_MAX_CHARS + 1),
             document_revision_ids: Vec::new(),
             links: serde_json::json!([]),
-            selected_plan_revision_id: None,
         };
-        let err = validate_report_input(&oversize_reason, ClaimPhase::Execute).unwrap_err();
+        let err = validate_report_input(&oversize_reason).unwrap_err();
         assert!(matches!(
             err,
             DomainError::Validation {
@@ -364,9 +311,8 @@ mod tests {
             failure_reason: "boom".into(),
             document_revision_ids: vec![Uuid::nil(); MAX_DOCUMENT_REVISION_IDS + 1],
             links: serde_json::json!([]),
-            selected_plan_revision_id: None,
         };
-        let err = validate_report_input(&input, ClaimPhase::Execute).unwrap_err();
+        let err = validate_report_input(&input).unwrap_err();
         assert!(matches!(
             err,
             DomainError::Validation {
@@ -377,12 +323,22 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_oversized_and_non_string_links() {
+    fn validate_rejects_oversized_non_string_and_unsafe_links() {
+        let oversize = format!(
+            "https://example.com/{}",
+            "x".repeat(crate::model::content::LINK_MAX_CHARS)
+        );
         for links in [
-            serde_json::json!(["ok", 7]),
+            serde_json::json!(["https://example.com", 7]),
             serde_json::json!([{"uri": "x"}]),
-            serde_json::json!(["x".repeat(LINK_MAX_CHARS + 1)]),
-            serde_json::json!((0..MAX_LINKS + 1).map(|_| "x").collect::<Vec<_>>()),
+            serde_json::json!([oversize]),
+            serde_json::json!(["javascript:alert(1)"]),
+            serde_json::json!(["http://user:secret@example.com"]),
+            serde_json::json!(
+                (0..MAX_LINKS + 1)
+                    .map(|_| "https://example.com")
+                    .collect::<Vec<_>>()
+            ),
         ] {
             let input = ReportInput {
                 outcome: SessionOutcome::Failed,
@@ -390,9 +346,8 @@ mod tests {
                 failure_reason: "boom".into(),
                 document_revision_ids: Vec::new(),
                 links: links.clone(),
-                selected_plan_revision_id: None,
             };
-            let err = validate_report_input(&input, ClaimPhase::Execute).unwrap_err();
+            let err = validate_report_input(&input).unwrap_err();
             assert!(
                 matches!(err, DomainError::Validation { field: "links", .. }),
                 "links {links} must be rejected"
@@ -401,35 +356,14 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_selected_plan_revision_outside_plan_success() {
-        for (outcome, phase) in [
-            (SessionOutcome::Failed, ClaimPhase::Plan),
-            (SessionOutcome::Succeeded, ClaimPhase::Execute),
-        ] {
-            let failure_reason = if outcome == SessionOutcome::Failed {
-                "boom".to_string()
-            } else {
-                String::new()
-            };
-            let input = ReportInput {
-                outcome,
-                summary: "s".into(),
-                failure_reason,
-                document_revision_ids: Vec::new(),
-                links: serde_json::json!([]),
-                selected_plan_revision_id: Some(Uuid::nil()),
-            };
-            let err = validate_report_input(&input, phase).unwrap_err();
-            assert!(
-                matches!(
-                    err,
-                    DomainError::Validation {
-                        field: "selected_plan_revision_id",
-                        ..
-                    }
-                ),
-                "outcome {outcome:?} phase {phase:?} must be rejected"
-            );
-        }
+    fn validate_accepts_safe_links() {
+        let input = ReportInput {
+            outcome: SessionOutcome::Failed,
+            summary: "s".into(),
+            failure_reason: "boom".into(),
+            document_revision_ids: Vec::new(),
+            links: serde_json::json!(["https://example.com/artifact", "http://example.com"]),
+        };
+        assert!(validate_report_input(&input).is_ok());
     }
 }

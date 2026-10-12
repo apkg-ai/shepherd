@@ -1,10 +1,12 @@
 mod archive;
 mod claims;
+mod content;
 mod dependencies;
 mod hierarchy;
 mod identity;
 mod reports;
 
+pub use content::DocumentListFilters;
 pub use identity::IdentityPaths;
 
 use std::future::Future;
@@ -16,8 +18,8 @@ use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{
-    Actor, ActorId, CommandId, DependencyId, Epic, EpicId, EventId, GoalId, IDEMPOTENCY_TTL_DAYS,
-    ProjectId, Revision, Task, TaskId, TaskTypeId,
+    Actor, ActorId, CommandId, DependencyId, DocumentId, Epic, EpicId, EventId, GoalId,
+    IDEMPOTENCY_TTL_DAYS, ProjectId, Revision, Task, TaskId, TaskTypeId,
 };
 use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
 use crate::storage::rows::format_ts;
@@ -538,6 +540,17 @@ impl PendingEvent {
             resource_id: id,
             resource_revision: 0,
             affected_ids: vec![task.as_uuid()],
+        }
+    }
+
+    // document.changed carries the owning project/epic/task id (plan/08).
+    pub(crate) fn document(id: DocumentId, revision: Revision, owner: Uuid) -> Self {
+        Self {
+            event_type: "document.changed",
+            kind_rank: 9,
+            resource_id: id.as_uuid(),
+            resource_revision: revision.value(),
+            affected_ids: vec![owner],
         }
     }
 }
