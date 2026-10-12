@@ -3,6 +3,7 @@ mod epic;
 mod goal;
 mod identity;
 mod project;
+mod session;
 mod task;
 
 pub use claim::{
@@ -24,6 +25,8 @@ pub use project::{
 pub(crate) use project::{
     DESCRIPTION_MAX_CHARS, NAME_MAX_CHARS, REASON_MAX_CHARS, validate_type_key, validate_type_label,
 };
+pub(crate) use session::validate_report_input;
+pub use session::{ReportInput, Session, SessionOutcome};
 pub use task::{Task, TaskCreate, TaskId, TaskPatch, TaskPhase, TaskStatus};
 
 use std::fmt;

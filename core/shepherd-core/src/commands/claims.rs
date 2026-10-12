@@ -18,21 +18,21 @@ use super::{
     require_revision, task_scope,
 };
 
-struct ClaimRow {
-    id: Uuid,
-    task_id: TaskId,
-    actor_id: ActorId,
-    phase: ClaimPhase,
-    submission_id: Option<Uuid>,
-    acquired_at: chrono::DateTime<chrono::Utc>,
-    expires_at: chrono::DateTime<chrono::Utc>,
-    status: String,
-    task_revision: i64,
-    plan_revision_id: Option<Uuid>,
-    lease_hash: String,
+pub(super) struct ClaimRow {
+    pub(super) id: Uuid,
+    pub(super) task_id: TaskId,
+    pub(super) actor_id: ActorId,
+    pub(super) phase: ClaimPhase,
+    pub(super) submission_id: Option<Uuid>,
+    pub(super) acquired_at: chrono::DateTime<chrono::Utc>,
+    pub(super) expires_at: chrono::DateTime<chrono::Utc>,
+    pub(super) status: String,
+    pub(super) task_revision: i64,
+    pub(super) plan_revision_id: Option<Uuid>,
+    pub(super) lease_hash: String,
 }
 
-async fn load_claim_row(
+pub(super) async fn load_claim_row(
     conn: &mut SqliteConnection,
     claim_id: &Uuid,
     project: &ProjectId,
@@ -78,7 +78,7 @@ async fn load_claim_row(
     })
 }
 
-type ClaimDbRow = (
+pub(super) type ClaimDbRow = (
     String,
     String,
     String,
@@ -107,7 +107,7 @@ fn claim_from_row(row: &ClaimRow, status_override: ClaimStatus) -> Claim {
     }
 }
 
-async fn reconcile_task_claims(
+pub(super) async fn reconcile_task_claims(
     conn: &mut SqliteConnection,
     task_id: TaskId,
     now: &str,

@@ -13,7 +13,7 @@ pub const MAX_TTL_SECONDS: i64 = 900;
 // (no `serde` feature on the uuid or chrono dependencies). These helpers
 // serialise through the string representation so idempotent-replay
 // round-trips work.
-mod serde_datetime {
+pub(super) mod serde_datetime {
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -27,7 +27,7 @@ mod serde_datetime {
     }
 }
 
-mod serde_uuid {
+pub(super) mod serde_uuid {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use uuid::Uuid;
 
@@ -41,7 +41,7 @@ mod serde_uuid {
     }
 }
 
-mod serde_uuid_vec {
+pub(super) mod serde_uuid_vec {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use uuid::Uuid;
 
@@ -61,7 +61,7 @@ mod serde_uuid_vec {
     }
 }
 
-mod serde_task_id {
+pub(super) mod serde_task_id {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use uuid::Uuid;
 
@@ -79,7 +79,7 @@ mod serde_task_id {
     }
 }
 
-mod serde_actor_id {
+pub(super) mod serde_actor_id {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use uuid::Uuid;
 

@@ -1,6 +1,6 @@
 # 010 — Atomic reports and failure recovery
 
-Status: not started. Requirements: DATA-01 CLAIM-01.
+Status: implemented on branch `v1-010-reports-and-retries` (PR #92 pending). Requirements: DATA-01 CLAIM-01.
 
 ## Objective and prerequisites
 
@@ -58,13 +58,29 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Completion checklist
 
-- [ ] Referenced requirements and every acceptance sentence implemented.
-- [ ] Schemas, permissions, transitions and clients remain consistent.
-- [ ] Success and rejection behavior verified at the public boundary.
-- [ ] Required commands pass; material environmental limitation recorded accurately.
-- [ ] Temporary code and next-step dependencies documented.
-- [ ] Handoff below completed; next eligible step linked.
+- [x] Referenced requirements and every acceptance sentence implemented.
+- [x] Schemas, permissions, transitions and clients remain consistent.
+- [x] Success and rejection behavior verified at the public boundary.
+- [x] Required commands pass; material environmental limitation recorded accurately.
+- [x] Temporary code and next-step dependencies documented.
+- [x] Handoff below completed; next eligible step linked.
 
 ## Implementation handoff record
 
-Fill when implementing, not during planning: commit/branch; files changed; test commands and results; any reproduced limitation; temporary interfaces; next eligible step IDs. If an acceptance criterion cannot pass, leave this step incomplete and explain the concrete blocker. Do not mark complete for code that merely compiles.
+Branch: `v1-010-reports-and-retries` (PR #92). Commits: `cdf196f` (initial implementation), `ea9a59c` (first review pass: dedupe live_actor, batch revision query, did_complete flag), plus the PR-review fix commit on the same branch.
+
+Files changed: `core/shepherd-core/src/commands/reports.rs` (new: `report_claim`, document-revision ownership and plan-kind validation, submission helper), `core/shepherd-core/src/model/session.rs` (new: Session, ReportInput, `validate_report_input` with wire limits), `core/shepherd-core/src/commands/mod.rs` (`session.recorded` event), `core/shepherd-core/src/commands/claims.rs` (claim-row helpers made `pub(super)`), `core/shepherd-core/src/storage/mod.rs` (test failpoints, `seed_task_document` fixture), `core/shepherd-core/src/workflow/task.rs` (`complete` promoted to the production report path), `core/shepherd-core/tests/v1_reports_and_retries.rs` (acceptance suite), `core/shepherd-core/src/commands/reports.rs` in-module unit suite (coverage gate).
+
+Test commands and results (run from `core/`): `cargo fmt --check` clean; `cargo clippy --all-targets -- -D warnings` clean; `cargo test --workspace` all suites pass (28 report unit tests, 23 report integration tests); `cargo llvm-cov --workspace --lib --bins` unit line coverage 96.7% (gate ≥ 95%); integration line coverage 93.1% (gate ≥ 70%), via `scripts/coverage-report.ts`; `python3 plan/validate.py` PASS.
+
+PR-review fixes included in the handoff: duplicate `document_revision_ids` are deduplicated (previously a panic), revision ownership is validated for failed reports too, the selected plan revision must belong to a `plan`-kind task document, `summary`/`links`/array-size wire limits from the ReportInput contract are enforced in the core, stray `selected_plan_revision_id` outside a successful plan report is rejected, the dead reconciled-claims event loop was removed (`one_active_claim_per_task` makes it unreachable on the success path), and an independent-pool concurrency regression test was added.
+
+Second PR-review fixes: the `ClaimPhase::Review` match arm returns the same validation error instead of `unreachable!()` (a guard reorder must not panic), `reportClaim` enforces `ensure_unarchived` like every other command, `summary` is rejected when whitespace-only (mirroring `failure_reason`'s trim), and new regressions cover same-project cross-task revision rejection, oversize `summary`/`failure_reason` through the command, failed reports storing their reported revisions, and idempotent replay still succeeding after the reported claim's lease has expired.
+
+Step-012 obligation: a successful plan report with a pending (non-`none`) policy writes `selected_plan_revision_id` before approval. Plan rejection (plan/04 "reject plan: clear acceptance") must clear both `selected_plan_revision_id` and `accepted_plan_submission_id` and carry a regression test, or a rejected task returns to planning with a stale selected plan.
+
+Reproduced limitation: none. The served contract in `openapi/shepherd.yaml` is untouched; reportClaim is core-only until step 015, per the scaffold rule.
+
+Temporary interfaces (next-step dependencies): `ReportInput.selected_plan_revision_id` is a step-010 seam — step 011's `selectTaskPlan` persists the selection on the task and the report then reads it from there (wire `ReportInput` deliberately has no such field, `additionalProperties: false`); `testing::seed_task_document` seeds documents until public document commands land in step 011; `Store::report_failpoint` and `complete_task_for_test` are test-only drivers.
+
+Next eligible step: [011 — versioned documents and plan selection](011-documents-and-submissions.md), which resolves the report step's deferred internal interfaces.
