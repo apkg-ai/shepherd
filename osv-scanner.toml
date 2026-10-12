@@ -1,6 +1,6 @@
 # OSV Scanner ignore list.
 # https://google.github.io/osv-scanner/configuration/
-# Every entry must exist in scripts/npm-audit.sh too, with a revisit condition.
+# Every npm entry must exist in scripts/npm-audit.sh too, with a revisit condition.
 
 [[IgnoredVulns]]
 id = "GHSA-vfj7-8cjw-p6xm"
@@ -8,4 +8,13 @@ id = "GHSA-vfj7-8cjw-p6xm"
 # (braces 3.0.3 is the latest published version); dev-only path through
 # spectral's globbing of our own static files.
 # Revisit: remove when braces ships a patched release.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0449"
+# unsafe-libyaml is unmaintained: informational advisory, no CVSS, no fixed
+# version. Reaches the lockfile only through serde_yaml, a shepherd-server
+# dev-dependency whose contract tests parse our own static OpenAPI YAML;
+# never compiled into release builds.
+# Revisit: remove when the server tests migrate off serde_yaml (e.g. to a
+# safe-Rust parser such as serde-saphyr, with step 015).
 
