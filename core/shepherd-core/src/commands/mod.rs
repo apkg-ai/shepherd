@@ -263,18 +263,24 @@ pub(crate) fn require_revision(expected: Option<i64>, actual: Revision) -> Resul
     }
 }
 
-// Unexpired active claim or pending submission blocks mutations on the
-// resource; the epic level checks every descendant task (plan/03, plan/04
-// FLOW-03).
 // Single source for "active work on task alias `t`": an unexpired active claim
-// or a pending submission (plan/03, plan/04 FLOW-03).
-pub(crate) fn active_work_predicate(now_placeholder: &str) -> String {
+// or a pending submission (plan/03, plan/04 FLOW-03). The optional phase list
+// narrows which claim phases count — plan claims never block selection or
+// selected-plan appends (plan/03, plan/04 row "select plan").
+pub(crate) fn claim_work_predicate(now_placeholder: &str, phases: Option<&str>) -> String {
+    let phase_filter = phases
+        .map(|list| format!(" AND c.phase IN ({list})"))
+        .unwrap_or_default();
     format!(
         "(EXISTS (SELECT 1 FROM claims c WHERE c.task_id = t.id \
-         AND c.status = 'active' AND c.expires_at > {now_placeholder}) \
+         AND c.status = 'active' AND c.expires_at > {now_placeholder}{phase_filter}) \
          OR EXISTS (SELECT 1 FROM submissions s WHERE s.task_id = t.id \
          AND s.status = 'pending'))"
     )
+}
+
+pub(crate) fn active_work_predicate(now_placeholder: &str) -> String {
+    claim_work_predicate(now_placeholder, None)
 }
 
 async fn has_active_work_by(

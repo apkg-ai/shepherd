@@ -890,7 +890,7 @@ async fn document_commands_replay_idempotently() {
     assert_eq!(revision_count(&s.store, &first).await, 2);
 }
 
-// --- End-to-end plan claim flow (replaces the step-010 seed seam) ---
+// --- End-to-end plan claim flow ---
 
 #[tokio::test]
 async fn plan_claim_flow_selects_own_plan_and_reports_success() {
@@ -1403,4 +1403,41 @@ async fn document_lists_paginate_and_bind_cursors() {
         vec![1]
     );
     assert_eq!(revisions_two.next_cursor, None);
+}
+
+// --- Page-index usage ---
+
+#[tokio::test]
+async fn document_lists_use_their_page_indexes_without_a_temp_sort() {
+    use sqlx::Row as _;
+
+    let s = setup().await;
+    let cases = [
+        (
+            "EXPLAIN QUERY PLAN SELECT id FROM documents \
+             WHERE project_id = 'p' ORDER BY created_at ASC, id ASC LIMIT 51",
+            "documents_project_page",
+        ),
+        (
+            "EXPLAIN QUERY PLAN SELECT id FROM document_revisions \
+             WHERE document_id = 'd' ORDER BY created_at DESC, id DESC LIMIT 51",
+            "document_revisions_page",
+        ),
+    ];
+    for (query, index) in cases {
+        let rows = sqlx::query(query).fetch_all(s.store.pool()).await.unwrap();
+        let plan: Vec<String> = rows
+            .iter()
+            .map(|row| row.try_get::<String, _>("detail").unwrap())
+            .collect();
+        let joined = plan.join(" | ");
+        assert!(
+            joined.contains(index),
+            "the page query must use {index}, got: {joined}"
+        );
+        assert!(
+            !joined.to_ascii_lowercase().contains("temp b-tree"),
+            "the page query must not sort in a temp B-tree, got: {joined}"
+        );
+    }
 }

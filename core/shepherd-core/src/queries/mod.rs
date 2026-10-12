@@ -55,7 +55,7 @@ pub(crate) fn scoped_filter(project: &ProjectId, include_archived: bool) -> Stri
     format!("project={project}&include_archived={include_archived}")
 }
 
-fn decode_after(
+pub(crate) fn decode_after(
     params: &ListParams,
     endpoint: &str,
     filter: &str,

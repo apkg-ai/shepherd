@@ -107,8 +107,8 @@ async fn reopening_v1_database_preserves_data_without_new_migrations() {
         .await
         .unwrap();
     // Baseline, the step 005 project-scope indexes, the step 007 task page
-    // index; a reopen adds nothing.
-    assert_eq!(migrations, 3);
+    // index, the step 011 document page indexes; a reopen adds nothing.
+    assert_eq!(migrations, 4);
 }
 
 async fn assert_rejection_leaves_bytes_untouched(dir: &tempfile::TempDir, db_name: &str) {

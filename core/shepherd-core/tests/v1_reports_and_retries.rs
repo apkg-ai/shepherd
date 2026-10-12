@@ -1808,3 +1808,83 @@ async fn same_key_retry_after_lease_expiry_still_replays() {
     assert_eq!(claim_status(&s.store, claim_id).await, "reported");
     assert_eq!(session_count(&s.store, task.id).await, 1);
 }
+
+// --- Execute output kind (plan/04 session rules) ---
+
+#[tokio::test]
+async fn execute_success_requires_a_finding_or_handoff_revision() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal, "E").await;
+    let task = create_task_full(
+        &s,
+        project.id,
+        epic.id,
+        "T",
+        false,
+        ReviewPolicy::None,
+        ReviewPolicy::None,
+    )
+    .await;
+    let (_, plan_rev) = create_task_doc(&s, project.id, task.id, DocumentKind::Plan).await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let grant = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(task.revision.value())),
+            project.id,
+            task.id,
+            ClaimInput {
+                phase: ClaimPhase::Execute,
+                submission_id: None,
+                ttl_seconds: None,
+            },
+            "claim-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Task-owned but plan-kind: a successful execution needs a real output.
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let err = s
+        .store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            grant.claim.id,
+            &grant.lease_token,
+            success_input(&plan_rev),
+            "report-hash",
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "document_revision_ids",
+            ..
+        }
+    ));
+    assert_eq!(claim_status(&s.store, grant.claim.id).await, "active");
+    assert_eq!(session_count(&s.store, task.id).await, 0);
+
+    // A handoff revision satisfies the output requirement.
+    let (_, handoff_rev) = create_task_doc(&s, project.id, task.id, DocumentKind::Handoff).await;
+    s.clock.advance(TimeDelta::milliseconds(2));
+    s.store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            grant.claim.id,
+            &grant.lease_token,
+            success_input(&handoff_rev),
+            "report-hash-2",
+        )
+        .await
+        .unwrap();
+    let t = reload_task(&s, project.id, task.id).await;
+    assert_eq!(t.status, TaskStatus::Done);
+}

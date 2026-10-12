@@ -8,8 +8,8 @@ use crate::model::{
     SelectPlanInput, Task, TaskId, TaskPhase, require_capability, validate_document_create,
     validate_revision_create,
 };
-use crate::queries::hierarchy::{project_row, task_row};
-use crate::queries::{ListParams, Page, decode_cursor, effective_limit, encode_cursor, split_page};
+use crate::queries::hierarchy::{project_exists, project_row, task_row};
+use crate::queries::{ListParams, Page, decode_after, effective_limit, encode_cursor, split_page};
 use crate::storage::rows::{format_ts, parse_ts, parse_uuid};
 use crate::storage::{StorageError, Store};
 
@@ -18,14 +18,16 @@ use super::{
     missing_after_write, require_revision, task_scope,
 };
 
-/// Validate that every UUID in `revision_ids` belongs to a document owned by the task.
+/// Validate that every UUID in `revision_ids` belongs to a document owned by
+/// the task. Duplicate ids are tolerated.
 pub(super) async fn validate_task_owned_revisions(
     conn: &mut SqliteConnection,
     project: &ProjectId,
     task: &TaskId,
     revision_ids: &[Uuid],
 ) -> Result<(), DomainError> {
-    if revision_ids.is_empty() {
+    let unique: std::collections::HashSet<Uuid> = revision_ids.iter().copied().collect();
+    if unique.is_empty() {
         return Ok(());
     }
     let task_str = task.to_string();
@@ -40,7 +42,7 @@ pub(super) async fn validate_task_owned_revisions(
     builder.push_bind(&project_str);
     builder.push(" AND dr.id IN (");
     let mut separated = builder.separated(", ");
-    for id in revision_ids {
+    for id in &unique {
         separated.push_bind(id.to_string());
     }
     builder.push(")");
@@ -49,10 +51,10 @@ pub(super) async fn validate_task_owned_revisions(
         .fetch_all(&mut *conn)
         .await
         .map_err(StorageError::from)?;
-    if found.len() != revision_ids.len() {
+    if found.len() != unique.len() {
         let found_set: std::collections::HashSet<&str> =
             found.iter().map(|r| r.0.as_str()).collect();
-        let missing = revision_ids
+        let missing = unique
             .iter()
             .find(|id| !found_set.contains(id.to_string().as_str()))
             .map(Uuid::to_string)
@@ -63,6 +65,58 @@ pub(super) async fn validate_task_owned_revisions(
         });
     }
     Ok(())
+}
+
+/// A successful execute report must cite at least one task-owned output
+/// revision of kind finding or handoff (plan/04 session rules); ownership is
+/// validated separately.
+pub(super) async fn require_output_revision(
+    conn: &mut SqliteConnection,
+    revision_ids: &[Uuid],
+) -> Result<(), DomainError> {
+    let rejection = || DomainError::Validation {
+        field: "document_revision_ids",
+        message: "successful execute report requires at least one task-owned \
+                  finding or handoff revision"
+            .into(),
+    };
+    if revision_ids.is_empty() {
+        return Err(rejection());
+    }
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT 1 FROM document_revisions dr \
+         JOIN documents d ON d.id = dr.document_id \
+         WHERE d.kind IN ('finding', 'handoff') AND dr.id IN (",
+    );
+    let mut separated = builder.separated(", ");
+    for id in revision_ids {
+        separated.push_bind(id.to_string());
+    }
+    builder.push(") LIMIT 1");
+    let found = builder
+        .build()
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(StorageError::from)?;
+    if found.is_none() {
+        return Err(rejection());
+    }
+    Ok(())
+}
+
+pub(super) async fn selected_plan_revision(
+    conn: &mut SqliteConnection,
+    task: TaskId,
+) -> Result<Option<Uuid>, DomainError> {
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT selected_plan_revision_id FROM tasks WHERE id = ?1")
+            .bind(task.to_string())
+            .fetch_one(&mut *conn)
+            .await?;
+    stored
+        .map(|value| parse_uuid("tasks.selected_plan_revision_id", &value))
+        .transpose()
+        .map_err(DomainError::from)
 }
 
 /// The selection target must be a revision of a plan document on that task (plan/03).
@@ -103,18 +157,16 @@ pub(super) async fn task_execute_or_review_work(
     task: TaskId,
     now: &str,
 ) -> Result<bool, DomainError> {
-    let found: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM tasks t WHERE t.id = ?1 AND \
-         (EXISTS (SELECT 1 FROM claims c WHERE c.task_id = t.id AND c.status = 'active' \
-         AND c.expires_at > ?2 AND c.phase IN ('execute', 'review')) \
-         OR EXISTS (SELECT 1 FROM submissions s WHERE s.task_id = t.id \
-         AND s.status = 'pending')) LIMIT 1",
-    )
-    .bind(task.to_string())
-    .bind(now)
-    .fetch_optional(&mut *conn)
-    .await?;
-    Ok(found.is_some())
+    let query = sqlx::AssertSqlSafe(format!(
+        "SELECT 1 FROM tasks t WHERE t.id = ?1 AND {} LIMIT 1",
+        super::claim_work_predicate("?2", Some("'execute', 'review'"))
+    ));
+    Ok(sqlx::query(query)
+        .bind(task.to_string())
+        .bind(now)
+        .fetch_optional(&mut *conn)
+        .await?
+        .is_some())
 }
 
 async fn is_selected_plan_document(
@@ -193,18 +245,6 @@ async fn resolve_owner_scope(
                 task_id: Some(id),
             })
         }
-    }
-}
-
-fn stored_owner(kind: &str, owner_id: &str) -> Result<DocumentOwner, DomainError> {
-    let id = parse_uuid("documents.owner_id", owner_id)?;
-    match DocumentOwnerKind::parse(kind) {
-        Some(DocumentOwnerKind::Project) => Ok(DocumentOwner::Project(ProjectId::from_uuid(id))),
-        Some(DocumentOwnerKind::Epic) => {
-            Ok(DocumentOwner::Epic(crate::model::EpicId::from_uuid(id)))
-        }
-        Some(DocumentOwnerKind::Task) => Ok(DocumentOwner::Task(TaskId::from_uuid(id))),
-        None => Err(StorageError::Corrupt(format!("documents.owner_kind: {kind}")).into()),
     }
 }
 
@@ -444,7 +484,7 @@ impl Store {
                 let owner = resolve_owner_scope(
                     tx,
                     &project,
-                    stored_owner(document.owner_kind.as_str(), &document.owner_id.to_string())?,
+                    DocumentOwner::from_parts(document.owner_kind, document.owner_id),
                 )
                 .await?;
                 owner.ensure_unarchived()?;
@@ -530,8 +570,9 @@ impl Store {
             Box::pin(async move {
                 let now_text = format_ts(&ctx.now);
 
-                let scope = task_scope(tx, &project, &task_id).await?;
+                // Authenticate before route membership (plan/04 precedence).
                 let actor = live_actor(tx, &ctx.actor.id).await?;
+                let scope = task_scope(tx, &project, &task_id).await?;
                 require_capability(&actor, Capability::AuthorDocuments)?;
                 require_revision(ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
@@ -554,14 +595,9 @@ impl Store {
                 require_task_plan_revision(tx, &project, &task_id, &input.document_revision_id)
                     .await?;
 
-                let current: Option<String> =
-                    sqlx::query_scalar("SELECT selected_plan_revision_id FROM tasks WHERE id = ?1")
-                        .bind(task_id.to_string())
-                        .fetch_one(&mut **tx)
-                        .await?;
                 // Re-selecting the current revision changes nothing: acceptance
                 // retained, no revision bump, no event (owner decision 2026-10-12).
-                if current.as_deref() == Some(input.document_revision_id.to_string().as_str()) {
+                if selected_plan_revision(tx, task_id).await? == Some(input.document_revision_id) {
                     return Ok(CommandResult {
                         value: scope.task,
                         events: Vec::new(),
@@ -630,14 +666,14 @@ impl Store {
         params: &ListParams,
     ) -> Result<Page<Document>, DomainError> {
         let limit = effective_limit(params)?;
-        let filter = documents_filter(project, filters);
-        let after = params
-            .cursor
-            .as_deref()
-            .map(|cursor| decode_cursor(cursor, "listDocuments", &filter))
-            .transpose()?;
-
         let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
+        // Route membership before cursor validity (plan/04): unknown project is 404.
+        if !project_exists(&mut tx, project).await? {
+            return Err(DomainError::NotFound);
+        }
+        let filter = documents_filter(project, filters);
+        let after = decode_after(params, "listDocuments", &filter)?;
+
         let mut builder = QueryBuilder::<Sqlite>::new(format!(
             "SELECT {DOCUMENT_COLUMNS} FROM documents WHERE project_id = "
         ));
@@ -692,17 +728,13 @@ impl Store {
         params: &ListParams,
     ) -> Result<Page<DocumentRevision>, DomainError> {
         let limit = effective_limit(params)?;
-        let filter = format!("project={project}&document={document}");
-        let after = params
-            .cursor
-            .as_deref()
-            .map(|cursor| decode_cursor(cursor, "listDocumentRevisions", &filter))
-            .transpose()?;
-
         let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
+        // Route membership before cursor validity (plan/04): unknown document is 404.
         document_row(&mut tx, project, document)
             .await?
             .ok_or(DomainError::NotFound)?;
+        let filter = format!("project={project}&document={document}");
+        let after = decode_after(params, "listDocumentRevisions", &filter)?;
 
         let mut builder = QueryBuilder::<Sqlite>::new(format!(
             "SELECT {REVISION_COLUMNS} FROM document_revisions WHERE document_id = "
@@ -1451,6 +1483,86 @@ mod tests {
             .unwrap();
         let numbers: Vec<i64> = rest.items.iter().map(|r| r.number).collect();
         assert_eq!(numbers, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn duplicate_owned_revision_ids_validate() {
+        let f = fixture(false).await;
+        let document = doc(&f, DocumentOwner::Task(f.task.id), DocumentKind::Finding).await;
+        let owned = document.latest_revision_id.as_uuid();
+        let project = f.project;
+        let task_id = f.task.id;
+        f.store
+            .domain_transaction(move |tx| {
+                Box::pin(async move {
+                    validate_task_owned_revisions(tx, &project, &task_id, &[owned, owned]).await
+                })
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn revoked_actors_get_forbidden_before_membership() {
+        let f = fixture(true).await;
+        sqlx::query("UPDATE actors SET revoked = 1 WHERE id = ?1")
+            .bind(f.owner.id.to_string())
+            .execute(f.store.pool())
+            .await
+            .unwrap();
+        // A revoked actor must not learn whether a task id exists.
+        let err = f
+            .store
+            .select_task_plan(
+                ctx(&f.owner, &f.clock, Some(1)),
+                f.project,
+                TaskId::generate(f.clock.now()),
+                SelectPlanInput {
+                    document_revision_id: Uuid::nil(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)));
+    }
+
+    #[tokio::test]
+    async fn unknown_project_lists_are_not_found_before_cursor_checks() {
+        let f = fixture(false).await;
+        let document = doc(&f, DocumentOwner::Task(f.task.id), DocumentKind::Note).await;
+        let unknown = ProjectId::generate(f.clock.now());
+        let garbage_cursor = ListParams {
+            cursor: Some("not-a-cursor".into()),
+            ..Default::default()
+        };
+        let err = f
+            .store
+            .list_documents(
+                &unknown,
+                &DocumentListFilters::default(),
+                &ListParams::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotFound));
+        let err = f
+            .store
+            .list_documents(&unknown, &DocumentListFilters::default(), &garbage_cursor)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::NotFound),
+            "membership precedes cursor validity"
+        );
+        let err = f
+            .store
+            .list_document_revisions(&unknown, &document.id, &garbage_cursor)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::NotFound),
+            "membership precedes cursor validity"
+        );
     }
 
     #[tokio::test]

@@ -9,11 +9,13 @@ use crate::model::{
 };
 use crate::queries::hierarchy::task_row;
 use crate::storage::Store;
-use crate::storage::rows::{format_ts, parse_uuid};
+use crate::storage::rows::format_ts;
 use crate::workflow;
 
 use super::claims::{load_claim_row, reconcile_task_claims};
-use super::content::validate_task_owned_revisions;
+use super::content::{
+    require_output_revision, selected_plan_revision, validate_task_owned_revisions,
+};
 use super::{CommandContext, PendingEvent, Replay, append_events, missing_after_write, task_scope};
 
 /// Submissions are accepted inline under policy none, pending otherwise.
@@ -23,21 +25,6 @@ fn submission_status(policy: ReviewPolicy) -> &'static str {
     } else {
         "pending"
     }
-}
-
-async fn selected_plan_revision(
-    conn: &mut SqliteConnection,
-    task: TaskId,
-) -> Result<Option<Uuid>, DomainError> {
-    let stored: Option<String> =
-        sqlx::query_scalar("SELECT selected_plan_revision_id FROM tasks WHERE id = ?1")
-            .bind(task.to_string())
-            .fetch_one(&mut *conn)
-            .await?;
-    stored
-        .map(|value| parse_uuid("tasks.selected_plan_revision_id", &value))
-        .transpose()
-        .map_err(DomainError::from)
 }
 
 impl Store {
@@ -117,17 +104,12 @@ impl Store {
                 .await?;
 
                 if input.outcome == SessionOutcome::Succeeded {
-                    if row.phase == ClaimPhase::Execute && input.document_revision_ids.is_empty() {
-                        return Err(DomainError::Validation {
-                            field: "document_revision_ids",
-                            message: "successful execute report requires at least one \
-                                      task-owned document revision"
-                                .into(),
-                        });
+                    if row.phase == ClaimPhase::Execute {
+                        require_output_revision(tx, &input.document_revision_ids).await?;
                     }
                     if row.phase == ClaimPhase::Plan {
-                        // selectTaskPlan is the only writer of this column and
-                        // already enforces plan-kind task ownership.
+                        // selectTaskPlan enforces plan-kind task ownership when
+                        // writing this column; update_task only clears it.
                         let selected = selected_plan_revision(tx, row.task_id).await?;
                         let Some(selected) = selected else {
                             return Err(DomainError::Validation {
@@ -1065,6 +1047,30 @@ mod tests {
         let err = report(&f, &f.owner, claim_id, &token, success_input(Vec::new()))
             .await
             .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "document_revision_ids",
+                ..
+            }
+        ));
+        assert_eq!(claim_status(&f, claim_id).await, "active");
+    }
+
+    #[tokio::test]
+    async fn execute_report_success_requires_an_output_kind_revision() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Execute).await;
+        // The cited revision is task-owned but plan-kind: not an output.
+        let err = report(
+            &f,
+            &f.owner,
+            claim_id,
+            &token,
+            success_input(vec![f.plan_rev]),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(
             err,
             DomainError::Validation {

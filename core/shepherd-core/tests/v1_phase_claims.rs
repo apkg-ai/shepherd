@@ -1051,6 +1051,24 @@ async fn accept_task_plan(s: &Setup, project: ProjectId, task: &Task) -> (Uuid, 
         .await
         .unwrap();
 
+    // A third revision after selection keeps the selected revision distinct
+    // from both latest_revision_id and the last-appended revision, so the
+    // execute-claim pin cannot pass by resolving either of those instead.
+    s.clock.advance(TimeDelta::milliseconds(1));
+    s.store
+        .create_document_revision(
+            ctx(&s.owner, s.clock.now(), Some(2)),
+            project,
+            document.id,
+            RevisionCreate {
+                body: "v3".into(),
+                links: Vec::new(),
+            },
+            "plan-rev3-hash",
+        )
+        .await
+        .unwrap();
+
     s.clock.advance(TimeDelta::milliseconds(1));
     s.store
         .report_claim(

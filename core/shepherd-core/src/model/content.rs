@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::claim::{serde_actor_id, serde_datetime};
+use super::claim::{serde_actor_id, serde_datetime, serde_uuid};
 use super::{ActorId, EpicId, ProjectId, Revision, TaskId, typed_uuid};
 use crate::error::DomainError;
 
@@ -164,20 +164,6 @@ mod serde_revision {
     }
 }
 
-mod serde_uuid_plain {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use uuid::Uuid;
-
-    pub fn serialize<S: Serializer>(id: &Uuid, s: S) -> Result<S::Ok, S::Error> {
-        id.to_string().serialize(s)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Uuid, D::Error> {
-        let text = String::deserialize(d)?;
-        Uuid::parse_str(&text).map_err(serde::de::Error::custom)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Document {
     #[serde(with = "serde_document_id")]
@@ -191,7 +177,7 @@ pub struct Document {
     #[serde(with = "serde_project_id")]
     pub project_id: ProjectId,
     pub owner_kind: DocumentOwnerKind,
-    #[serde(with = "serde_uuid_plain")]
+    #[serde(with = "serde_uuid")]
     pub owner_id: Uuid,
     pub kind: DocumentKind,
     pub title: String,
@@ -222,6 +208,14 @@ pub enum DocumentOwner {
 }
 
 impl DocumentOwner {
+    pub fn from_parts(kind: DocumentOwnerKind, id: Uuid) -> Self {
+        match kind {
+            DocumentOwnerKind::Project => DocumentOwner::Project(ProjectId::from_uuid(id)),
+            DocumentOwnerKind::Epic => DocumentOwner::Epic(EpicId::from_uuid(id)),
+            DocumentOwnerKind::Task => DocumentOwner::Task(TaskId::from_uuid(id)),
+        }
+    }
+
     pub fn kind(&self) -> DocumentOwnerKind {
         match self {
             DocumentOwner::Project(_) => DocumentOwnerKind::Project,
@@ -406,6 +400,7 @@ mod tests {
         for (owner, kind, id) in cases {
             assert_eq!(owner.kind(), kind);
             assert_eq!(owner.id(), id);
+            assert_eq!(DocumentOwner::from_parts(kind, id), owner);
         }
     }
 
