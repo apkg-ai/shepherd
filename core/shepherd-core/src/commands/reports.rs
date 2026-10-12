@@ -116,6 +116,7 @@ impl Store {
 
                 validate_report_input(&input, row.phase)?;
                 let scope = task_scope(tx, &project, &row.task_id).await?;
+                scope.ensure_unarchived()?;
                 let expected_phase = match row.phase {
                     ClaimPhase::Plan => TaskPhase::Planning,
                     ClaimPhase::Execute => TaskPhase::Execution,
@@ -363,7 +364,14 @@ impl Store {
 
                         submission_id = Some(sub_id);
                     }
-                    (ClaimPhase::Review, _) => unreachable!(),
+                    (ClaimPhase::Review, _) => {
+                        // Defense in depth: the expected_phase guard above
+                        // already rejects this; reordering must not panic.
+                        return Err(DomainError::Validation {
+                            field: "phase",
+                            message: "review reports are not yet supported".into(),
+                        });
+                    }
                 }
 
                 #[cfg(any(test, feature = "test-support"))]

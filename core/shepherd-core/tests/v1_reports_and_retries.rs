@@ -1585,3 +1585,243 @@ async fn independent_pools_share_one_active_claim_and_expiry() {
         .unwrap();
     assert_eq!(status, "done");
 }
+
+// --- Cross-task revision ownership (same project) ---
+
+#[tokio::test]
+async fn same_project_cross_task_revision_is_rejected() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal, "E").await;
+    let task_a = create_task_full(
+        &s,
+        project.id,
+        epic.id,
+        "A",
+        false,
+        ReviewPolicy::None,
+        ReviewPolicy::None,
+    )
+    .await;
+    let task_b = create_task_full(
+        &s,
+        project.id,
+        epic.id,
+        "B",
+        false,
+        ReviewPolicy::None,
+        ReviewPolicy::None,
+    )
+    .await;
+    let (_, rev_b) = testing::seed_task_document(
+        s.store.pool(),
+        project.id,
+        task_b.id,
+        s.owner.id,
+        "finding",
+        &format_ts(&s.clock.now()),
+    )
+    .await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let grant = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(task_a.revision.value())),
+            project.id,
+            task_a.id,
+            ClaimInput {
+                phase: ClaimPhase::Execute,
+                submission_id: None,
+                ttl_seconds: None,
+            },
+            "claim-a",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let err = s
+        .store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            grant.claim.id,
+            &grant.lease_token,
+            ReportInput {
+                outcome: SessionOutcome::Succeeded,
+                summary: "done".into(),
+                failure_reason: String::new(),
+                document_revision_ids: vec![rev_b.parse().unwrap()],
+                links: serde_json::json!([]),
+                selected_plan_revision_id: None,
+            },
+            "report-a",
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "document_revision_ids",
+            ..
+        }
+    ));
+    assert_eq!(claim_status(&s.store, grant.claim.id).await, "active");
+    assert_eq!(session_count(&s.store, task_a.id).await, 0);
+}
+
+// --- Wire text limits enforced through the command ---
+
+#[tokio::test]
+async fn oversize_summary_and_failure_reason_are_rejected() {
+    let s = setup().await;
+    let (project, _, task, claim_id, token, rev_id) =
+        claim_and_report_setup(&s, ReviewPolicy::None).await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let err = s
+        .store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project,
+            claim_id,
+            &token,
+            ReportInput {
+                outcome: SessionOutcome::Succeeded,
+                summary: "x".repeat(10_001),
+                failure_reason: String::new(),
+                document_revision_ids: vec![rev_id.parse().unwrap()],
+                links: serde_json::json!([]),
+                selected_plan_revision_id: None,
+            },
+            "report-oversize-summary",
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "summary",
+            ..
+        }
+    ));
+
+    // The claim was never closed, so the same lease can attempt again.
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let err = s
+        .store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project,
+            claim_id,
+            &token,
+            ReportInput {
+                outcome: SessionOutcome::Failed,
+                summary: "s".into(),
+                failure_reason: "x".repeat(2_001),
+                document_revision_ids: Vec::new(),
+                links: serde_json::json!([]),
+                selected_plan_revision_id: None,
+            },
+            "report-oversize-reason",
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "failure_reason",
+            ..
+        }
+    ));
+    assert_eq!(claim_status(&s.store, claim_id).await, "active");
+    assert_eq!(session_count(&s.store, task.id).await, 0);
+}
+
+#[tokio::test]
+async fn failed_report_stores_reported_revisions() {
+    let s = setup().await;
+    let (project, _, task, claim_id, token, rev_id) =
+        claim_and_report_setup(&s, ReviewPolicy::None).await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let rev_uuid: Uuid = rev_id.parse().unwrap();
+    let session = s
+        .store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project,
+            claim_id,
+            &token,
+            ReportInput {
+                outcome: SessionOutcome::Failed,
+                summary: "attempt failed".into(),
+                failure_reason: "boom".into(),
+                document_revision_ids: vec![rev_uuid],
+                links: serde_json::json!([]),
+                selected_plan_revision_id: None,
+            },
+            "report-failed-with-revisions",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(session.document_revision_ids, vec![rev_uuid]);
+    let stored: String =
+        sqlx::query_scalar("SELECT document_revision_ids FROM sessions WHERE id = ?1")
+            .bind(session.id.to_string())
+            .fetch_one(s.store.pool())
+            .await
+            .unwrap();
+    let parsed: Vec<String> = serde_json::from_str(&stored).unwrap();
+    assert_eq!(parsed, vec![rev_id]);
+    let _ = task;
+}
+
+// --- Idempotent replay outlives the lease ---
+
+#[tokio::test]
+async fn same_key_retry_after_lease_expiry_still_replays() {
+    let s = setup().await;
+    let (project, _, task, claim_id, token, rev_id) =
+        claim_and_report_setup(&s, ReviewPolicy::None).await;
+
+    let key = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let first = s
+        .store
+        .report_claim(
+            ctx_with_key(&s.owner, s.clock.now(), None, key),
+            project,
+            claim_id,
+            &token,
+            success_input(&rev_id),
+            "report-hash",
+        )
+        .await
+        .unwrap();
+    let session = first.into_inner();
+
+    // Past the 300s TTL the lease would be invalid, but the replay must be
+    // served from the idempotency record without touching the claim.
+    s.clock.advance(TimeDelta::seconds(301));
+    let second = s
+        .store
+        .report_claim(
+            ctx_with_key(&s.owner, s.clock.now(), None, key),
+            project,
+            claim_id,
+            &token,
+            success_input(&rev_id),
+            "report-hash",
+        )
+        .await
+        .unwrap();
+    assert!(second.is_replay());
+    assert_eq!(second.into_inner().id, session.id);
+    assert_eq!(claim_status(&s.store, claim_id).await, "reported");
+    assert_eq!(session_count(&s.store, task.id).await, 1);
+}

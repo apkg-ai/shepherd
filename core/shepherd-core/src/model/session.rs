@@ -79,10 +79,10 @@ pub(crate) fn validate_report_input(
     phase: ClaimPhase,
 ) -> Result<(), DomainError> {
     super::validate_long_text("summary", &input.summary, SUMMARY_MAX_CHARS)?;
-    if input.summary.is_empty() {
+    if input.summary.trim().is_empty() {
         return Err(DomainError::Validation {
             field: "summary",
-            message: "must not be empty".into(),
+            message: "must not be blank".into(),
         });
     }
     match input.outcome {
@@ -295,6 +295,62 @@ mod tests {
             err,
             DomainError::Validation {
                 field: "summary",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_whitespace_only_summary() {
+        let input = ReportInput {
+            outcome: SessionOutcome::Failed,
+            summary: "   ".into(),
+            failure_reason: "boom".into(),
+            document_revision_ids: Vec::new(),
+            links: serde_json::json!([]),
+            selected_plan_revision_id: None,
+        };
+        let err = validate_report_input(&input, ClaimPhase::Execute).unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "summary",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_oversize_summary_and_failure_reason() {
+        let oversize_summary = ReportInput {
+            outcome: SessionOutcome::Succeeded,
+            summary: "x".repeat(SUMMARY_MAX_CHARS + 1),
+            failure_reason: String::new(),
+            document_revision_ids: Vec::new(),
+            links: serde_json::json!([]),
+            selected_plan_revision_id: None,
+        };
+        let err = validate_report_input(&oversize_summary, ClaimPhase::Execute).unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "summary",
+                ..
+            }
+        ));
+        let oversize_reason = ReportInput {
+            outcome: SessionOutcome::Failed,
+            summary: "s".into(),
+            failure_reason: "x".repeat(FAILURE_REASON_MAX_CHARS + 1),
+            document_revision_ids: Vec::new(),
+            links: serde_json::json!([]),
+            selected_plan_revision_id: None,
+        };
+        let err = validate_report_input(&oversize_reason, ClaimPhase::Execute).unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "failure_reason",
                 ..
             }
         ));
