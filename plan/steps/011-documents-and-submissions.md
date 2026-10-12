@@ -1,6 +1,6 @@
 # 011 — Versioned documents and plan selection
 
-Status: not started. Requirements: CONTENT-01 REVIEW-02.
+Status: implemented on branch `v1-011-documents-and-submissions` (PR pending). Requirements: CONTENT-01 REVIEW-02.
 
 ## Objective and prerequisites
 
@@ -58,13 +58,23 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Completion checklist
 
-- [ ] Referenced requirements and every acceptance sentence implemented.
-- [ ] Schemas, permissions, transitions and clients remain consistent.
-- [ ] Success and rejection behavior verified at the public boundary.
-- [ ] Required commands pass; material environmental limitation recorded accurately.
-- [ ] Temporary code and next-step dependencies documented.
-- [ ] Handoff below completed; next eligible step linked.
+- [x] Referenced requirements and every acceptance sentence implemented.
+- [x] Schemas, permissions, transitions and clients remain consistent.
+- [x] Success and rejection behavior verified at the public boundary.
+- [x] Required commands pass; material environmental limitation recorded accurately.
+- [x] Temporary code and next-step dependencies documented.
+- [x] Handoff below completed; next eligible step linked.
 
 ## Implementation handoff record
 
-Fill when implementing, not during planning: commit/branch; files changed; test commands and results; any reproduced limitation; temporary interfaces; next eligible step IDs. If an acceptance criterion cannot pass, leave this step incomplete and explain the concrete blocker. Do not mark complete for code that merely compiles.
+Branch: `v1-011-documents-and-submissions`. Commits: `4f620b6` (commands, model, report seam resolution, existing-test migration), `d29b4b9` (acceptance suite), `86cb4f9` (in-module unit suites and document event tests), plus this handoff commit.
+
+Files changed: `core/shepherd-core/src/model/content.rs` (new: Document/DocumentRevision types, owner/kind enums, content limits, hand-rolled link scheme-safety shared with reports), `core/shepherd-core/src/commands/content.rs` (new: `create_document`, `create_document_revision`, `select_task_plan`, `get_document`, `get_document_revision`, `list_documents`, `list_document_revisions`, shared `validate_task_owned_revisions`/`require_task_plan_revision`/`task_execute_or_review_work` helpers), `core/shepherd-core/src/commands/reports.rs` (plan success reads `tasks.selected_plan_revision_id`; ownership validation moved to content), `core/shepherd-core/src/model/session.rs` (`ReportInput.selected_plan_revision_id` seam deleted; link safety applied to report links), `core/shepherd-core/src/model/mod.rs` + `commands/mod.rs` (module wiring, `PendingEvent::document`, `document.changed` rank 9), `core/shepherd-core/src/storage/mod.rs` (`testing::seed_task_document` removed), `core/shepherd-core/tests/v1_documents_and_submissions.rs` (new acceptance suite, 19 named tests), `core/shepherd-core/tests/v1_reports_and_retries.rs` + `v1_phase_claims.rs` (migrated from the removed seams to the public commands; `seed_accepted_plan` replaced by the public plan flow).
+
+Test commands and results (run from `core/`): `cargo fmt --check` clean; `cargo clippy --all-targets -- -D warnings` clean; `cargo test --workspace` all 19 suites pass (317 lib tests incl. 13 content command + 14 content model unit tests; 19 documents-and-submissions, 23 reports, 11 phase-claims integration tests); `cargo test --workspace --doc` pass; coverage via `cargo llvm-cov` + `node scripts/coverage-report.ts --dir coverage --report core`: unit 96.9% (gate ≥ 95), integration 93.1% (gate ≥ 70), union 96.9% (gate ≥ 92); `python3 plan/validate.py` PASS. No reproduced limitation; the served contract in `openapi/shepherd.yaml` is untouched — all document operations are core-only until step 015.
+
+Owner decisions recorded during planning (2026-10-12): terminal unarchived owners accept only `note`-kind documents (isolated in `DocumentKind::allowed_on_terminal_owner`, one line to widen); re-selecting the already-selected revision is a no-op success after the full guard chain (acceptance retained, no revision bump, no event); selection during another actor's plan claim is allowed for any permitted writer — the active-work guard is phase-based (`task_execute_or_review_work`: execute/review claims and pending submissions block, plan claims never); link scheme-safety (http/https only, no userinfo, no javascript/data/file) applies to both document links and report/session links through one shared validator.
+
+Temporary interfaces (next-step dependencies): `select_task_plan` uses `domain_transaction` + `CommandResult<Task>` following the `update_task` precedent because `Task` is not serde-serializable — wire idempotency for Task-returning operations is resolved uniformly in step 015. `Store::report_failpoint` and `complete_task_for_test` remain test-only drivers; `testing::seed_submission`/`seed_claim` remain until step 012's review commands. Step-012 obligation carried over from the 010 handoff: plan rejection must clear both `selected_plan_revision_id` and `accepted_plan_submission_id` with a regression test.
+
+Next eligible step: [012 — reviews](012-reviews.md), which consumes the pending submissions produced here.
