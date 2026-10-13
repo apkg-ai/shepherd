@@ -1172,6 +1172,124 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn archived_project_and_epic_owners_reject_mutations() {
+        let f = fixture(false).await;
+        let epic_doc = doc(&f, DocumentOwner::Epic(f.epic), DocumentKind::Brief).await;
+
+        // A second, work-free project: archiving it must not touch the
+        // fixture task, and archive_project refuses nonterminal work.
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let empty = f
+            .store
+            .create_project(
+                ctx(&f.owner, &f.clock, None),
+                ProjectCreate {
+                    name: "Empty".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let project_doc = f
+            .store
+            .create_document(
+                ctx(&f.owner, &f.clock, None),
+                empty.id,
+                input(DocumentOwner::Project(empty.id), DocumentKind::Decision),
+                "h",
+            )
+            .await
+            .unwrap()
+            .into_inner();
+
+        f.clock.advance(TimeDelta::milliseconds(2));
+        f.store
+            .archive_project(
+                ctx(&f.owner, &f.clock, Some(empty.revision.value())),
+                empty.id,
+                "cleanup".into(),
+            )
+            .await
+            .unwrap();
+        let err = f
+            .store
+            .create_document(
+                ctx(&f.owner, &f.clock, None),
+                empty.id,
+                input(DocumentOwner::Project(empty.id), DocumentKind::Note),
+                "h",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
+        // append() is fixture-project bound; the project-owned document
+        // lives in the second project.
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let err = f
+            .store
+            .create_document_revision(
+                ctx(&f.owner, &f.clock, Some(1)),
+                empty.id,
+                project_doc.id,
+                RevisionCreate {
+                    body: "late".to_string(),
+                    links: Vec::new(),
+                },
+                "rev-h",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
+
+        // The epic owner needs a terminal epic before it can archive.
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let epic_revision: i64 = sqlx::query_scalar("SELECT revision FROM epics WHERE id = ?1")
+            .bind(f.epic.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        f.store
+            .cancel_epic(
+                ctx(&f.owner, &f.clock, Some(epic_revision)),
+                f.project,
+                f.epic,
+                "obsolete".into(),
+            )
+            .await
+            .unwrap();
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let epic_revision: i64 = sqlx::query_scalar("SELECT revision FROM epics WHERE id = ?1")
+            .bind(f.epic.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        f.store
+            .archive_epic(
+                ctx(&f.owner, &f.clock, Some(epic_revision)),
+                f.project,
+                f.epic,
+                "cleanup".into(),
+            )
+            .await
+            .unwrap();
+        let err = f
+            .store
+            .create_document(
+                ctx(&f.owner, &f.clock, None),
+                f.project,
+                input(DocumentOwner::Epic(f.epic), DocumentKind::Note),
+                "h",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
+        let err = append(&f, &epic_doc, Some(1), "late").await.unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
+    }
+
+    #[tokio::test]
     async fn execute_claims_block_selected_plan_appends_only() {
         let f = fixture(true).await;
         let plan = doc(&f, DocumentOwner::Task(f.task.id), DocumentKind::Plan).await;
