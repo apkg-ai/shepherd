@@ -755,10 +755,12 @@ async fn concurrent_appends_have_one_winner() {
 
     let store_b = open_store(&s.dir, s.clock.clone()).await;
     s.clock.advance(TimeDelta::milliseconds(2));
-    let winner = s
-        .store
-        .create_document_revision(
-            ctx(&s.owner, s.clock.now(), Some(1)),
+    // Both appends start on the same revision with independent pools; only
+    // one can win the command_lock write reservation.
+    let now = s.clock.now();
+    let (a, b) = tokio::join!(
+        s.store.create_document_revision(
+            ctx(&s.owner, now, Some(1)),
             project,
             document.id,
             RevisionCreate {
@@ -766,16 +768,9 @@ async fn concurrent_appends_have_one_winner() {
                 links: Vec::new(),
             },
             "rev-a",
-        )
-        .await
-        .unwrap()
-        .into_inner();
-    assert_eq!(winner.number, 2);
-
-    s.clock.advance(TimeDelta::milliseconds(2));
-    let err = store_b
-        .create_document_revision(
-            ctx(&s.owner, s.clock.now(), Some(1)),
+        ),
+        store_b.create_document_revision(
+            ctx(&s.owner, now, Some(1)),
             project,
             document.id,
             RevisionCreate {
@@ -783,25 +778,31 @@ async fn concurrent_appends_have_one_winner() {
                 links: Vec::new(),
             },
             "rev-b",
-        )
-        .await
-        .unwrap_err();
+        ),
+    );
+
+    let (winner, loser) = match (a, b) {
+        (Ok(winner), Err(loser)) => (winner, loser),
+        (Err(loser), Ok(winner)) => (winner, loser),
+        (Ok(_), Ok(_)) => panic!("both concurrent appends succeeded"),
+        (Err(_), Err(_)) => panic!("both concurrent appends failed"),
+    };
+    assert_eq!(winner.into_inner().number, 2);
+    // The loser waited for the winner's commit, re-read the bumped revision
+    // and failed its stale If-Match.
     assert!(matches!(
-        err,
+        loser,
         DomainError::RevisionConflict {
             expected: 1,
             actual: 2
         }
     ));
     // Either pool serves the winning append.
-    let via_b = store_b
-        .get_document_revision(
-            &project,
-            &shepherd_core::model::DocumentRevisionId::from_uuid(winner.id.as_uuid()),
-        )
+    let body: String = sqlx::query_scalar("SELECT body FROM document_revisions WHERE number = 2")
+        .fetch_one(store_b.pool())
         .await
         .unwrap();
-    assert_eq!(via_b.body, "pool a");
+    assert!(body == "pool a" || body == "pool b");
     assert_eq!(revision_count(&store_b, &document).await, 2);
 }
 
