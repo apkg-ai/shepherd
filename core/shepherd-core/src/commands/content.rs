@@ -67,11 +67,14 @@ pub(super) async fn validate_task_owned_revisions(
     Ok(())
 }
 
-/// A successful execute report must cite at least one task-owned output
-/// revision of kind finding or handoff (plan/04 session rules); ownership is
-/// validated separately.
+/// A successful execute report must cite at least one output revision of kind
+/// finding or handoff owned by this task (plan/04 session rules). The query is
+/// intrinsically scoped, so no caller can validate ownership separately from
+/// kind.
 pub(super) async fn require_output_revision(
     conn: &mut SqliteConnection,
+    project: &ProjectId,
+    task: &TaskId,
     revision_ids: &[Uuid],
 ) -> Result<(), DomainError> {
     let rejection = || DomainError::Validation {
@@ -86,8 +89,13 @@ pub(super) async fn require_output_revision(
     let mut builder = QueryBuilder::<Sqlite>::new(
         "SELECT 1 FROM document_revisions dr \
          JOIN documents d ON d.id = dr.document_id \
-         WHERE d.kind IN ('finding', 'handoff') AND dr.id IN (",
+         WHERE d.kind IN ('finding', 'handoff') \
+         AND d.owner_kind = 'task' AND d.owner_id = ",
     );
+    builder.push_bind(task.to_string());
+    builder.push(" AND d.project_id = ");
+    builder.push_bind(project.to_string());
+    builder.push(" AND dr.id IN (");
     let mut separated = builder.separated(", ");
     for id in revision_ids {
         separated.push_bind(id.to_string());
@@ -969,6 +977,20 @@ mod tests {
         .unwrap()
     }
 
+    async fn output_gate(
+        store: &Store,
+        project: ProjectId,
+        task: TaskId,
+        ids: &[Uuid],
+    ) -> Result<(), DomainError> {
+        let ids = ids.to_vec();
+        store
+            .domain_transaction(move |tx| {
+                Box::pin(async move { require_output_revision(tx, &project, &task, &ids).await })
+            })
+            .await
+    }
+
     #[tokio::test]
     async fn documents_are_created_for_all_owner_kinds() {
         let f = fixture(false).await;
@@ -1589,5 +1611,68 @@ mod tests {
             }
             other => panic!("expected validation error, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn output_revision_gate_is_scoped_without_separate_ownership_checks() {
+        let f = fixture(false).await;
+        let finding = doc(&f, DocumentOwner::Task(f.task.id), DocumentKind::Finding).await;
+        let note = doc(&f, DocumentOwner::Task(f.task.id), DocumentKind::Note).await;
+        let finding_rev = finding.latest_revision_id.as_uuid();
+        let note_rev = note.latest_revision_id.as_uuid();
+        let project = f.project;
+        let task_id = f.task.id;
+
+        output_gate(&f.store, project, task_id, &[finding_rev])
+            .await
+            .unwrap();
+
+        // A foreign task id must fail the gate on its own.
+        let foreign_task = TaskId::generate(f.clock.now());
+        let err = output_gate(&f.store, project, foreign_task, &[finding_rev])
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "document_revision_ids",
+                ..
+            }
+        ));
+
+        // A foreign project id must fail the gate on its own.
+        let foreign_project = ProjectId::generate(f.clock.now());
+        let err = output_gate(&f.store, foreign_project, task_id, &[finding_rev])
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "document_revision_ids",
+                ..
+            }
+        ));
+
+        // Task-owned but not an output kind, and the empty list.
+        let err = output_gate(&f.store, project, task_id, &[note_rev])
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "document_revision_ids",
+                ..
+            }
+        ));
+        let err = output_gate(&f.store, project, task_id, &[])
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "document_revision_ids",
+                ..
+            }
+        ));
     }
 }

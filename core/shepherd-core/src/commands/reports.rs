@@ -105,7 +105,13 @@ impl Store {
 
                 if input.outcome == SessionOutcome::Succeeded {
                     if row.phase == ClaimPhase::Execute {
-                        require_output_revision(tx, &input.document_revision_ids).await?;
+                        require_output_revision(
+                            tx,
+                            &project,
+                            &row.task_id,
+                            &input.document_revision_ids,
+                        )
+                        .await?;
                     }
                     if row.phase == ClaimPhase::Plan {
                         // selectTaskPlan enforces plan-kind task ownership when
