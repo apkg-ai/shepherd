@@ -15,7 +15,9 @@ pub use content::{
     Document, DocumentCreate, DocumentId, DocumentKind, DocumentOwner, DocumentOwnerKind,
     DocumentRevision, DocumentRevisionId, RevisionCreate, SelectPlanInput,
 };
-pub(crate) use content::{validate_document_create, validate_revision_create};
+pub(crate) use content::{
+    revision_number_from_stored, validate_document_create, validate_revision_create,
+};
 pub use epic::{Epic, EpicCreate, EpicId, EpicStatus};
 pub use goal::{Goal, GoalCreate, GoalId, TextPatch, goal_completed};
 pub use identity::{

@@ -300,7 +300,10 @@ pub(crate) fn validate_link_entry(field: &'static str, value: &str) -> Result<()
 fn is_invisible(c: char) -> bool {
     matches!(
         c,
-        '\u{00AD}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}'
+        '\u{00AD}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2069}'
             | '\u{FEFF}'
     )
 }
@@ -628,6 +631,7 @@ mod tests {
             "https://exam\u{00AD}ple.com/x",
             "https://example.com/\u{200B}x",
             "https://example.com/\u{202E}x",
+            "https://example.com/\u{2067}x",
             "\u{FEFF}https://example.com",
             "",
         ] {

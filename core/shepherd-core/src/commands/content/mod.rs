@@ -269,6 +269,8 @@ fn revision_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<DocumentRevision, 
     let id: String = row.try_get("id")?;
     let document_id: String = row.try_get("document_id")?;
     let number: i64 = row.try_get("number")?;
+    let number = crate::model::revision_number_from_stored(number)
+        .ok_or_else(|| StorageError::Corrupt(format!("document_revisions.number: {number}")))?;
     let body: String = row.try_get("body")?;
     let links: String = row.try_get("links")?;
     let actor_id: String = row.try_get("actor_id")?;
