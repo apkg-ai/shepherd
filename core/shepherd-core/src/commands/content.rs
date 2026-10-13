@@ -758,7 +758,9 @@ impl Store {
                 .push_bind(id.clone())
                 .push("))");
         }
-        // Revisions list newest first (plan/07).
+        // Revisions list newest first (plan/07). The keyset tie-break is
+        // (created_at, id), not number: two appends within one clock tick can
+        // list out of number order until step 015's wire-typed lists.
         builder
             .push(" ORDER BY created_at DESC, id DESC LIMIT ")
             .push_bind(limit + 1);
