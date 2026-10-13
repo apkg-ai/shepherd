@@ -94,59 +94,31 @@ impl DocumentKind {
     }
 }
 
-mod serde_document_id {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use uuid::Uuid;
+macro_rules! typed_id_serde {
+    ($module:ident, $ty:ident) => {
+        mod $module {
+            use serde::{Deserialize, Deserializer, Serialize, Serializer};
+            use uuid::Uuid;
 
-    use super::DocumentId;
+            use super::$ty;
 
-    pub fn serialize<S: Serializer>(id: &DocumentId, s: S) -> Result<S::Ok, S::Error> {
-        id.to_string().serialize(s)
-    }
+            pub fn serialize<S: Serializer>(id: &$ty, s: S) -> Result<S::Ok, S::Error> {
+                id.to_string().serialize(s)
+            }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<DocumentId, D::Error> {
-        let text = String::deserialize(d)?;
-        Uuid::parse_str(&text)
-            .map(DocumentId::from_uuid)
-            .map_err(serde::de::Error::custom)
-    }
+            pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<$ty, D::Error> {
+                let text = String::deserialize(d)?;
+                Uuid::parse_str(&text)
+                    .map($ty::from_uuid)
+                    .map_err(serde::de::Error::custom)
+            }
+        }
+    };
 }
 
-mod serde_document_revision_id {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use uuid::Uuid;
-
-    use super::DocumentRevisionId;
-
-    pub fn serialize<S: Serializer>(id: &DocumentRevisionId, s: S) -> Result<S::Ok, S::Error> {
-        id.to_string().serialize(s)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<DocumentRevisionId, D::Error> {
-        let text = String::deserialize(d)?;
-        Uuid::parse_str(&text)
-            .map(DocumentRevisionId::from_uuid)
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-mod serde_project_id {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use uuid::Uuid;
-
-    use crate::model::ProjectId;
-
-    pub fn serialize<S: Serializer>(id: &ProjectId, s: S) -> Result<S::Ok, S::Error> {
-        id.to_string().serialize(s)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<ProjectId, D::Error> {
-        let text = String::deserialize(d)?;
-        Uuid::parse_str(&text)
-            .map(ProjectId::from_uuid)
-            .map_err(serde::de::Error::custom)
-    }
-}
+typed_id_serde!(serde_document_id, DocumentId);
+typed_id_serde!(serde_document_revision_id, DocumentRevisionId);
+typed_id_serde!(serde_project_id, ProjectId);
 
 mod serde_revision {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -161,6 +133,26 @@ mod serde_revision {
         let value = i64::deserialize(d)?;
         Revision::from_stored(value)
             .ok_or_else(|| serde::de::Error::custom("revision must be at least 1"))
+    }
+}
+
+// plan/contracts DocumentRevision: number minimum 1, int32 maximum.
+mod serde_number {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(number: &i64, s: S) -> Result<S::Ok, S::Error> {
+        number.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+        let value = i64::deserialize(d)?;
+        if (1..=i32::MAX as i64).contains(&value) {
+            Ok(value)
+        } else {
+            Err(serde::de::Error::custom(
+                "number must be between 1 and 2147483647",
+            ))
+        }
     }
 }
 
@@ -191,6 +183,7 @@ pub struct DocumentRevision {
     pub id: DocumentRevisionId,
     #[serde(with = "serde_document_id")]
     pub document_id: DocumentId,
+    #[serde(with = "serde_number")]
     pub number: i64,
     pub body: String,
     pub links: Vec<String>,
@@ -452,6 +445,28 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("revision must be at least 1"));
+    }
+
+    #[test]
+    fn revision_number_outside_the_contract_range_fails_deserialization() {
+        let json = |number: &str| {
+            format!(
+                r#"{{"id":"00000000-0000-0000-0000-000000000000",
+                    "document_id":"00000000-0000-0000-0000-000000000000",
+                    "number":{number},"body":"","links":[],
+                    "actor_id":"00000000-0000-0000-0000-000000000000",
+                    "created_at":"2026-09-14T00:00:00.000Z"}}"#
+            )
+        };
+        assert!(serde_json::from_str::<DocumentRevision>(&json("1")).is_ok());
+        for number in ["0", "-1", "2147483648"] {
+            let err = serde_json::from_str::<DocumentRevision>(&json(number)).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("number must be between 1 and 2147483647"),
+                "{number}"
+            );
+        }
     }
 
     #[test]
