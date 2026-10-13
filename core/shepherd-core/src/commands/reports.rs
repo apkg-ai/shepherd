@@ -13,9 +13,7 @@ use crate::storage::rows::format_ts;
 use crate::workflow;
 
 use super::claims::{load_claim_row, reconcile_task_claims};
-use super::content::{
-    require_output_revision, selected_plan_revision, validate_task_owned_revisions,
-};
+use super::content::{require_output_kinds, selected_plan_revision, task_owned_revision_kinds};
 use super::{CommandContext, PendingEvent, Replay, append_events, missing_after_write, task_scope};
 
 /// Submissions are accepted inline under policy none, pending otherwise.
@@ -95,7 +93,7 @@ impl Store {
                 // session row or the ownership query.
                 let mut seen = std::collections::HashSet::new();
                 input.document_revision_ids.retain(|id| seen.insert(*id));
-                validate_task_owned_revisions(
+                let cited_kinds = task_owned_revision_kinds(
                     tx,
                     &project,
                     &row.task_id,
@@ -105,24 +103,19 @@ impl Store {
 
                 if input.outcome == SessionOutcome::Succeeded {
                     if row.phase == ClaimPhase::Execute {
-                        require_output_revision(
-                            tx,
-                            &project,
-                            &row.task_id,
-                            &input.document_revision_ids,
-                        )
-                        .await?;
+                        require_output_kinds(&cited_kinds)?;
                     }
                     if row.phase == ClaimPhase::Plan {
                         // selectTaskPlan enforces plan-kind task ownership when
-                        // writing this column; update_task only clears it.
+                        // writing this column; update_task only clears it. The
+                        // missing selection is task state, not a request field.
                         let selected = selected_plan_revision(tx, row.task_id).await?;
                         let Some(selected) = selected else {
-                            return Err(DomainError::Validation {
-                                field: "selected_plan_revision_id",
-                                message: "successful plan report requires a selected task plan"
+                            return Err(DomainError::InvalidState(
+                                "successful plan report requires a selected task plan; \
+                                 call selectTaskPlan first"
                                     .into(),
-                            });
+                            ));
                         };
                         if !input.document_revision_ids.contains(&selected) {
                             return Err(DomainError::Validation {
@@ -439,7 +432,7 @@ mod tests {
         Actor, ActorKind, Clock, CommandId, EpicCreate, GoalCreate, ProjectCreate, Task,
         TaskCreate, TaskStatus, TestClock,
     };
-    use crate::model::{DocumentCreate, DocumentKind, DocumentOwner, SelectPlanInput};
+    use crate::model::{DocumentKind, SelectPlanInput};
     use crate::storage::open;
     use crate::storage::rows::insert_actor;
     use crate::storage::testing::{seed_actor, store_options, test_clock};
@@ -543,17 +536,9 @@ mod tests {
             .await
             .unwrap()
             .value;
-        let plan_rev =
-            create_task_doc(&store, &owner, &clock, project, task.id, DocumentKind::Plan).await;
-        let finding_rev = create_task_doc(
-            &store,
-            &owner,
-            &clock,
-            project,
-            task.id,
-            DocumentKind::Finding,
-        )
-        .await;
+        let plan_rev = create_task_doc(&store, &owner, project, task.id, DocumentKind::Plan).await;
+        let finding_rev =
+            create_task_doc(&store, &owner, project, task.id, DocumentKind::Finding).await;
         Fixture {
             _dir: dir,
             clock,
@@ -569,27 +554,12 @@ mod tests {
     async fn create_task_doc(
         store: &Store,
         owner: &Actor,
-        clock: &TestClock,
         project: ProjectId,
         task: TaskId,
         kind: DocumentKind,
     ) -> Uuid {
-        store
-            .create_document(
-                ctx(owner, clock, None),
-                project,
-                DocumentCreate {
-                    owner: DocumentOwner::Task(task),
-                    kind,
-                    title: format!("{} doc", kind.as_str()),
-                    body: String::new(),
-                    links: Vec::new(),
-                },
-                "doc-hash",
-            )
+        crate::storage::testing::create_task_document(store, owner, project, task, kind)
             .await
-            .unwrap()
-            .into_inner()
             .latest_revision_id
             .as_uuid()
     }
@@ -895,13 +865,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(matches!(
-            err,
-            DomainError::Validation {
-                field: "selected_plan_revision_id",
-                ..
-            }
-        ));
+        assert!(matches!(err, DomainError::InvalidState(_)));
         assert_eq!(claim_status(&f, claim_id).await, "active");
         let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions")
             .fetch_one(f.store.pool())

@@ -236,7 +236,11 @@ pub mod testing {
     use std::sync::Arc;
 
     use super::{Store, StoreOptions, TestCodec, TestKeyProvider};
-    use crate::model::{Actor, ActorId, ActorKind, TestClock};
+    use crate::commands::CommandContext;
+    use crate::model::{
+        Actor, ActorId, ActorKind, CommandId, Document, DocumentCreate, DocumentKind,
+        DocumentOwner, ProjectId, TaskId, TestClock,
+    };
 
     pub fn test_clock() -> Arc<TestClock> {
         Arc::new(TestClock::new("2026-09-14T00:00:00Z".parse().unwrap()))
@@ -262,6 +266,40 @@ pub mod testing {
             .await
             .unwrap();
         actor
+    }
+
+    /// Command-driven task document fixture shared by unit and integration
+    /// tests: one empty document of the given kind through the public command.
+    pub async fn create_task_document(
+        store: &Store,
+        actor: &Actor,
+        project: ProjectId,
+        task: TaskId,
+        kind: DocumentKind,
+    ) -> Document {
+        let now = store.clock().now();
+        store
+            .create_document(
+                CommandContext {
+                    actor: actor.clone(),
+                    command_id: CommandId::generate(now),
+                    idempotency_key: uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+                    expected_revision: None,
+                    now,
+                },
+                project,
+                DocumentCreate {
+                    owner: DocumentOwner::Task(task),
+                    kind,
+                    title: format!("{} doc", kind.as_str()),
+                    body: String::new(),
+                    links: Vec::new(),
+                },
+                "test-doc-hash",
+            )
+            .await
+            .unwrap()
+            .into_inner()
     }
 
     pub fn store_options(dir: &Path, db_name: &str, clock: Arc<TestClock>) -> StoreOptions {

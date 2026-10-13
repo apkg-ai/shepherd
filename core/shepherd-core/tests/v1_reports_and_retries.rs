@@ -166,23 +166,7 @@ async fn create_task_doc(
     kind: DocumentKind,
 ) -> (String, String) {
     s.clock.advance(TimeDelta::milliseconds(2));
-    let document = s
-        .store
-        .create_document(
-            ctx(&s.owner, s.clock.now(), None),
-            project,
-            DocumentCreate {
-                owner: DocumentOwner::Task(task),
-                kind,
-                title: format!("{} doc", kind.as_str()),
-                body: String::new(),
-                links: Vec::new(),
-            },
-            "doc-hash",
-        )
-        .await
-        .unwrap()
-        .into_inner();
+    let document = testing::create_task_document(&s.store, &s.owner, project, task, kind).await;
     (
         document.id.to_string(),
         document.latest_revision_id.to_string(),
@@ -1353,13 +1337,7 @@ async fn successful_plan_report_requires_a_prior_plan_selection() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(
-        err,
-        DomainError::Validation {
-            field: "selected_plan_revision_id",
-            ..
-        }
-    ));
+    assert!(matches!(err, DomainError::InvalidState(_)));
     assert_eq!(claim_status(&s.store, grant.claim.id).await, "active");
     assert_eq!(session_count(&s.store, task.id).await, 0);
 }

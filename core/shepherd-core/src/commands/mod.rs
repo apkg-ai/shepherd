@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{
-    Actor, ActorId, CommandId, DependencyId, DocumentId, Epic, EpicId, EventId, GoalId,
+    Actor, ActorId, ClaimPhase, CommandId, DependencyId, DocumentId, Epic, EpicId, EventId, GoalId,
     IDEMPOTENCY_TTL_DAYS, ProjectId, Revision, Task, TaskId, TaskTypeId,
 };
 use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
@@ -267,9 +267,12 @@ pub(crate) fn require_revision(expected: Option<i64>, actual: Revision) -> Resul
 // or a pending submission (plan/03, plan/04 FLOW-03). The optional phase list
 // narrows which claim phases count — plan claims never block selection or
 // selected-plan appends (plan/03, plan/04 row "select plan").
-pub(crate) fn claim_work_predicate(now_placeholder: &str, phases: Option<&str>) -> String {
+pub(crate) fn claim_work_predicate(now_placeholder: &str, phases: Option<&[ClaimPhase]>) -> String {
     let phase_filter = phases
-        .map(|list| format!(" AND c.phase IN ({list})"))
+        .map(|phases| {
+            let list: Vec<&str> = phases.iter().map(|phase| phase.as_str()).collect();
+            format!(" AND c.phase IN ('{}')", list.join("', '"))
+        })
         .unwrap_or_default();
     format!(
         "(EXISTS (SELECT 1 FROM claims c WHERE c.task_id = t.id \

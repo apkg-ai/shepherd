@@ -550,6 +550,21 @@ pub(crate) async fn epic_exists(
     )
 }
 
+pub(crate) async fn task_exists(
+    conn: &mut SqliteConnection,
+    project: &ProjectId,
+    task: &TaskId,
+) -> Result<bool, DomainError> {
+    Ok(
+        sqlx::query("SELECT 1 FROM tasks WHERE id = ?1 AND project_id = ?2")
+            .bind(task.to_string())
+            .bind(project.to_string())
+            .fetch_optional(&mut *conn)
+            .await?
+            .is_some(),
+    )
+}
+
 pub(crate) async fn list_projects(
     conn: &mut SqliteConnection,
     params: &ListParams,

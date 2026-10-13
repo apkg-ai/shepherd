@@ -787,7 +787,8 @@ async fn concurrent_appends_have_one_winner() {
         (Ok(_), Ok(_)) => panic!("both concurrent appends succeeded"),
         (Err(_), Err(_)) => panic!("both concurrent appends failed"),
     };
-    assert_eq!(winner.into_inner().number, 2);
+    let winner = winner.into_inner();
+    assert_eq!(winner.number, 2);
     // The loser waited for the winner's commit, re-read the bumped revision
     // and failed its stale If-Match.
     assert!(matches!(
@@ -797,12 +798,12 @@ async fn concurrent_appends_have_one_winner() {
             actual: 2
         }
     ));
-    // Either pool serves the winning append.
+    // Either pool serves the winning append, body and all.
     let body: String = sqlx::query_scalar("SELECT body FROM document_revisions WHERE number = 2")
         .fetch_one(store_b.pool())
         .await
         .unwrap();
-    assert!(body == "pool a" || body == "pool b");
+    assert_eq!(body, winner.body);
     assert_eq!(revision_count(&store_b, &document).await, 2);
 }
 

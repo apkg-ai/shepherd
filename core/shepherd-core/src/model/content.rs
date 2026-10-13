@@ -92,6 +92,11 @@ impl DocumentKind {
     pub(crate) fn allowed_on_terminal_owner(self) -> bool {
         matches!(self, DocumentKind::Note)
     }
+
+    // plan/04: successful execution cites at least one finding/handoff output.
+    pub(crate) fn is_execute_output(self) -> bool {
+        matches!(self, DocumentKind::Finding | DocumentKind::Handoff)
+    }
 }
 
 macro_rules! typed_id_serde {
@@ -136,7 +141,12 @@ mod serde_revision {
     }
 }
 
-// plan/contracts DocumentRevision: number minimum 1, int32 maximum.
+// plan/contracts DocumentRevision: number minimum 1, int32 maximum. One guard
+// shared by serde and the storage row mapper.
+pub(crate) fn revision_number_from_stored(value: i64) -> Option<i64> {
+    (1..=i32::MAX as i64).contains(&value).then_some(value)
+}
+
 mod serde_number {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -146,13 +156,8 @@ mod serde_number {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
         let value = i64::deserialize(d)?;
-        if (1..=i32::MAX as i64).contains(&value) {
-            Ok(value)
-        } else {
-            Err(serde::de::Error::custom(
-                "number must be between 1 and 2147483647",
-            ))
-        }
+        super::revision_number_from_stored(value)
+            .ok_or_else(|| serde::de::Error::custom("number must be between 1 and 2147483647"))
     }
 }
 
@@ -290,8 +295,21 @@ pub(crate) fn validate_link_entry(field: &'static str, value: &str) -> Result<()
 
 // plan/07: HTTP(S) artifact links only; reject credentials in URLs and
 // javascript/data/file schemes. Hand-rolled: no url crate is pinned for core.
+// Invisible Unicode format characters (soft hyphen, zero-width, bidi
+// overrides, BOM) make a stored link render as a different destination.
+fn is_invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}'
+            | '\u{FEFF}'
+    )
+}
+
 fn link_is_safe(value: &str) -> bool {
-    if value.chars().any(|c| c.is_control() || c.is_whitespace()) {
+    if value
+        .chars()
+        .any(|c| c.is_control() || c.is_whitespace() || is_invisible(c))
+    {
         return false;
     }
     let Some((scheme, rest)) = value.split_once("://") else {
@@ -607,6 +625,10 @@ mod tests {
             "http://user@example.com",
             "https://example.com/with space",
             "https://example.com/with\nnewline",
+            "https://exam\u{00AD}ple.com/x",
+            "https://example.com/\u{200B}x",
+            "https://example.com/\u{202E}x",
+            "\u{FEFF}https://example.com",
             "",
         ] {
             let err = validate_link_entry("links", link).unwrap_err();
