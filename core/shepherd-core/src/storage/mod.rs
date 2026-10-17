@@ -236,7 +236,11 @@ pub mod testing {
     use std::sync::Arc;
 
     use super::{Store, StoreOptions, TestCodec, TestKeyProvider};
-    use crate::model::{Actor, ActorId, ActorKind, TestClock};
+    use crate::commands::CommandContext;
+    use crate::model::{
+        Actor, ActorId, ActorKind, CommandId, Document, DocumentCreate, DocumentKind,
+        DocumentOwner, ProjectId, TaskId, TestClock,
+    };
 
     pub fn test_clock() -> Arc<TestClock> {
         Arc::new(TestClock::new("2026-09-14T00:00:00Z".parse().unwrap()))
@@ -262,6 +266,40 @@ pub mod testing {
             .await
             .unwrap();
         actor
+    }
+
+    /// Command-driven task document fixture shared by unit and integration
+    /// tests: one empty document of the given kind through the public command.
+    pub async fn create_task_document(
+        store: &Store,
+        actor: &Actor,
+        project: ProjectId,
+        task: TaskId,
+        kind: DocumentKind,
+    ) -> Document {
+        let now = store.clock().now();
+        store
+            .create_document(
+                CommandContext {
+                    actor: actor.clone(),
+                    command_id: CommandId::generate(now),
+                    idempotency_key: uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+                    expected_revision: None,
+                    now,
+                },
+                project,
+                DocumentCreate {
+                    owner: DocumentOwner::Task(task),
+                    kind,
+                    title: format!("{} doc", kind.as_str()),
+                    body: String::new(),
+                    links: Vec::new(),
+                },
+                "test-doc-hash",
+            )
+            .await
+            .unwrap()
+            .into_inner()
     }
 
     pub fn store_options(dir: &Path, db_name: &str, clock: Arc<TestClock>) -> StoreOptions {
@@ -305,48 +343,7 @@ pub mod testing {
         id
     }
 
-    /// Direct-SQL document + revision fixture for report tests.
-    pub async fn seed_task_document(
-        pool: &sqlx::SqlitePool,
-        project: crate::model::ProjectId,
-        task: crate::model::TaskId,
-        actor: crate::model::ActorId,
-        kind: &str,
-        now: &str,
-    ) -> (String, String) {
-        let doc_id = test_uuid();
-        let rev_id = test_uuid();
-        let mut tx = pool.begin().await.unwrap();
-        sqlx::query(
-            "INSERT INTO documents (id, revision, created_at, updated_at, project_id, \
-             owner_kind, owner_id, kind, title, latest_revision_id) \
-             VALUES (?1, 1, ?2, ?2, ?3, 'task', ?4, ?5, ?5, ?6)",
-        )
-        .bind(&doc_id)
-        .bind(now)
-        .bind(project.to_string())
-        .bind(task.to_string())
-        .bind(kind)
-        .bind(&rev_id)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO document_revisions (id, document_id, number, body, links, \
-             actor_id, created_at) VALUES (?1, ?2, 1, '', '[]', ?3, ?4)",
-        )
-        .bind(&rev_id)
-        .bind(&doc_id)
-        .bind(actor.to_string())
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
-        (doc_id, rev_id)
-    }
-
-    /// Direct-SQL session + submission fixture: commands land in steps 010/011.
+    /// Direct-SQL session + submission fixture: review rows land in step 012.
     pub async fn seed_submission(
         pool: &sqlx::SqlitePool,
         task: crate::model::TaskId,

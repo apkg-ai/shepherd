@@ -1,4 +1,5 @@
 mod claim;
+mod content;
 mod epic;
 mod goal;
 mod identity;
@@ -9,6 +10,13 @@ mod task;
 pub use claim::{
     Claim, ClaimGrant, ClaimInput, ClaimPhase, ClaimStatus, DEFAULT_TTL_SECONDS, MAX_TTL_SECONDS,
     MIN_TTL_SECONDS, RenewInput, validate_ttl,
+};
+pub use content::{
+    Document, DocumentCreate, DocumentId, DocumentKind, DocumentOwner, DocumentOwnerKind,
+    DocumentRevision, DocumentRevisionId, RevisionCreate, SelectPlanInput,
+};
+pub(crate) use content::{
+    revision_number_from_stored, validate_document_create, validate_revision_create,
 };
 pub use epic::{Epic, EpicCreate, EpicId, EpicStatus};
 pub use goal::{Goal, GoalCreate, GoalId, TextPatch, goal_completed};
@@ -75,6 +83,32 @@ macro_rules! typed_uuid {
 }
 
 pub(crate) use typed_uuid;
+
+// Typed-uuid ids serialize through their string form (no serde feature on the
+// uuid dependency); one macro keeps every entity family's wire format equal.
+macro_rules! typed_id_serde {
+    ($vis:vis $module:ident, $ty:ident) => {
+        $vis mod $module {
+            use serde::{Deserialize, Deserializer, Serialize, Serializer};
+            use uuid::Uuid;
+
+            use super::$ty;
+
+            pub fn serialize<S: Serializer>(id: &$ty, s: S) -> Result<S::Ok, S::Error> {
+                id.to_string().serialize(s)
+            }
+
+            pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<$ty, D::Error> {
+                let text = String::deserialize(d)?;
+                Uuid::parse_str(&text)
+                    .map($ty::from_uuid)
+                    .map_err(serde::de::Error::custom)
+            }
+        }
+    };
+}
+
+pub(crate) use typed_id_serde;
 
 macro_rules! resource_status {
     ($name:ident) => {

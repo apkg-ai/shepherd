@@ -1,10 +1,10 @@
-use sqlx::{QueryBuilder, Sqlite, SqliteConnection};
+use sqlx::SqliteConnection;
 use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::lease;
 use crate::model::{
-    ActorId, ClaimPhase, ClaimStatus, ProjectId, ReportInput, ReviewPolicy, Session,
+    ActorId, ClaimPhase, ClaimStatus, DocumentKind, ProjectId, ReportInput, ReviewPolicy, Session,
     SessionOutcome, TaskId, TaskPhase, validate_report_input,
 };
 use crate::queries::hierarchy::task_row;
@@ -13,54 +13,8 @@ use crate::storage::rows::format_ts;
 use crate::workflow;
 
 use super::claims::{load_claim_row, reconcile_task_claims};
+use super::content::{require_output_kinds, selected_plan_revision, task_owned_revision_kinds};
 use super::{CommandContext, PendingEvent, Replay, append_events, missing_after_write, task_scope};
-
-/// Validate that every UUID in `revision_ids` belongs to a document owned by the task.
-async fn validate_document_revisions(
-    conn: &mut SqliteConnection,
-    project: &ProjectId,
-    task: &TaskId,
-    revision_ids: &[Uuid],
-) -> Result<(), DomainError> {
-    if revision_ids.is_empty() {
-        return Ok(());
-    }
-    let task_str = task.to_string();
-    let project_str = project.to_string();
-    let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT dr.id FROM document_revisions dr \
-         JOIN documents d ON d.id = dr.document_id \
-         WHERE d.owner_kind = 'task' AND d.owner_id = ",
-    );
-    builder.push_bind(&task_str);
-    builder.push(" AND d.project_id = ");
-    builder.push_bind(&project_str);
-    builder.push(" AND dr.id IN (");
-    let mut separated = builder.separated(", ");
-    for id in revision_ids {
-        separated.push_bind(id.to_string());
-    }
-    builder.push(")");
-    let found: Vec<(String,)> = builder
-        .build_query_as()
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(crate::storage::StorageError::from)?;
-    if found.len() != revision_ids.len() {
-        let found_set: std::collections::HashSet<&str> =
-            found.iter().map(|r| r.0.as_str()).collect();
-        let missing = revision_ids
-            .iter()
-            .find(|id| !found_set.contains(id.to_string().as_str()))
-            .map(Uuid::to_string)
-            .unwrap_or_else(|| "unknown".into());
-        return Err(DomainError::Validation {
-            field: "document_revision_ids",
-            message: format!("revision {missing} does not belong to a document owned by this task"),
-        });
-    }
-    Ok(())
-}
 
 /// Submissions are accepted inline under policy none, pending otherwise.
 fn submission_status(policy: ReviewPolicy) -> &'static str {
@@ -114,7 +68,7 @@ impl Store {
                     return Err(DomainError::LeaseInvalid);
                 }
 
-                validate_report_input(&input, row.phase)?;
+                validate_report_input(&input)?;
                 let scope = task_scope(tx, &project, &row.task_id).await?;
                 scope.ensure_unarchived()?;
                 let expected_phase = match row.phase {
@@ -139,7 +93,7 @@ impl Store {
                 // session row or the ownership query.
                 let mut seen = std::collections::HashSet::new();
                 input.document_revision_ids.retain(|id| seen.insert(*id));
-                validate_document_revisions(
+                let cited_kinds = task_owned_revision_kinds(
                     tx,
                     &project,
                     &row.task_id,
@@ -148,35 +102,34 @@ impl Store {
                 .await?;
 
                 if input.outcome == SessionOutcome::Succeeded {
-                    if row.phase == ClaimPhase::Execute && input.document_revision_ids.is_empty() {
-                        return Err(DomainError::Validation {
-                            field: "document_revision_ids",
-                            message: "successful execute report requires at least one \
-                                      task-owned document revision"
-                                .into(),
-                        });
+                    if row.phase == ClaimPhase::Execute {
+                        require_output_kinds(&cited_kinds)?;
                     }
                     if row.phase == ClaimPhase::Plan {
-                        let selected = input.selected_plan_revision_id.unwrap();
+                        // The missing selection is task state, not a request field.
+                        let selected = selected_plan_revision(tx, row.task_id).await?;
+                        let Some(selected) = selected else {
+                            return Err(DomainError::InvalidState(
+                                "successful plan report requires a selected task plan; \
+                                 call selectTaskPlan first"
+                                    .into(),
+                            ));
+                        };
                         if !input.document_revision_ids.contains(&selected) {
                             return Err(DomainError::Validation {
-                                field: "selected_plan_revision_id",
-                                message: "must be one of the reported document_revision_ids".into(),
+                                field: "document_revision_ids",
+                                message: "must include the selected plan revision".into(),
                             });
                         }
-                        let kind: Option<String> = sqlx::query_scalar(
-                            "SELECT d.kind FROM documents d \
-                             JOIN document_revisions dr ON dr.document_id = d.id \
-                             WHERE dr.id = ?1",
-                        )
-                        .bind(selected.to_string())
-                        .fetch_optional(&mut **tx)
-                        .await?;
-                        if kind.as_deref() != Some("plan") {
-                            return Err(DomainError::Validation {
-                                field: "selected_plan_revision_id",
-                                message: "must belong to a plan document".into(),
-                            });
+                        // selectTaskPlan already enforces plan-kind at write
+                        // time; recheck here so a future writer of the column
+                        // cannot smuggle a non-plan selection into acceptance.
+                        if cited_kinds.get(&selected) != Some(&DocumentKind::Plan) {
+                            return Err(DomainError::InvalidState(
+                                "the selected task plan revision no longer references a \
+                                 plan document"
+                                    .into(),
+                            ));
                         }
                     }
                 }
@@ -238,13 +191,7 @@ impl Store {
 
                 // idempotent_transaction re-checks the actor inside this
                 // transaction, so the context snapshot is safe here.
-                let events_ctx = CommandContext {
-                    actor,
-                    command_id,
-                    idempotency_key: Uuid::nil(),
-                    expected_revision: None,
-                    now,
-                };
+                let events_ctx = CommandContext::for_events(actor, command_id, now);
 
                 match (row.phase, input.outcome) {
                     (ClaimPhase::Plan, SessionOutcome::Failed) => {
@@ -266,7 +213,6 @@ impl Store {
                         } else {
                             TaskPhase::PlanReview
                         };
-                        let selected = input.selected_plan_revision_id.unwrap();
 
                         insert_submission(
                             tx,
@@ -286,15 +232,14 @@ impl Store {
                         .await?;
 
                         // Policy none accepts inline; the accepted submission id
-                        // is only written for that policy.
+                        // is only written for that policy. The selection itself
+                        // was persisted earlier by selectTaskPlan.
                         sqlx::query(
                             "UPDATE tasks SET revision = revision + 1, updated_at = ?1, \
-                             phase = ?2, selected_plan_revision_id = ?3, \
-                             accepted_plan_submission_id = ?4 WHERE id = ?5",
+                             phase = ?2, accepted_plan_submission_id = ?3 WHERE id = ?4",
                         )
                         .bind(&now_text)
                         .bind(next_phase.as_str())
-                        .bind(selected.to_string())
                         .bind((review_policy == ReviewPolicy::None).then_some(sub_id.to_string()))
                         .bind(row.task_id.to_string())
                         .execute(&mut **tx)
@@ -489,9 +434,10 @@ mod tests {
         Actor, ActorKind, Clock, CommandId, EpicCreate, GoalCreate, ProjectCreate, Task,
         TaskCreate, TaskStatus, TestClock,
     };
+    use crate::model::{DocumentKind, SelectPlanInput};
     use crate::storage::open;
     use crate::storage::rows::insert_actor;
-    use crate::storage::testing::{seed_actor, seed_task_document, store_options, test_clock};
+    use crate::storage::testing::{seed_actor, store_options, test_clock};
 
     struct Fixture {
         _dir: tempfile::TempDir,
@@ -592,18 +538,9 @@ mod tests {
             .await
             .unwrap()
             .value;
-        let now_text = format_ts(&clock.now());
-        let (_, plan_rev) =
-            seed_task_document(store.pool(), project, task.id, owner.id, "plan", &now_text).await;
-        let (_, finding_rev) = seed_task_document(
-            store.pool(),
-            project,
-            task.id,
-            owner.id,
-            "finding",
-            &now_text,
-        )
-        .await;
+        let plan_rev = create_task_doc(&store, &owner, project, task.id, DocumentKind::Plan).await;
+        let finding_rev =
+            create_task_doc(&store, &owner, project, task.id, DocumentKind::Finding).await;
         Fixture {
             _dir: dir,
             clock,
@@ -611,9 +548,37 @@ mod tests {
             owner,
             project,
             task,
-            plan_rev: plan_rev.parse().unwrap(),
-            finding_rev: finding_rev.parse().unwrap(),
+            plan_rev,
+            finding_rev,
         }
+    }
+
+    async fn create_task_doc(
+        store: &Store,
+        owner: &Actor,
+        project: ProjectId,
+        task: TaskId,
+        kind: DocumentKind,
+    ) -> Uuid {
+        crate::storage::testing::create_task_document(store, owner, project, task, kind)
+            .await
+            .latest_revision_id
+            .as_uuid()
+    }
+
+    async fn select_plan(f: &Fixture, revision: Uuid) {
+        let (task_revision, _, _, _) = task_state(f).await;
+        f.store
+            .select_task_plan(
+                ctx(&f.owner, &f.clock, Some(task_revision)),
+                f.project,
+                f.task.id,
+                SelectPlanInput {
+                    document_revision_id: revision,
+                },
+            )
+            .await
+            .unwrap();
     }
 
     async fn claim(f: &Fixture, phase: ClaimPhase) -> (Uuid, String) {
@@ -636,14 +601,13 @@ mod tests {
         (grant.claim.id, grant.lease_token)
     }
 
-    fn success_input(revisions: Vec<Uuid>, selected: Option<Uuid>) -> ReportInput {
+    fn success_input(revisions: Vec<Uuid>) -> ReportInput {
         ReportInput {
             outcome: SessionOutcome::Succeeded,
             summary: "done".into(),
             failure_reason: String::new(),
             document_revision_ids: revisions,
             links: serde_json::json!([]),
-            selected_plan_revision_id: selected,
         }
     }
 
@@ -654,7 +618,6 @@ mod tests {
             failure_reason: "boom".into(),
             document_revision_ids: Vec::new(),
             links: serde_json::json!([]),
-            selected_plan_revision_id: None,
         }
     }
 
@@ -722,7 +685,7 @@ mod tests {
             &f.owner,
             claim_id,
             &token,
-            success_input(vec![f.finding_rev], None),
+            success_input(vec![f.finding_rev]),
         )
         .await
         .unwrap()
@@ -766,7 +729,7 @@ mod tests {
             &f.owner,
             claim_id,
             &token,
-            success_input(vec![f.finding_rev], None),
+            success_input(vec![f.finding_rev]),
         )
         .await
         .unwrap();
@@ -829,12 +792,13 @@ mod tests {
     async fn plan_report_success_without_review_accepts_submission() {
         let f = fixture(true, ReviewPolicy::None, ReviewPolicy::None).await;
         let (claim_id, token) = claim(&f, ClaimPhase::Plan).await;
+        select_plan(&f, f.plan_rev).await;
         report(
             &f,
             &f.owner,
             claim_id,
             &token,
-            success_input(vec![f.plan_rev], Some(f.plan_rev)),
+            success_input(vec![f.plan_rev]),
         )
         .await
         .unwrap();
@@ -865,12 +829,13 @@ mod tests {
     async fn plan_report_success_with_review_pends_submission() {
         let f = fixture(true, ReviewPolicy::Human, ReviewPolicy::None).await;
         let (claim_id, token) = claim(&f, ClaimPhase::Plan).await;
+        select_plan(&f, f.plan_rev).await;
         report(
             &f,
             &f.owner,
             claim_id,
             &token,
-            success_input(vec![f.plan_rev], Some(f.plan_rev)),
+            success_input(vec![f.plan_rev]),
         )
         .await
         .unwrap();
@@ -890,7 +855,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plan_report_rejects_non_plan_selection() {
+    async fn plan_report_success_requires_prior_selection() {
         let f = fixture(true, ReviewPolicy::None, ReviewPolicy::None).await;
         let (claim_id, token) = claim(&f, ClaimPhase::Plan).await;
         let err = report(
@@ -898,17 +863,11 @@ mod tests {
             &f.owner,
             claim_id,
             &token,
-            success_input(vec![f.finding_rev], Some(f.finding_rev)),
+            success_input(vec![f.plan_rev]),
         )
         .await
         .unwrap_err();
-        assert!(matches!(
-            err,
-            DomainError::Validation {
-                field: "selected_plan_revision_id",
-                ..
-            }
-        ));
+        assert!(matches!(err, DomainError::InvalidState(_)));
         assert_eq!(claim_status(&f, claim_id).await, "active");
         let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions")
             .fetch_one(f.store.pool())
@@ -926,7 +885,7 @@ mod tests {
             &f.owner,
             claim_id,
             &token,
-            success_input(vec![f.finding_rev, f.finding_rev, f.finding_rev], None),
+            success_input(vec![f.finding_rev, f.finding_rev, f.finding_rev]),
         )
         .await
         .unwrap();
@@ -948,7 +907,6 @@ mod tests {
                 failure_reason,
                 document_revision_ids: vec![other.finding_rev],
                 links: serde_json::json!([]),
-                selected_plan_revision_id: None,
             };
             let err = report(&f, &f.owner, claim_id, &token, input)
                 .await
@@ -977,7 +935,7 @@ mod tests {
             &f.owner,
             claim_id,
             &token,
-            success_input(vec![f.finding_rev], None),
+            success_input(vec![f.finding_rev]),
         )
         .await
         .unwrap_err();
@@ -1001,7 +959,7 @@ mod tests {
             &other,
             claim_id,
             &token,
-            success_input(vec![f.finding_rev], None),
+            success_input(vec![f.finding_rev]),
         )
         .await
         .unwrap_err();
@@ -1011,7 +969,7 @@ mod tests {
             &f.owner,
             claim_id,
             "wrong-token",
-            success_input(vec![f.finding_rev], None),
+            success_input(vec![f.finding_rev]),
         )
         .await
         .unwrap_err();
@@ -1046,7 +1004,7 @@ mod tests {
             &f.owner,
             claim_id,
             "seed-token",
-            success_input(vec![f.finding_rev], None),
+            success_input(vec![f.finding_rev]),
         )
         .await
         .unwrap_err();
@@ -1058,12 +1016,30 @@ mod tests {
     async fn execute_report_success_requires_a_revision() {
         let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
         let (claim_id, token) = claim(&f, ClaimPhase::Execute).await;
+        let err = report(&f, &f.owner, claim_id, &token, success_input(Vec::new()))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "document_revision_ids",
+                ..
+            }
+        ));
+        assert_eq!(claim_status(&f, claim_id).await, "active");
+    }
+
+    #[tokio::test]
+    async fn execute_report_success_requires_an_output_kind_revision() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
+        let (claim_id, token) = claim(&f, ClaimPhase::Execute).await;
+        // The cited revision is task-owned but plan-kind: not an output.
         let err = report(
             &f,
             &f.owner,
             claim_id,
             &token,
-            success_input(Vec::new(), None),
+            success_input(vec![f.plan_rev]),
         )
         .await
         .unwrap_err();
@@ -1081,19 +1057,20 @@ mod tests {
     async fn plan_report_selection_must_be_among_reported_revisions() {
         let f = fixture(true, ReviewPolicy::None, ReviewPolicy::None).await;
         let (claim_id, token) = claim(&f, ClaimPhase::Plan).await;
+        select_plan(&f, f.plan_rev).await;
         let err = report(
             &f,
             &f.owner,
             claim_id,
             &token,
-            success_input(vec![f.finding_rev], Some(f.plan_rev)),
+            success_input(vec![f.finding_rev]),
         )
         .await
         .unwrap_err();
         assert!(matches!(
             err,
             DomainError::Validation {
-                field: "selected_plan_revision_id",
+                field: "document_revision_ids",
                 ..
             }
         ));

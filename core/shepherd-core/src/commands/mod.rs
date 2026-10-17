@@ -1,10 +1,12 @@
 mod archive;
 mod claims;
+mod content;
 mod dependencies;
 mod hierarchy;
 mod identity;
 mod reports;
 
+pub use content::DocumentListFilters;
 pub use identity::IdentityPaths;
 
 use std::future::Future;
@@ -16,8 +18,8 @@ use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{
-    Actor, ActorId, CommandId, DependencyId, Epic, EpicId, EventId, GoalId, IDEMPOTENCY_TTL_DAYS,
-    ProjectId, Revision, Task, TaskId, TaskTypeId,
+    Actor, ActorId, ClaimPhase, CommandId, DependencyId, DocumentId, Epic, EpicId, EventId, GoalId,
+    IDEMPOTENCY_TTL_DAYS, ProjectId, Revision, Task, TaskId, TaskTypeId,
 };
 use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
 use crate::storage::rows::format_ts;
@@ -30,6 +32,20 @@ pub struct CommandContext {
     pub idempotency_key: Uuid,
     pub expected_revision: Option<i64>,
     pub now: DateTime<Utc>,
+}
+
+impl CommandContext {
+    /// append_events reads only the actor, command id and timestamp; the
+    /// idempotency fields are irrelevant to event rows.
+    pub(crate) fn for_events(actor: Actor, command_id: CommandId, now: DateTime<Utc>) -> Self {
+        Self {
+            actor,
+            command_id,
+            idempotency_key: Uuid::nil(),
+            expected_revision: None,
+            now,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -261,18 +277,27 @@ pub(crate) fn require_revision(expected: Option<i64>, actual: Revision) -> Resul
     }
 }
 
-// Unexpired active claim or pending submission blocks mutations on the
-// resource; the epic level checks every descendant task (plan/03, plan/04
-// FLOW-03).
 // Single source for "active work on task alias `t`": an unexpired active claim
-// or a pending submission (plan/03, plan/04 FLOW-03).
-pub(crate) fn active_work_predicate(now_placeholder: &str) -> String {
+// or a pending submission (plan/03, plan/04 FLOW-03). The optional phase list
+// narrows which claim phases count — plan claims never block selection or
+// selected-plan appends (plan/03, plan/04 row "select plan").
+pub(crate) fn claim_work_predicate(now_placeholder: &str, phases: Option<&[ClaimPhase]>) -> String {
+    let phase_filter = phases
+        .map(|phases| {
+            let list: Vec<&str> = phases.iter().map(|phase| phase.as_str()).collect();
+            format!(" AND c.phase IN ('{}')", list.join("', '"))
+        })
+        .unwrap_or_default();
     format!(
         "(EXISTS (SELECT 1 FROM claims c WHERE c.task_id = t.id \
-         AND c.status = 'active' AND c.expires_at > {now_placeholder}) \
+         AND c.status = 'active' AND c.expires_at > {now_placeholder}{phase_filter}) \
          OR EXISTS (SELECT 1 FROM submissions s WHERE s.task_id = t.id \
          AND s.status = 'pending'))"
     )
+}
+
+pub(crate) fn active_work_predicate(now_placeholder: &str) -> String {
+    claim_work_predicate(now_placeholder, None)
 }
 
 async fn has_active_work_by(
@@ -540,6 +565,17 @@ impl PendingEvent {
             affected_ids: vec![task.as_uuid()],
         }
     }
+
+    // document.changed carries the owning project/epic/task id (plan/08).
+    pub(crate) fn document(id: DocumentId, revision: Revision, owner: Uuid) -> Self {
+        Self {
+            event_type: "document.changed",
+            kind_rank: 9,
+            resource_id: id.as_uuid(),
+            resource_revision: revision.value(),
+            affected_ids: vec![owner],
+        }
+    }
 }
 
 // `reason` is the command reason or empty string; durable explanations for
@@ -609,7 +645,9 @@ mod tests {
         let first_type = TaskTypeId::generate(now);
         let second_type = TaskTypeId::generate(now);
         let task = TaskId::generate(now);
+        let document = DocumentId::generate(now);
         let mut events = [
+            PendingEvent::document(document, Revision::INITIAL, task.as_uuid()),
             PendingEvent::submission(Uuid::nil(), 1, task),
             PendingEvent::claim(Uuid::nil(), 1, task),
             PendingEvent::task_type(second_type, Revision::INITIAL),
@@ -622,6 +660,7 @@ mod tests {
         assert_eq!(events[2].resource_id, second_type.as_uuid());
         assert_eq!(events[3].event_type, "claim.changed");
         assert_eq!(events[4].event_type, "submission.changed");
+        assert_eq!(events[5].event_type, "document.changed");
     }
 
     #[test]
@@ -634,6 +673,18 @@ mod tests {
         let submission = PendingEvent::submission(Uuid::nil(), 2, task);
         assert_eq!(submission.resource_revision, 2);
         assert_eq!(submission.affected_ids, vec![task.as_uuid()]);
+    }
+
+    #[test]
+    fn document_events_reference_the_owning_entity() {
+        let now = "2026-09-14T00:00:00Z".parse().unwrap();
+        let document = DocumentId::generate(now);
+        let owner = TaskId::generate(now).as_uuid();
+        let event = PendingEvent::document(document, Revision::INITIAL.next(), owner);
+        assert_eq!(event.event_type, "document.changed");
+        assert_eq!(event.resource_id, document.as_uuid());
+        assert_eq!(event.resource_revision, 2);
+        assert_eq!(event.affected_ids, vec![owner]);
     }
 }
 

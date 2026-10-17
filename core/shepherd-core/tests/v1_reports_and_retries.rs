@@ -4,11 +4,12 @@ use chrono::{DateTime, TimeDelta, Utc};
 use shepherd_core::commands::{CommandContext, Replay};
 use shepherd_core::error::DomainError;
 use shepherd_core::model::{
-    Actor, ActorId, ActorKind, ClaimInput, ClaimPhase, Clock, CommandId, Epic, EpicCreate, EpicId,
-    EpicStatus, GoalCreate, GoalId, Project, ProjectCreate, ProjectId, ReportInput, ReviewPolicy,
-    SessionOutcome, Task, TaskCreate, TaskId, TaskStatus, TestClock,
+    Actor, ActorId, ActorKind, ClaimInput, ClaimPhase, Clock, CommandId, DocumentCreate,
+    DocumentKind, DocumentOwner, Epic, EpicCreate, EpicId, EpicStatus, GoalCreate, GoalId, Project,
+    ProjectCreate, ProjectId, ReportInput, ReviewPolicy, SelectPlanInput, SessionOutcome, Task,
+    TaskCreate, TaskId, TaskStatus, TestClock,
 };
-use shepherd_core::storage::rows::{format_ts, insert_actor};
+use shepherd_core::storage::rows::insert_actor;
 use shepherd_core::storage::{Store, failpoint, open, testing};
 use uuid::Uuid;
 
@@ -158,6 +159,36 @@ async fn create_task_full(
         .value
 }
 
+async fn create_task_doc(
+    s: &Setup,
+    project: ProjectId,
+    task: TaskId,
+    kind: DocumentKind,
+) -> (String, String) {
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let document = testing::create_task_document(&s.store, &s.owner, project, task, kind).await;
+    (
+        document.id.to_string(),
+        document.latest_revision_id.to_string(),
+    )
+}
+
+async fn select_plan(s: &Setup, project: ProjectId, task: TaskId, revision_id: Uuid) {
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let current = reload_task(s, project, task).await;
+    s.store
+        .select_task_plan(
+            ctx(&s.owner, s.clock.now(), Some(current.revision.value())),
+            project,
+            task,
+            SelectPlanInput {
+                document_revision_id: revision_id,
+            },
+        )
+        .await
+        .unwrap();
+}
+
 async fn claim_and_report_setup(
     s: &Setup,
     work_review: ReviewPolicy,
@@ -192,15 +223,7 @@ async fn claim_and_report_setup(
         .await
         .unwrap()
         .into_inner();
-    let (doc_id, rev_id) = testing::seed_task_document(
-        s.store.pool(),
-        project.id,
-        task.id,
-        s.owner.id,
-        "finding",
-        &format_ts(&s.clock.now()),
-    )
-    .await;
+    let (doc_id, rev_id) = create_task_doc(s, project.id, task.id, DocumentKind::Finding).await;
     let _ = doc_id;
     (
         project.id,
@@ -219,7 +242,6 @@ fn success_input(rev_id: &str) -> ReportInput {
         failure_reason: String::new(),
         document_revision_ids: vec![rev_id.parse().unwrap()],
         links: serde_json::json!([]),
-        selected_plan_revision_id: None,
     }
 }
 
@@ -230,7 +252,6 @@ fn failed_input() -> ReportInput {
         failure_reason: "something went wrong".into(),
         document_revision_ids: Vec::new(),
         links: serde_json::json!([]),
-        selected_plan_revision_id: None,
     }
 }
 
@@ -606,16 +627,7 @@ async fn execution_attempts_increment_once_planning_does_not() {
         ReviewPolicy::None,
     )
     .await;
-    let now_text = format_ts(&s.clock.now());
-    let (_, plan_rev) = testing::seed_task_document(
-        s.store.pool(),
-        project.id,
-        task.id,
-        s.owner.id,
-        "plan",
-        &now_text,
-    )
-    .await;
+    let (_, plan_rev) = create_task_doc(&s, project.id, task.id, DocumentKind::Plan).await;
     let plan_rev_uuid: Uuid = plan_rev.parse().unwrap();
 
     // Failed plan report: attempt_count must NOT increment.
@@ -672,6 +684,7 @@ async fn execution_attempts_increment_once_planning_does_not() {
         .await
         .unwrap()
         .into_inner();
+    select_plan(&s, project.id, task.id, plan_rev_uuid).await;
     s.clock.advance(TimeDelta::milliseconds(2));
     s.store
         .report_claim(
@@ -685,7 +698,6 @@ async fn execution_attempts_increment_once_planning_does_not() {
                 failure_reason: String::new(),
                 document_revision_ids: vec![plan_rev_uuid],
                 links: serde_json::json!([]),
-                selected_plan_revision_id: Some(plan_rev_uuid),
             },
             "report-plan-ok",
         )
@@ -698,15 +710,7 @@ async fn execution_attempts_increment_once_planning_does_not() {
     );
 
     // Now task is in execution phase. Seed a work document.
-    let (_, work_rev) = testing::seed_task_document(
-        s.store.pool(),
-        project.id,
-        task.id,
-        s.owner.id,
-        "finding",
-        &format_ts(&s.clock.now()),
-    )
-    .await;
+    let (_, work_rev) = create_task_doc(&s, project.id, task.id, DocumentKind::Finding).await;
 
     // Failed execute report: attempt_count increments to 1.
     s.clock.advance(TimeDelta::milliseconds(2));
@@ -800,15 +804,7 @@ async fn successful_plan_report_with_none_policy_advances_to_execution() {
         ReviewPolicy::None,
     )
     .await;
-    let (_, rev_id) = testing::seed_task_document(
-        s.store.pool(),
-        project.id,
-        task.id,
-        s.owner.id,
-        "plan",
-        &format_ts(&s.clock.now()),
-    )
-    .await;
+    let (_, rev_id) = create_task_doc(&s, project.id, task.id, DocumentKind::Plan).await;
     let rev_uuid: Uuid = rev_id.parse().unwrap();
 
     s.clock.advance(TimeDelta::milliseconds(2));
@@ -828,6 +824,7 @@ async fn successful_plan_report_with_none_policy_advances_to_execution() {
         .await
         .unwrap()
         .into_inner();
+    select_plan(&s, project.id, task.id, rev_uuid).await;
     s.clock.advance(TimeDelta::milliseconds(2));
     let session = s
         .store
@@ -842,7 +839,6 @@ async fn successful_plan_report_with_none_policy_advances_to_execution() {
                 failure_reason: String::new(),
                 document_revision_ids: vec![rev_uuid],
                 links: serde_json::json!([]),
-                selected_plan_revision_id: Some(rev_uuid),
             },
             "report-hash",
         )
@@ -891,15 +887,7 @@ async fn successful_plan_report_with_human_policy_advances_to_plan_review() {
         ReviewPolicy::Human,
     )
     .await;
-    let (_, rev_id) = testing::seed_task_document(
-        s.store.pool(),
-        project.id,
-        task.id,
-        s.owner.id,
-        "plan",
-        &format_ts(&s.clock.now()),
-    )
-    .await;
+    let (_, rev_id) = create_task_doc(&s, project.id, task.id, DocumentKind::Plan).await;
     let rev_uuid: Uuid = rev_id.parse().unwrap();
 
     s.clock.advance(TimeDelta::milliseconds(2));
@@ -919,6 +907,7 @@ async fn successful_plan_report_with_human_policy_advances_to_plan_review() {
         .await
         .unwrap()
         .into_inner();
+    select_plan(&s, project.id, task.id, rev_uuid).await;
     s.clock.advance(TimeDelta::milliseconds(2));
     s.store
         .report_claim(
@@ -932,7 +921,6 @@ async fn successful_plan_report_with_human_policy_advances_to_plan_review() {
                 failure_reason: String::new(),
                 document_revision_ids: vec![rev_uuid],
                 links: serde_json::json!([]),
-                selected_plan_revision_id: Some(rev_uuid),
             },
             "report-hash",
         )
@@ -1014,15 +1002,7 @@ async fn successful_execute_report_with_none_policy_completes_and_cascades() {
         ReviewPolicy::None,
     )
     .await;
-    let (_, rev_id) = testing::seed_task_document(
-        s.store.pool(),
-        project.id,
-        task_b.id,
-        s.owner.id,
-        "finding",
-        &format_ts(&s.clock.now()),
-    )
-    .await;
+    let (_, rev_id) = create_task_doc(&s, project.id, task_b.id, DocumentKind::Finding).await;
 
     s.clock.advance(TimeDelta::milliseconds(2));
     let grant = s
@@ -1089,15 +1069,7 @@ async fn failed_reports_leave_phase_unchanged() {
         ReviewPolicy::None,
     )
     .await;
-    let (_, plan_rev) = testing::seed_task_document(
-        s.store.pool(),
-        project.id,
-        task.id,
-        s.owner.id,
-        "plan",
-        &format_ts(&s.clock.now()),
-    )
-    .await;
+    let (_, plan_rev) = create_task_doc(&s, project.id, task.id, DocumentKind::Plan).await;
     let plan_rev_uuid: Uuid = plan_rev.parse().unwrap();
 
     // Failed plan report: phase stays at planning.
@@ -1159,6 +1131,7 @@ async fn failed_reports_leave_phase_unchanged() {
         .await
         .unwrap()
         .into_inner();
+    select_plan(&s, project.id, task.id, plan_rev_uuid).await;
     s.clock.advance(TimeDelta::milliseconds(2));
     s.store
         .report_claim(
@@ -1172,7 +1145,6 @@ async fn failed_reports_leave_phase_unchanged() {
                 failure_reason: String::new(),
                 document_revision_ids: vec![plan_rev_uuid],
                 links: serde_json::json!([]),
-                selected_plan_revision_id: Some(plan_rev_uuid),
             },
             "report-plan-ok",
         )
@@ -1181,15 +1153,7 @@ async fn failed_reports_leave_phase_unchanged() {
 
     // Failed execute report: phase stays at execution.
     let t = reload_task(&s, project.id, task.id).await;
-    let (_, work_rev) = testing::seed_task_document(
-        s.store.pool(),
-        project.id,
-        task.id,
-        s.owner.id,
-        "finding",
-        &format_ts(&s.clock.now()),
-    )
-    .await;
+    let (_, work_rev) = create_task_doc(&s, project.id, task.id, DocumentKind::Finding).await;
     let _ = work_rev;
 
     s.clock.advance(TimeDelta::milliseconds(2));
@@ -1291,7 +1255,7 @@ async fn successful_execute_report_with_human_policy_advances_to_work_review() {
 // --- Review-fix regressions ---
 
 #[tokio::test]
-async fn successful_plan_report_rejects_non_plan_revision() {
+async fn successful_plan_report_requires_a_prior_plan_selection() {
     let s = setup().await;
     let project = create_project(&s, "P").await;
     let goal = create_goal(&s, project.id, "G").await;
@@ -1306,25 +1270,8 @@ async fn successful_plan_report_rejects_non_plan_revision() {
         ReviewPolicy::None,
     )
     .await;
-    let now_text = format_ts(&s.clock.now());
-    let (_, plan_rev) = testing::seed_task_document(
-        s.store.pool(),
-        project.id,
-        task.id,
-        s.owner.id,
-        "plan",
-        &now_text,
-    )
-    .await;
-    let (_, finding_rev) = testing::seed_task_document(
-        s.store.pool(),
-        project.id,
-        task.id,
-        s.owner.id,
-        "finding",
-        &now_text,
-    )
-    .await;
+    let (_, plan_rev) = create_task_doc(&s, project.id, task.id, DocumentKind::Plan).await;
+    let (_, finding_rev) = create_task_doc(&s, project.id, task.id, DocumentKind::Finding).await;
 
     s.clock.advance(TimeDelta::milliseconds(2));
     let grant = s
@@ -1344,8 +1291,34 @@ async fn successful_plan_report_rejects_non_plan_revision() {
         .unwrap()
         .into_inner();
 
+    // The selection step is the only route to a plan: a non-plan revision is
+    // rejected there, so a report can never carry one.
     s.clock.advance(TimeDelta::milliseconds(2));
     let finding_uuid: Uuid = finding_rev.parse().unwrap();
+    let current = reload_task(&s, project.id, task.id).await;
+    let err = s
+        .store
+        .select_task_plan(
+            ctx(&s.owner, s.clock.now(), Some(current.revision.value())),
+            project.id,
+            task.id,
+            SelectPlanInput {
+                document_revision_id: finding_uuid,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "document_revision_id",
+            ..
+        }
+    ));
+
+    // Without a persisted selection, a successful plan report is rejected.
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let plan_uuid: Uuid = plan_rev.parse().unwrap();
     let err = s
         .store
         .report_claim(
@@ -1357,24 +1330,16 @@ async fn successful_plan_report_rejects_non_plan_revision() {
                 outcome: SessionOutcome::Succeeded,
                 summary: "planned".into(),
                 failure_reason: String::new(),
-                document_revision_ids: vec![finding_uuid],
+                document_revision_ids: vec![plan_uuid],
                 links: serde_json::json!([]),
-                selected_plan_revision_id: Some(finding_uuid),
             },
             "report-hash",
         )
         .await
         .unwrap_err();
-    assert!(matches!(
-        err,
-        DomainError::Validation {
-            field: "selected_plan_revision_id",
-            ..
-        }
-    ));
+    assert!(matches!(err, DomainError::InvalidState(_)));
     assert_eq!(claim_status(&s.store, grant.claim.id).await, "active");
     assert_eq!(session_count(&s.store, task.id).await, 0);
-    let _ = plan_rev;
 }
 
 #[tokio::test]
@@ -1398,7 +1363,6 @@ async fn duplicate_revision_ids_are_reported_once() {
                 failure_reason: String::new(),
                 document_revision_ids: vec![rev_uuid, rev_uuid],
                 links: serde_json::json!([]),
-                selected_plan_revision_id: None,
             },
             "report-hash",
         )
@@ -1484,16 +1448,25 @@ async fn independent_pools_share_one_active_claim_and_expiry() {
         .await
         .unwrap()
         .value;
-    let now_text = format_ts(&clock.now());
-    let (_, rev_id) = testing::seed_task_document(
-        store_a.pool(),
-        project,
-        task.id,
-        owner.id,
-        "finding",
-        &now_text,
-    )
-    .await;
+    clock.advance(TimeDelta::milliseconds(2));
+    let rev_id = store_a
+        .create_document(
+            ctx(&owner, clock.now(), None),
+            project,
+            DocumentCreate {
+                owner: DocumentOwner::Task(task.id),
+                kind: DocumentKind::Finding,
+                title: "finding doc".into(),
+                body: String::new(),
+                links: Vec::new(),
+            },
+            "doc-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner()
+        .latest_revision_id
+        .to_string();
 
     // Pool A claims; pool B sees the active claim and is not eligible.
     clock.advance(TimeDelta::milliseconds(2));
@@ -1614,15 +1587,7 @@ async fn same_project_cross_task_revision_is_rejected() {
         ReviewPolicy::None,
     )
     .await;
-    let (_, rev_b) = testing::seed_task_document(
-        s.store.pool(),
-        project.id,
-        task_b.id,
-        s.owner.id,
-        "finding",
-        &format_ts(&s.clock.now()),
-    )
-    .await;
+    let (_, rev_b) = create_task_doc(&s, project.id, task_b.id, DocumentKind::Finding).await;
 
     s.clock.advance(TimeDelta::milliseconds(2));
     let grant = s
@@ -1656,7 +1621,6 @@ async fn same_project_cross_task_revision_is_rejected() {
                 failure_reason: String::new(),
                 document_revision_ids: vec![rev_b.parse().unwrap()],
                 links: serde_json::json!([]),
-                selected_plan_revision_id: None,
             },
             "report-a",
         )
@@ -1695,7 +1659,6 @@ async fn oversize_summary_and_failure_reason_are_rejected() {
                 failure_reason: String::new(),
                 document_revision_ids: vec![rev_id.parse().unwrap()],
                 links: serde_json::json!([]),
-                selected_plan_revision_id: None,
             },
             "report-oversize-summary",
         )
@@ -1724,7 +1687,6 @@ async fn oversize_summary_and_failure_reason_are_rejected() {
                 failure_reason: "x".repeat(2_001),
                 document_revision_ids: Vec::new(),
                 links: serde_json::json!([]),
-                selected_plan_revision_id: None,
             },
             "report-oversize-reason",
         )
@@ -1762,7 +1724,6 @@ async fn failed_report_stores_reported_revisions() {
                 failure_reason: "boom".into(),
                 document_revision_ids: vec![rev_uuid],
                 links: serde_json::json!([]),
-                selected_plan_revision_id: None,
             },
             "report-failed-with-revisions",
         )
@@ -1824,4 +1785,84 @@ async fn same_key_retry_after_lease_expiry_still_replays() {
     assert_eq!(second.into_inner().id, session.id);
     assert_eq!(claim_status(&s.store, claim_id).await, "reported");
     assert_eq!(session_count(&s.store, task.id).await, 1);
+}
+
+// --- Execute output kind (plan/04 session rules) ---
+
+#[tokio::test]
+async fn execute_success_requires_a_finding_or_handoff_revision() {
+    let s = setup().await;
+    let project = create_project(&s, "P").await;
+    let goal = create_goal(&s, project.id, "G").await;
+    let epic = create_epic(&s, project.id, goal, "E").await;
+    let task = create_task_full(
+        &s,
+        project.id,
+        epic.id,
+        "T",
+        false,
+        ReviewPolicy::None,
+        ReviewPolicy::None,
+    )
+    .await;
+    let (_, plan_rev) = create_task_doc(&s, project.id, task.id, DocumentKind::Plan).await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let grant = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(task.revision.value())),
+            project.id,
+            task.id,
+            ClaimInput {
+                phase: ClaimPhase::Execute,
+                submission_id: None,
+                ttl_seconds: None,
+            },
+            "claim-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Task-owned but plan-kind: a successful execution needs a real output.
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let err = s
+        .store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            grant.claim.id,
+            &grant.lease_token,
+            success_input(&plan_rev),
+            "report-hash",
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DomainError::Validation {
+            field: "document_revision_ids",
+            ..
+        }
+    ));
+    assert_eq!(claim_status(&s.store, grant.claim.id).await, "active");
+    assert_eq!(session_count(&s.store, task.id).await, 0);
+
+    // A handoff revision satisfies the output requirement.
+    let (_, handoff_rev) = create_task_doc(&s, project.id, task.id, DocumentKind::Handoff).await;
+    s.clock.advance(TimeDelta::milliseconds(2));
+    s.store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            grant.claim.id,
+            &grant.lease_token,
+            success_input(&handoff_rev),
+            "report-hash-2",
+        )
+        .await
+        .unwrap();
+    let t = reload_task(&s, project.id, task.id).await;
+    assert_eq!(t.status, TaskStatus::Done);
 }

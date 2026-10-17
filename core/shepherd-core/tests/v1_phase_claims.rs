@@ -5,11 +5,13 @@ use shepherd_core::commands::CommandContext;
 use shepherd_core::error::DomainError;
 use shepherd_core::model::{
     Actor, ActorId, ActorKind, Claim, ClaimInput, ClaimPhase, ClaimStatus, Clock, CommandId,
-    DependencyCreate, Epic, EpicCreate, EpicId, EpicStatus, Goal, GoalCreate, GoalId, Project,
-    ProjectCreate, ProjectId, RenewInput, Task, TaskCreate, TaskId, TaskStatus, TestClock,
+    DependencyCreate, DocumentCreate, DocumentKind, DocumentOwner, Epic, EpicCreate, EpicId,
+    EpicStatus, Goal, GoalCreate, GoalId, Project, ProjectCreate, ProjectId, RenewInput,
+    ReportInput, ReviewPolicy, RevisionCreate, SelectPlanInput, SessionOutcome, Task, TaskCreate,
+    TaskId, TaskStatus, TestClock,
 };
 use shepherd_core::queries::{ClaimListFilters, ListParams, Page};
-use shepherd_core::storage::rows::{format_ts, insert_actor};
+use shepherd_core::storage::rows::insert_actor;
 use shepherd_core::storage::{Store, StoreOptions, open, testing};
 use uuid::Uuid;
 
@@ -977,88 +979,115 @@ async fn list_claims_paginates_by_acquired_at_without_overlap() {
 
 // --- Plan revision pinning ---
 
-/// Direct-SQL fixture: an accepted plan submission carrying two document
-/// revisions, with the task moved to execution and the second revision
-/// selected. Document and submission commands land in steps 010/011.
-async fn seed_accepted_plan(
-    s: &Setup,
-    project: ProjectId,
-    task: TaskId,
-    actor: ActorId,
-    revisions: [Uuid; 2],
-    selected: Uuid,
-) {
-    let now = format_ts(&s.clock.now());
-    let document = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
-    let session = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
-    let submission = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
-    let revision_json = format!(r#"["{}","{}"]"#, revisions[0], revisions[1]);
-    let mut tx = s.store.pool().begin().await.unwrap();
-    sqlx::query(
-        "INSERT INTO documents (id, revision, created_at, updated_at, project_id, \
-         owner_kind, owner_id, kind, title, latest_revision_id) \
-         VALUES (?1, 1, ?2, ?2, ?3, 'task', ?4, 'plan', 'Plan', ?5)",
-    )
-    .bind(document.to_string())
-    .bind(&now)
-    .bind(project.to_string())
-    .bind(task.to_string())
-    .bind(revisions[0].to_string())
-    .execute(&mut *tx)
-    .await
-    .unwrap();
-    for (number, id) in revisions.iter().enumerate() {
-        sqlx::query(
-            "INSERT INTO document_revisions (id, document_id, number, body, links, \
-             actor_id, created_at) VALUES (?1, ?2, ?3, '', '[]', ?4, ?5)",
+/// Drives the public plan flow to an accepted two-revision plan with the
+/// second revision selected: claim plan, create the plan document, append a
+/// second revision, select it, then report plan success (policy none accepts
+/// inline and moves the task to execution).
+async fn accept_task_plan(s: &Setup, project: ProjectId, task: &Task) -> (Uuid, Uuid) {
+    s.clock.advance(TimeDelta::milliseconds(1));
+    let grant = s
+        .store
+        .claim_task(
+            ctx(&s.owner, s.clock.now(), Some(task.revision.value())),
+            project,
+            task.id,
+            claim_input(ClaimPhase::Plan, None),
+            "plan-claim-hash",
         )
-        .bind(id.to_string())
-        .bind(document.to_string())
-        .bind(number as i64 + 1)
-        .bind(actor.to_string())
-        .bind(&now)
-        .execute(&mut *tx)
+        .await
+        .unwrap()
+        .into_inner();
+
+    s.clock.advance(TimeDelta::milliseconds(1));
+    let document = s
+        .store
+        .create_document(
+            ctx(&s.owner, s.clock.now(), None),
+            project,
+            DocumentCreate {
+                owner: DocumentOwner::Task(task.id),
+                kind: DocumentKind::Plan,
+                title: "Plan".into(),
+                body: String::new(),
+                links: Vec::new(),
+            },
+            "plan-doc-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let first = document.latest_revision_id.as_uuid();
+
+    s.clock.advance(TimeDelta::milliseconds(1));
+    let second = s
+        .store
+        .create_document_revision(
+            ctx(&s.owner, s.clock.now(), Some(document.revision.value())),
+            project,
+            document.id,
+            RevisionCreate {
+                body: "v2".into(),
+                links: Vec::new(),
+            },
+            "plan-rev-hash",
+        )
+        .await
+        .unwrap()
+        .into_inner()
+        .id
+        .as_uuid();
+
+    s.clock.advance(TimeDelta::milliseconds(1));
+    let current = reload_task(s, project, task.id).await;
+    s.store
+        .select_task_plan(
+            ctx(&s.owner, s.clock.now(), Some(current.revision.value())),
+            project,
+            task.id,
+            SelectPlanInput {
+                document_revision_id: second,
+            },
+        )
         .await
         .unwrap();
-    }
-    sqlx::query(
-        "INSERT INTO sessions (id, task_id, claim_id, actor_id, phase, started_at, \
-         ended_at, outcome, summary, failure_reason, document_revision_ids, links) \
-         VALUES (?1, ?2, 'claim', ?3, 'plan', ?4, ?4, 'succeeded', '', '', '[]', '[]')",
-    )
-    .bind(session.to_string())
-    .bind(task.to_string())
-    .bind(actor.to_string())
-    .bind(&now)
-    .execute(&mut *tx)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO submissions (id, revision, created_at, updated_at, task_id, kind, \
-         producer_id, document_revision_ids, session_id, policy, status, \
-         created_context_revision) VALUES (?1, 1, ?2, ?2, ?3, 'plan', ?4, ?5, ?6, \
-         'none', 'accepted', 1)",
-    )
-    .bind(submission.to_string())
-    .bind(&now)
-    .bind(task.to_string())
-    .bind(actor.to_string())
-    .bind(&revision_json)
-    .bind(session.to_string())
-    .execute(&mut *tx)
-    .await
-    .unwrap();
-    sqlx::query(
-        "UPDATE tasks SET phase = 'execution', accepted_plan_submission_id = ?1, \
-         selected_plan_revision_id = ?2 WHERE id = ?3",
-    )
-    .bind(submission.to_string())
-    .bind(selected.to_string())
-    .bind(task.to_string())
-    .execute(&mut *tx)
-    .await
-    .unwrap();
-    tx.commit().await.unwrap();
+
+    // A third revision after selection keeps the selected revision distinct
+    // from both latest_revision_id and the last-appended revision, so the
+    // execute-claim pin cannot pass by resolving either of those instead.
+    s.clock.advance(TimeDelta::milliseconds(1));
+    s.store
+        .create_document_revision(
+            ctx(&s.owner, s.clock.now(), Some(2)),
+            project,
+            document.id,
+            RevisionCreate {
+                body: "v3".into(),
+                links: Vec::new(),
+            },
+            "plan-rev3-hash",
+        )
+        .await
+        .unwrap();
+
+    s.clock.advance(TimeDelta::milliseconds(1));
+    s.store
+        .report_claim(
+            ctx(&s.owner, s.clock.now(), None),
+            project,
+            grant.claim.id,
+            &grant.lease_token,
+            ReportInput {
+                outcome: SessionOutcome::Succeeded,
+                summary: "planned".into(),
+                failure_reason: String::new(),
+                document_revision_ids: vec![first, second],
+                links: serde_json::json!([]),
+            },
+            "plan-report-hash",
+        )
+        .await
+        .unwrap();
+    (first, second)
 }
 
 #[tokio::test]
@@ -1067,12 +1096,28 @@ async fn execute_claim_pins_the_selected_plan_revision() {
     let project = create_project(&s, "P").await;
     let goal = create_goal(&s, project.id, "G").await;
     let epic = create_epic(&s, project.id, goal.id, "E").await;
-    let task = create_task_with_planning(&s, project.id, epic.id, "T", true).await;
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let task = s
+        .store
+        .create_task(
+            ctx(&s.owner, s.clock.now(), None),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "T".to_string(),
+                type_key: "code".to_string(),
+                planning_required: Some(true),
+                plan_review: Some(ReviewPolicy::None),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
 
     // The accepted plan carries two revisions; the owner selected the second.
-    let first = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
-    let second = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
-    seed_accepted_plan(&s, project.id, task.id, s.owner.id, [first, second], second).await;
+    let (first, second) = accept_task_plan(&s, project.id, &task).await;
+    let _ = first;
 
     s.clock.advance(TimeDelta::milliseconds(1));
     let updated = reload_task(&s, project.id, task.id).await;

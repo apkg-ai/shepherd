@@ -312,6 +312,8 @@ CREATE INDEX sessions_task ON sessions(task_id,ended_at,id);
 
 CREATE INDEX documents_owner ON documents(project_id,owner_kind,owner_id,created_at,id);
 
+CREATE INDEX documents_project_page ON documents(project_id,created_at,id);
+
 CREATE INDEX submissions_queue ON submissions(status,policy,kind,created_at,id);
 
 CREATE INDEX events_project ON events(project_id,id);

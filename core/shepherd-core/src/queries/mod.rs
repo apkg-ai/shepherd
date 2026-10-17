@@ -55,7 +55,7 @@ pub(crate) fn scoped_filter(project: &ProjectId, include_archived: bool) -> Stri
     format!("project={project}&include_archived={include_archived}")
 }
 
-fn decode_after(
+pub(crate) fn decode_after(
     params: &ListParams,
     endpoint: &str,
     filter: &str,
@@ -87,6 +87,17 @@ fn push_page_clauses(
         builder.push(prefix).push("archived = 0");
         prefix = " AND ";
     }
+    push_keyset_tail(builder, prefix, after, limit);
+}
+
+// The ascending keyset tail every list shares: cursor predicate, sort order,
+// and one extra row to learn whether a next page exists.
+pub(crate) fn push_keyset_tail(
+    builder: &mut QueryBuilder<Sqlite>,
+    prefix: &str,
+    after: &Option<(String, String)>,
+    limit: i64,
+) {
     if let Some((created_at, id)) = after {
         builder
             .push(prefix)
@@ -98,7 +109,6 @@ fn push_page_clauses(
             .push_bind(id.clone())
             .push("))");
     }
-    // Fetch one extra row to learn whether a next page exists.
     builder
         .push(" ORDER BY created_at ASC, id ASC LIMIT ")
         .push_bind(limit + 1);

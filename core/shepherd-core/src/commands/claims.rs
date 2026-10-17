@@ -278,13 +278,7 @@ impl Store {
                 pending.push(PendingEvent::task(task_id, updated_task.revision, epic_id));
                 pending.push(PendingEvent::claim(claim_id, task_rev, task_id));
 
-                let ctx_for_events = CommandContext {
-                    actor,
-                    command_id,
-                    idempotency_key: Uuid::nil(),
-                    expected_revision: None,
-                    now,
-                };
+                let ctx_for_events = CommandContext::for_events(actor, command_id, now);
                 append_events(tx, &project, &ctx_for_events, "claimTask", "", pending).await?;
 
                 Ok(ClaimGrant {
@@ -348,13 +342,7 @@ impl Store {
                     .await?;
 
                 let actor = super::live_actor(tx, &actor_id).await?;
-                let ctx_for_events = CommandContext {
-                    actor,
-                    command_id,
-                    idempotency_key: Uuid::nil(),
-                    expected_revision: None,
-                    now,
-                };
+                let ctx_for_events = CommandContext::for_events(actor, command_id, now);
                 append_events(
                     tx,
                     &project,
@@ -429,13 +417,7 @@ impl Store {
                 .await?;
 
                 let actor = super::live_actor(tx, &actor_id).await?;
-                let ctx_for_events = CommandContext {
-                    actor,
-                    command_id,
-                    idempotency_key: Uuid::nil(),
-                    expected_revision: None,
-                    now,
-                };
+                let ctx_for_events = CommandContext::for_events(actor, command_id, now);
                 let mut pending: Vec<PendingEvent> = reconciled
                     .iter()
                     .map(|c| PendingEvent::claim(c.id, c.task_revision, c.task_id))
