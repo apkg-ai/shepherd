@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{ActorId, TaskId};
+use super::{ActorId, TaskId, typed_id_serde};
 use crate::error::DomainError;
 
 pub const DEFAULT_TTL_SECONDS: i64 = 300;
@@ -61,41 +61,8 @@ pub(super) mod serde_uuid_vec {
     }
 }
 
-pub(super) mod serde_task_id {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use uuid::Uuid;
-
-    use crate::model::TaskId;
-
-    pub fn serialize<S: Serializer>(id: &TaskId, s: S) -> Result<S::Ok, S::Error> {
-        id.to_string().serialize(s)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<TaskId, D::Error> {
-        let text = String::deserialize(d)?;
-        Uuid::parse_str(&text)
-            .map(TaskId::from_uuid)
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-pub(super) mod serde_actor_id {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use uuid::Uuid;
-
-    use crate::model::ActorId;
-
-    pub fn serialize<S: Serializer>(id: &ActorId, s: S) -> Result<S::Ok, S::Error> {
-        id.to_string().serialize(s)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<ActorId, D::Error> {
-        let text = String::deserialize(d)?;
-        Uuid::parse_str(&text)
-            .map(ActorId::from_uuid)
-            .map_err(serde::de::Error::custom)
-    }
-}
+typed_id_serde!(pub(super) serde_task_id, TaskId);
+typed_id_serde!(pub(super) serde_actor_id, ActorId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClaimPhase {

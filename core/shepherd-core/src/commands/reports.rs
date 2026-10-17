@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::error::DomainError;
 use crate::lease;
 use crate::model::{
-    ActorId, ClaimPhase, ClaimStatus, ProjectId, ReportInput, ReviewPolicy, Session,
+    ActorId, ClaimPhase, ClaimStatus, DocumentKind, ProjectId, ReportInput, ReviewPolicy, Session,
     SessionOutcome, TaskId, TaskPhase, validate_report_input,
 };
 use crate::queries::hierarchy::task_row;
@@ -106,9 +106,7 @@ impl Store {
                         require_output_kinds(&cited_kinds)?;
                     }
                     if row.phase == ClaimPhase::Plan {
-                        // selectTaskPlan enforces plan-kind task ownership when
-                        // writing this column; update_task only clears it. The
-                        // missing selection is task state, not a request field.
+                        // The missing selection is task state, not a request field.
                         let selected = selected_plan_revision(tx, row.task_id).await?;
                         let Some(selected) = selected else {
                             return Err(DomainError::InvalidState(
@@ -122,6 +120,16 @@ impl Store {
                                 field: "document_revision_ids",
                                 message: "must include the selected plan revision".into(),
                             });
+                        }
+                        // selectTaskPlan already enforces plan-kind at write
+                        // time; recheck here so a future writer of the column
+                        // cannot smuggle a non-plan selection into acceptance.
+                        if cited_kinds.get(&selected) != Some(&DocumentKind::Plan) {
+                            return Err(DomainError::InvalidState(
+                                "the selected task plan revision no longer references a \
+                                 plan document"
+                                    .into(),
+                            ));
                         }
                     }
                 }
@@ -183,13 +191,7 @@ impl Store {
 
                 // idempotent_transaction re-checks the actor inside this
                 // transaction, so the context snapshot is safe here.
-                let events_ctx = CommandContext {
-                    actor,
-                    command_id,
-                    idempotency_key: Uuid::nil(),
-                    expected_revision: None,
-                    now,
-                };
+                let events_ctx = CommandContext::for_events(actor, command_id, now);
 
                 match (row.phase, input.outcome) {
                     (ClaimPhase::Plan, SessionOutcome::Failed) => {

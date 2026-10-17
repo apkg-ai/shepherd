@@ -9,7 +9,7 @@ use crate::model::{
     validate_document_create, validate_revision_create,
 };
 use crate::queries::hierarchy::{
-    epic_exists, project_archived, project_exists, task_exists, task_row,
+    epic_exists, filter_token, project_archived, project_exists, task_exists, task_row,
 };
 use crate::queries::{
     ListParams, Page, decode_after, effective_limit, encode_cursor, push_keyset_tail, split_page,
@@ -23,18 +23,18 @@ use super::{
 };
 
 /// Validate that every UUID in `revision_ids` is a revision of a document
-/// owned by the task, returning the owning documents' kinds (order
-/// unspecified). Duplicate ids are tolerated. One scoped query backs every
-/// citation gate so ownership can never be checked separately from kind.
+/// owned by the task, returning each id's document kind. Duplicate ids are
+/// tolerated. One scoped query backs every citation gate so ownership can
+/// never be checked separately from kind.
 pub(super) async fn task_owned_revision_kinds(
     conn: &mut SqliteConnection,
     project: &ProjectId,
     task: &TaskId,
     revision_ids: &[Uuid],
-) -> Result<Vec<DocumentKind>, DomainError> {
+) -> Result<std::collections::HashMap<Uuid, DocumentKind>, DomainError> {
     let unique: std::collections::HashSet<Uuid> = revision_ids.iter().copied().collect();
     if unique.is_empty() {
-        return Ok(Vec::new());
+        return Ok(std::collections::HashMap::new());
     }
     let task_str = task.to_string();
     let project_str = project.to_string();
@@ -57,12 +57,21 @@ pub(super) async fn task_owned_revision_kinds(
         .fetch_all(&mut *conn)
         .await
         .map_err(StorageError::from)?;
-    if found.len() != unique.len() {
-        let found_set: std::collections::HashSet<&str> =
-            found.iter().map(|row| row.0.as_str()).collect();
-        let missing = unique
+    let kinds = found
+        .iter()
+        .map(|(id, kind)| {
+            Ok((
+                parse_uuid("document_revisions.id", id)?,
+                DocumentKind::parse(kind)
+                    .ok_or_else(|| StorageError::Corrupt(format!("documents.kind: {kind}")))?,
+            ))
+        })
+        .collect::<Result<std::collections::HashMap<Uuid, DocumentKind>, StorageError>>()?;
+    if kinds.len() != unique.len() {
+        // Report the first missing id in request order, deterministically.
+        let missing = revision_ids
             .iter()
-            .find(|id| !found_set.contains(id.to_string().as_str()))
+            .find(|id| !kinds.contains_key(id))
             .map(Uuid::to_string)
             .unwrap_or_else(|| "unknown".into());
         return Err(DomainError::Validation {
@@ -70,20 +79,16 @@ pub(super) async fn task_owned_revision_kinds(
             message: format!("revision {missing} does not belong to a document owned by this task"),
         });
     }
-    found
-        .iter()
-        .map(|(_, kind)| {
-            DocumentKind::parse(kind)
-                .ok_or_else(|| StorageError::Corrupt(format!("documents.kind: {kind}")).into())
-        })
-        .collect()
+    Ok(kinds)
 }
 
 /// A successful execute report must cite at least one output revision of kind
 /// finding or handoff (plan/04 session rules); `kinds` comes from the scoped
 /// ownership query above.
-pub(super) fn require_output_kinds(kinds: &[DocumentKind]) -> Result<(), DomainError> {
-    if kinds.iter().any(|kind| kind.is_execute_output()) {
+pub(super) fn require_output_kinds(
+    kinds: &std::collections::HashMap<Uuid, DocumentKind>,
+) -> Result<(), DomainError> {
+    if kinds.values().any(|kind| kind.is_execute_output()) {
         return Ok(());
     }
     Err(DomainError::Validation {
@@ -98,12 +103,13 @@ pub(super) async fn selected_plan_revision(
     conn: &mut SqliteConnection,
     task: TaskId,
 ) -> Result<Option<Uuid>, DomainError> {
-    let stored: Option<String> =
+    let stored: Option<Option<String>> =
         sqlx::query_scalar("SELECT selected_plan_revision_id FROM tasks WHERE id = ?1")
             .bind(task.to_string())
-            .fetch_one(&mut *conn)
+            .fetch_optional(&mut *conn)
             .await?;
     stored
+        .ok_or(DomainError::NotFound)?
         .map(|value| parse_uuid("tasks.selected_plan_revision_id", &value))
         .transpose()
         .map_err(DomainError::from)
@@ -117,7 +123,7 @@ pub(super) async fn require_task_plan_revision(
     revision_id: &Uuid,
 ) -> Result<(), DomainError> {
     match task_owned_revision_kinds(conn, project, task, std::slice::from_ref(revision_id)).await {
-        Ok(kinds) if kinds.contains(&DocumentKind::Plan) => Ok(()),
+        Ok(kinds) if kinds.get(revision_id) == Some(&DocumentKind::Plan) => Ok(()),
         Ok(_) => Err(DomainError::Validation {
             field: "document_revision_id",
             message: "must reference a plan document".into(),
@@ -375,17 +381,12 @@ pub struct DocumentListFilters {
 }
 
 fn documents_filter(project: &ProjectId, filters: &DocumentListFilters) -> String {
-    let mut parts = vec![format!("project={project}")];
-    if let Some(owner_kind) = &filters.owner_kind {
-        parts.push(format!("owner_kind={}", owner_kind.as_str()));
-    }
-    if let Some(owner_id) = &filters.owner_id {
-        parts.push(format!("owner={owner_id}"));
-    }
-    if let Some(kind) = &filters.kind {
-        parts.push(format!("kind={}", kind.as_str()));
-    }
-    parts.join("&")
+    format!(
+        "project={project}&owner_kind={}&owner={}&kind={}",
+        filter_token(filters.owner_kind.map(DocumentOwnerKind::as_str)),
+        filter_token(filters.owner_id.as_ref()),
+        filter_token(filters.kind.map(DocumentKind::as_str)),
+    )
 }
 
 mod documents;

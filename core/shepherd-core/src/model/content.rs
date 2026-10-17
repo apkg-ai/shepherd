@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::claim::{serde_actor_id, serde_datetime, serde_uuid};
-use super::{ActorId, EpicId, ProjectId, Revision, TaskId, typed_uuid};
+use super::{ActorId, EpicId, ProjectId, Revision, TaskId, typed_id_serde, typed_uuid};
 use crate::error::DomainError;
 
 pub(crate) const DOC_TITLE_MAX_CHARS: usize = 200;
@@ -87,8 +87,8 @@ impl DocumentKind {
         }
     }
 
-    // Owner decision 2026-10-12: terminal unarchived entities accept only
-    // contextual notes (plan/03 "plans ... cannot be replaced").
+    // Terminal unarchived entities accept only contextual notes (plan/03
+    // "plans ... cannot be replaced").
     pub(crate) fn allowed_on_terminal_owner(self) -> bool {
         matches!(self, DocumentKind::Note)
     }
@@ -97,28 +97,6 @@ impl DocumentKind {
     pub(crate) fn is_execute_output(self) -> bool {
         matches!(self, DocumentKind::Finding | DocumentKind::Handoff)
     }
-}
-
-macro_rules! typed_id_serde {
-    ($module:ident, $ty:ident) => {
-        mod $module {
-            use serde::{Deserialize, Deserializer, Serialize, Serializer};
-            use uuid::Uuid;
-
-            use super::$ty;
-
-            pub fn serialize<S: Serializer>(id: &$ty, s: S) -> Result<S::Ok, S::Error> {
-                id.to_string().serialize(s)
-            }
-
-            pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<$ty, D::Error> {
-                let text = String::deserialize(d)?;
-                Uuid::parse_str(&text)
-                    .map($ty::from_uuid)
-                    .map_err(serde::de::Error::custom)
-            }
-        }
-    };
 }
 
 typed_id_serde!(serde_document_id, DocumentId);
@@ -136,8 +114,9 @@ mod serde_revision {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Revision, D::Error> {
         let value = i64::deserialize(d)?;
-        Revision::from_stored(value)
-            .ok_or_else(|| serde::de::Error::custom("revision must be at least 1"))
+        super::revision_number_from_stored(value)
+            .and_then(Revision::from_stored)
+            .ok_or_else(|| serde::de::Error::custom("revision must be between 1 and 2147483647"))
     }
 }
 
@@ -147,18 +126,10 @@ pub(crate) fn revision_number_from_stored(value: i64) -> Option<i64> {
     (1..=i32::MAX as i64).contains(&value).then_some(value)
 }
 
-mod serde_number {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S: Serializer>(number: &i64, s: S) -> Result<S::Ok, S::Error> {
-        number.serialize(s)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
-        let value = i64::deserialize(d)?;
-        super::revision_number_from_stored(value)
-            .ok_or_else(|| serde::de::Error::custom("number must be between 1 and 2147483647"))
-    }
+fn deserialize_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+    let value = i64::deserialize(d)?;
+    revision_number_from_stored(value)
+        .ok_or_else(|| serde::de::Error::custom("number must be between 1 and 2147483647"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,7 +159,7 @@ pub struct DocumentRevision {
     pub id: DocumentRevisionId,
     #[serde(with = "serde_document_id")]
     pub document_id: DocumentId,
-    #[serde(with = "serde_number")]
+    #[serde(deserialize_with = "deserialize_number")]
     pub number: i64,
     pub body: String,
     pub links: Vec<String>,
@@ -295,24 +266,11 @@ pub(crate) fn validate_link_entry(field: &'static str, value: &str) -> Result<()
 
 // plan/07: HTTP(S) artifact links only; reject credentials in URLs and
 // javascript/data/file schemes. Hand-rolled: no url crate is pinned for core.
-// Invisible Unicode format characters (soft hyphen, zero-width, bidi
-// overrides, BOM) make a stored link render as a different destination.
-fn is_invisible(c: char) -> bool {
-    matches!(
-        c,
-        '\u{00AD}'
-            | '\u{200B}'..='\u{200F}'
-            | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2069}'
-            | '\u{FEFF}'
-    )
-}
-
 fn link_is_safe(value: &str) -> bool {
-    if value
-        .chars()
-        .any(|c| c.is_control() || c.is_whitespace() || is_invisible(c))
-    {
+    // RFC 3986 URLs are printable ASCII; anything else (whitespace, control,
+    // invisible format and bidi characters) can render as a different
+    // destination than the stored bytes.
+    if !value.chars().all(|c| c.is_ascii_graphic()) {
         return false;
     }
     let Some((scheme, rest)) = value.split_once("://") else {
@@ -465,7 +423,10 @@ mod tests {
                "latest_revision_id":"00000000-0000-0000-0000-000000000000"}"#,
         )
         .unwrap_err();
-        assert!(err.to_string().contains("revision must be at least 1"));
+        assert!(
+            err.to_string()
+                .contains("revision must be between 1 and 2147483647")
+        );
     }
 
     #[test]
@@ -632,6 +593,10 @@ mod tests {
             "https://example.com/\u{200B}x",
             "https://example.com/\u{202E}x",
             "https://example.com/\u{2067}x",
+            "https://example.com/\u{061C}x",
+            "https://example.com/\u{180E}x",
+            "https://example.com/\u{E0041}x",
+            "https://ex\u{E4}mple.com/x",
             "\u{FEFF}https://example.com",
             "",
         ] {

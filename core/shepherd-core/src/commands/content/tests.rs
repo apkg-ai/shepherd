@@ -854,7 +854,7 @@ async fn duplicate_owned_revision_ids_validate() {
             Box::pin(async move {
                 task_owned_revision_kinds(tx, &project, &task_id, &[owned, owned])
                     .await
-                    .map(|kinds| assert_eq!(kinds, vec![DocumentKind::Finding]))
+                    .map(|kinds| assert_eq!(kinds.get(&owned), Some(&DocumentKind::Finding)))
             })
         })
         .await
@@ -922,6 +922,74 @@ async fn unknown_project_lists_are_not_found_before_cursor_checks() {
         matches!(err, DomainError::NotFound),
         "membership precedes cursor validity"
     );
+}
+
+#[tokio::test]
+async fn unknown_owner_filter_targets_are_not_found() {
+    let f = fixture(false).await;
+    doc(&f, DocumentOwner::Task(f.task.id), DocumentKind::Note).await;
+    let foreign = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    let cases = [
+        (Some(DocumentOwnerKind::Task), foreign),
+        (Some(DocumentOwnerKind::Epic), foreign),
+        (Some(DocumentOwnerKind::Project), foreign),
+        (None, foreign),
+    ];
+    for (owner_kind, owner_id) in cases {
+        let err = f
+            .store
+            .list_documents(
+                &f.project,
+                &DocumentListFilters {
+                    owner_kind,
+                    owner_id: Some(owner_id),
+                    kind: None,
+                },
+                &ListParams::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotFound), "{owner_kind:?}");
+    }
+    // Kind-less owner ids resolve through any of the three owner tables.
+    for owner_id in [f.project.as_uuid(), f.epic.as_uuid(), f.task.id.as_uuid()] {
+        let page = f
+            .store
+            .list_documents(
+                &f.project,
+                &DocumentListFilters {
+                    owner_kind: None,
+                    owner_id: Some(owner_id),
+                    kind: None,
+                },
+                &ListParams::default(),
+            )
+            .await
+            .unwrap();
+        assert!(page.items.len() <= 1);
+    }
+}
+
+#[tokio::test]
+async fn appends_stop_at_the_contract_revision_maximum() {
+    let f = fixture(false).await;
+    let document = doc(&f, DocumentOwner::Task(f.task.id), DocumentKind::Note).await;
+    sqlx::query("UPDATE documents SET revision = 2147483647 WHERE id = ?1")
+        .bind(document.id.to_string())
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+    let err = append(&f, &document, Some(2_147_483_647), "overflow")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::InvalidState(_)));
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM document_revisions WHERE document_id = ?1")
+            .bind(document.id.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+    assert_eq!(count, 1, "the overflowing append must write nothing");
 }
 
 #[tokio::test]

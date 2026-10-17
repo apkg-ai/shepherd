@@ -62,7 +62,7 @@ Every row writes audit event(s) inside the same transaction. “Task changed” 
 | waive task | owner; cancelled, not already waived; epic live | mark exclusion with reason | no task success | task.changed, epic.changed + cascade |
 | auto-complete epic | accepted, unblocked; own deps done; >=1 nonwaived task and all such tasks done | done | epic never claimed | epic.changed + downstream cascade |
 | explicit complete epic | owner; accepted/unblocked; own deps done; empty or all tasks waived | done | no claim | epic.changed + cascade |
-| select plan/change requirements | permitted writer; no execute/review claim or pending review | active/open retained; phase planning if planning_required else execution; acceptance cleared | plan claimant may save/select own output | task.changed; 409 active_work otherwise |
+| select plan/change requirements | permitted writer; no execute/review claim or pending review | active/open retained; phase planning if planning_required else execution; acceptance cleared | plan claimant may save/select own output; re-selecting the already-selected revision is a no-op: no change, no event | task.changed; 409 active_work otherwise |
 
 Session timestamps are server-derived: started_at=claim.acquired_at, ended_at=transaction now. Failed report requires nonblank failure_reason; successful report persists failure_reason="" and rejects a nonempty failure_reason. Session document_revision_ids and links are always present. Successful planning includes its selected task plan; successful execution includes at least one task-owned finding/handoff revision. Reported claims close once; execution attempt_count increments for either successful or failed execute reports, never plan/review/expiry.
 

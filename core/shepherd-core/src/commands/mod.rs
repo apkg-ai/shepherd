@@ -34,6 +34,20 @@ pub struct CommandContext {
     pub now: DateTime<Utc>,
 }
 
+impl CommandContext {
+    /// append_events reads only the actor, command id and timestamp; the
+    /// idempotency fields are irrelevant to event rows.
+    pub(crate) fn for_events(actor: Actor, command_id: CommandId, now: DateTime<Utc>) -> Self {
+        Self {
+            actor,
+            command_id,
+            idempotency_key: Uuid::nil(),
+            expected_revision: None,
+            now,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct CommandResult<T> {
     pub value: T,

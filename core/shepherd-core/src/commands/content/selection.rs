@@ -39,7 +39,7 @@ impl Store {
                     .await?;
 
                 // Re-selecting the current revision changes nothing: acceptance
-                // retained, no revision bump, no event (owner decision 2026-10-12).
+                // retained, no revision bump, no event (plan/04 select-plan row).
                 if selected_plan_revision(tx, task_id).await? == Some(input.document_revision_id) {
                     return Ok(CommandResult {
                         value: scope.task,

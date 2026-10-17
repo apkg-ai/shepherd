@@ -94,31 +94,22 @@ impl Store {
         }
         let filter = format!("project={project}&document={document}");
         let after = decode_after(params, "listDocumentRevisions", &filter)?;
-        // The cursor carries the row id; the seek key is the unique, strictly
-        // ordered revision number, so same-clock-tick appends cannot misorder.
-        let after_number =
-            match &after {
-                Some((_, id)) => {
-                    let number: Option<i64> = sqlx::query_scalar(
-                        "SELECT number FROM document_revisions WHERE id = ?1 AND document_id = ?2",
-                    )
-                    .bind(id)
-                    .bind(document.to_string())
-                    .fetch_optional(&mut *tx)
-                    .await?;
-                    Some(number.ok_or_else(|| {
-                        DomainError::InvalidCursor("unknown revision cursor".into())
-                    })?)
-                }
-                None => None,
-            };
 
         let mut builder = QueryBuilder::<Sqlite>::new(format!(
             "SELECT {REVISION_COLUMNS} FROM document_revisions WHERE document_id = "
         ));
         builder.push_bind(document.to_string());
-        if let Some(number) = after_number {
-            builder.push(" AND number < ").push_bind(number);
+        // The seek key is the unique, strictly ordered revision number, resolved
+        // from the cursor's row id in the same statement. The inner select
+        // cannot miss: the cursor MAC binds endpoint and filter, and the filter
+        // embeds the document id.
+        if let Some((_, id)) = &after {
+            builder
+                .push(" AND number < (SELECT number FROM document_revisions WHERE id = ")
+                .push_bind(id.clone())
+                .push(" AND document_id = ")
+                .push_bind(document.to_string())
+                .push(")");
         }
         // Revisions list newest first (plan/07).
         builder

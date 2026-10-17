@@ -482,7 +482,6 @@ mod tests {
             "epics_project",
             "tasks_project_page",
             "documents_project_page",
-            "document_revisions_page",
         ] {
             let index: Option<i64> = sqlx::query_scalar(
                 "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",

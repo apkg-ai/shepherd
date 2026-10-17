@@ -1420,10 +1420,12 @@ async fn document_lists_use_their_page_indexes_without_a_temp_sort() {
              WHERE project_id = 'p' ORDER BY created_at ASC, id ASC LIMIT 51",
             "documents_project_page",
         ),
+        // The revisions page is served by the UNIQUE(document_id,number)
+        // autoindex; this pins the production query shape.
         (
             "EXPLAIN QUERY PLAN SELECT id FROM document_revisions \
-             WHERE document_id = 'd' ORDER BY created_at DESC, id DESC LIMIT 51",
-            "document_revisions_page",
+             WHERE document_id = 'd' AND number < 5 ORDER BY number DESC LIMIT 51",
+            "sqlite_autoindex_document_revisions",
         ),
     ];
     for (query, index) in cases {

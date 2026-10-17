@@ -59,13 +59,7 @@ impl Store {
                 .execute(&mut **tx)
                 .await?;
 
-                let events_ctx = CommandContext {
-                    actor,
-                    command_id,
-                    idempotency_key: Uuid::nil(),
-                    expected_revision: None,
-                    now,
-                };
+                let events_ctx = CommandContext::for_events(actor, command_id, now);
                 append_events(
                     tx,
                     &project,
@@ -131,9 +125,15 @@ impl Store {
                 }
                 validate_revision_create(&input)?;
 
+                // Invariant: documents.revision always equals the latest
+                // revision number; one binding drives both writes and the event.
+                let next = document.revision.next();
+                if crate::model::revision_number_from_stored(next.value()).is_none() {
+                    return Err(DomainError::InvalidState(
+                        "document has reached the maximum revision number".into(),
+                    ));
+                }
                 let revision_id = DocumentRevisionId::generate(now);
-                // Invariant: documents.revision always equals the latest revision number.
-                let number = document.revision.value() + 1;
                 let links_text = links_json(&input.links)?;
 
                 sqlx::query(
@@ -142,7 +142,7 @@ impl Store {
                 )
                 .bind(revision_id.to_string())
                 .bind(document_id.to_string())
-                .bind(number)
+                .bind(next.value())
                 .bind(&input.body)
                 .bind(&links_text)
                 .bind(actor_id.to_string())
@@ -151,33 +151,24 @@ impl Store {
                 .await?;
 
                 sqlx::query(
-                    "UPDATE documents SET revision = revision + 1, updated_at = ?1, \
-                     latest_revision_id = ?2 WHERE id = ?3",
+                    "UPDATE documents SET revision = ?1, updated_at = ?2, \
+                     latest_revision_id = ?3 WHERE id = ?4",
                 )
+                .bind(next.value())
                 .bind(&now_text)
                 .bind(revision_id.to_string())
                 .bind(document_id.to_string())
                 .execute(&mut **tx)
                 .await?;
 
-                let events_ctx = CommandContext {
-                    actor,
-                    command_id,
-                    idempotency_key: Uuid::nil(),
-                    expected_revision: None,
-                    now,
-                };
+                let events_ctx = CommandContext::for_events(actor, command_id, now);
                 append_events(
                     tx,
                     &project,
                     &events_ctx,
                     "createDocumentRevision",
                     "",
-                    vec![PendingEvent::document(
-                        document_id,
-                        document.revision.next(),
-                        document.owner_id,
-                    )],
+                    vec![PendingEvent::document(document_id, next, document.owner_id)],
                 )
                 .await?;
 
