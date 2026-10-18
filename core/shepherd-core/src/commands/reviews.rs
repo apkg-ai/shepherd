@@ -303,4 +303,122 @@ impl Store {
         })
         .await
     }
+
+    pub async fn withdraw_submission(
+        &self,
+        ctx: CommandContext,
+        project: crate::model::ProjectId,
+        submission_id: Uuid,
+        reason: String,
+        request_hash: &str,
+    ) -> Result<Replay<Submission>, DomainError> {
+        let actor_id = ctx.actor.id;
+        let expected_revision = ctx.expected_revision;
+        let now = ctx.now;
+        let command_id = ctx.command_id;
+
+        self.idempotent_transaction(&ctx, request_hash, 200, move |tx| {
+            Box::pin(async move {
+                let now_text = format_ts(&now);
+
+                let submission = submission_row(tx, &project, &submission_id)
+                    .await?
+                    .ok_or(DomainError::NotFound)?;
+                let task_id = submission.task_id;
+                let scope = task_scope(tx, &project, &task_id).await?;
+                let actor = super::live_actor(tx, &actor_id).await?;
+
+                require_capability(&actor, Capability::WithdrawSubmission)?;
+                // plan/12: the owner or the producer may withdraw; other
+                // agents may not.
+                if actor.kind != crate::model::ActorKind::Human
+                    && actor_id != submission.producer_id
+                {
+                    return Err(DomainError::Forbidden(
+                        "only the owner or the producer may withdraw a submission".into(),
+                    ));
+                }
+                require_revision(expected_revision, submission.revision)?;
+                scope.ensure_unarchived()?;
+                if scope.task.status.is_terminal() || scope.epic.status.is_terminal() {
+                    return Err(DomainError::TerminalScope);
+                }
+                require_pending(&submission)?;
+                let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
+
+                sqlx::query(
+                    "UPDATE submissions SET status = 'withdrawn', withdraw_reason = ?1, \
+                     revision = revision + 1, updated_at = ?2 WHERE id = ?3",
+                )
+                .bind(&reason)
+                .bind(&now_text)
+                .bind(submission_id.to_string())
+                .execute(&mut **tx)
+                .await?;
+
+                // plan/04: plan withdrawal returns planning; work withdrawal
+                // returns execution. Selection and acceptance stay untouched.
+                let next_phase = match submission.kind {
+                    SubmissionKind::Plan => TaskPhase::Planning,
+                    SubmissionKind::Work => TaskPhase::Execution,
+                };
+                sqlx::query(
+                    "UPDATE tasks SET revision = revision + 1, updated_at = ?1, phase = ?2 \
+                     WHERE id = ?3",
+                )
+                .bind(&now_text)
+                .bind(next_phase.as_str())
+                .bind(task_id.to_string())
+                .execute(&mut **tx)
+                .await?;
+
+                let mut pending = Vec::new();
+                pending.push(PendingEvent::submission(
+                    submission_id,
+                    submission.revision.value() + 1,
+                    task_id,
+                ));
+
+                // Withdrawal revokes the active review claim; no Review row is
+                // fabricated (plan/04).
+                let closed = super::revoke_active_claims(
+                    tx,
+                    super::ClaimScope::Task(task_id),
+                    &now_text,
+                    &reason,
+                )
+                .await?;
+                for claim in closed.all() {
+                    pending.push(PendingEvent::claim(
+                        claim.id,
+                        claim.task_revision,
+                        claim.task_id,
+                    ));
+                }
+
+                let epic_id = scope.task.epic_id;
+                let updated = task_row(tx, &project, &task_id)
+                    .await?
+                    .ok_or_else(|| missing_after_write("task"))?;
+                pending.push(PendingEvent::task(task_id, updated.revision, epic_id));
+
+                let events_ctx = CommandContext::for_events(actor, command_id, now);
+                append_events(
+                    tx,
+                    &project,
+                    &events_ctx,
+                    "withdrawSubmission",
+                    &reason,
+                    pending,
+                )
+                .await?;
+
+                let withdrawn = submission_row(tx, &project, &submission_id)
+                    .await?
+                    .ok_or_else(|| missing_after_write("submission"))?;
+                Ok(withdrawn)
+            })
+        })
+        .await
+    }
 }

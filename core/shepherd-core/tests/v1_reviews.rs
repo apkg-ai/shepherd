@@ -966,6 +966,272 @@ async fn review_decision_replays_idempotently() {
     assert_eq!(reviews_count(&s.store).await, 1);
 }
 
+async fn try_withdraw(
+    s: &Setup,
+    who: &Actor,
+    project: ProjectId,
+    submission: Uuid,
+    expected_revision: Option<i64>,
+    reason: &str,
+) -> Result<shepherd_core::model::Submission, DomainError> {
+    s.clock.advance(TimeDelta::milliseconds(2));
+    s.store
+        .withdraw_submission(
+            ctx(who, s.clock.now(), expected_revision),
+            project,
+            submission,
+            reason.to_string(),
+            "withdraw-hash",
+        )
+        .await
+        .map(shepherd_core::commands::Replay::into_inner)
+}
+
+// --- Acceptance: withdrawal revokes review claim; late review fails ---
+
+#[tokio::test]
+async fn withdrawal_revokes_review_claim_and_late_review_fails() {
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Agent).await;
+    let reviewer = agent(&s, "reviewer").await;
+    let (claim_id, token) = claim(
+        &s,
+        &reviewer,
+        f.project,
+        f.task,
+        ClaimPhase::Review,
+        Some(f.submission_id),
+    )
+    .await;
+
+    let withdrawn = try_withdraw(
+        &s,
+        &s.owner,
+        f.project,
+        f.submission_id,
+        Some(1),
+        "owner takes it back",
+    )
+    .await
+    .unwrap();
+    assert_eq!(withdrawn.revision.value(), 2);
+
+    let (sub_status, sub_revision, withdraw_reason) =
+        submission_state(&s.store, f.submission_id).await;
+    assert_eq!(sub_status, "withdrawn");
+    assert_eq!(sub_revision, 2);
+    assert_eq!(withdraw_reason, "owner takes it back");
+    let (claim_status, close_reason, _) = claim_state(&s.store, claim_id).await;
+    assert_eq!(claim_status, "revoked");
+    assert_eq!(close_reason, "owner takes it back");
+    let (_, phase, ..) = task_state(&s.store, f.task).await;
+    assert_eq!(phase, "execution");
+    assert_eq!(reviews_count(&s.store).await, 0, "no fabricated review");
+
+    // Late review: the revoked claim no longer authorizes a decision.
+    let err = try_review(
+        &s,
+        &reviewer,
+        f.project,
+        f.submission_id,
+        Some(2),
+        ReviewDecision::Approve,
+        "",
+        Some((claim_id, &token)),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, DomainError::LeaseInvalid),
+        "expected lease_invalid after withdrawal, got: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn withdrawn_plan_returns_planning_with_selection_retained() {
+    let s = setup().await;
+    let f = pending_plan_submission(&s, ReviewPolicy::Human).await;
+    let (_, _, _, selected_before, _) = task_state(&s.store, f.task).await;
+    assert!(selected_before.is_some());
+
+    // The producer may withdraw its own submission.
+    try_withdraw(
+        &s,
+        &f.producer,
+        f.project,
+        f.submission_id,
+        Some(1),
+        "found a gap",
+    )
+    .await
+    .unwrap();
+
+    let (_, phase, _, selected, accepted) = task_state(&s.store, f.task).await;
+    assert_eq!(phase, "planning");
+    assert_eq!(selected, selected_before, "withdrawal keeps the selection");
+    assert_eq!(accepted, None);
+    let (sub_status, ..) = submission_state(&s.store, f.submission_id).await;
+    assert_eq!(sub_status, "withdrawn");
+}
+
+#[tokio::test]
+async fn unrelated_agent_cannot_withdraw() {
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Agent).await;
+    let bystander = agent(&s, "bystander").await;
+
+    let before = mutation_snapshot(&s.store, f.task, f.submission_id).await;
+    let err = try_withdraw(&s, &bystander, f.project, f.submission_id, Some(1), "mine").await;
+    assert!(
+        matches!(err, Err(DomainError::Forbidden(_))),
+        "expected forbidden, got: {err:?}"
+    );
+    assert_eq!(
+        mutation_snapshot(&s.store, f.task, f.submission_id).await,
+        before
+    );
+}
+
+#[tokio::test]
+async fn withdraw_requires_reason_and_fresh_revision() {
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Human).await;
+    let before = mutation_snapshot(&s.store, f.task, f.submission_id).await;
+
+    let err = try_withdraw(&s, &s.owner, f.project, f.submission_id, Some(1), "  ")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            DomainError::Validation {
+                field: "reason",
+                ..
+            }
+        ),
+        "expected blank-reason validation, got: {err:?}"
+    );
+
+    let err = try_withdraw(&s, &s.owner, f.project, f.submission_id, Some(5), "stale")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            DomainError::RevisionConflict {
+                expected: 5,
+                actual: 1
+            }
+        ),
+        "expected revision conflict, got: {err:?}"
+    );
+    assert_eq!(
+        mutation_snapshot(&s.store, f.task, f.submission_id).await,
+        before
+    );
+
+    try_withdraw(&s, &s.owner, f.project, f.submission_id, Some(1), "redo")
+        .await
+        .unwrap();
+    let err = try_withdraw(&s, &s.owner, f.project, f.submission_id, Some(2), "again")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, DomainError::SubmissionSuperseded(_)),
+        "expected submission_superseded, got: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn withdraw_then_policy_change_is_the_documented_escape() {
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Agent).await;
+
+    try_withdraw(
+        &s,
+        &s.owner,
+        f.project,
+        f.submission_id,
+        Some(1),
+        "no reviewer agent available",
+    )
+    .await
+    .unwrap();
+
+    // Idle after withdrawal: the owner may lower the gate to human review.
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let revision = task_revision(&s.store, f.task).await;
+    s.store
+        .update_task(
+            ctx(&s.owner, s.clock.now(), Some(revision)),
+            f.project,
+            f.task,
+            shepherd_core::model::TaskPatch {
+                title: None,
+                description: None,
+                type_key: None,
+                planning_required: None,
+                plan_review: None,
+                work_review: Some(ReviewPolicy::Human),
+            },
+        )
+        .await
+        .unwrap();
+
+    let policy: String = sqlx::query_scalar("SELECT work_review FROM tasks WHERE id = ?1")
+        .bind(f.task.to_string())
+        .fetch_one(s.store.pool())
+        .await
+        .unwrap();
+    assert_eq!(policy, "human");
+}
+
+#[tokio::test]
+async fn concurrent_decision_and_withdrawal_have_one_winner() {
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Human).await;
+    let store_b = open_store(&s.dir, s.clock.clone()).await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let (approve, withdraw) = tokio::join!(
+        s.store.review_submission(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            f.project,
+            f.submission_id,
+            None,
+            ReviewInput {
+                decision: ReviewDecision::Approve,
+                reason: String::new(),
+                claim_id: None,
+            },
+            "race-approve",
+        ),
+        store_b.withdraw_submission(
+            ctx(&s.owner, s.clock.now(), Some(1)),
+            f.project,
+            f.submission_id,
+            "changed my mind".to_string(),
+            "race-withdraw",
+        ),
+    );
+
+    let winners = [approve.is_ok(), withdraw.is_ok()];
+    assert_eq!(
+        winners.iter().filter(|ok| **ok).count(),
+        1,
+        "exactly one mutation must win: {approve:?} vs {withdraw:?}"
+    );
+    let (sub_status, sub_revision, _) = submission_state(&s.store, f.submission_id).await;
+    assert_eq!(sub_revision, 2);
+    if approve.is_ok() {
+        assert_eq!(sub_status, "accepted");
+        assert_eq!(reviews_count(&s.store).await, 1);
+    } else {
+        assert_eq!(sub_status, "withdrawn");
+        assert_eq!(reviews_count(&s.store).await, 0);
+    }
+}
+
 // --- Acceptance: producer cannot agent-review own output using another session ---
 
 #[tokio::test]
