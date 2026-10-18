@@ -1459,3 +1459,250 @@ async fn review_claim_leaves_task_unchanged() {
     );
     assert!(event_type_count(&s.store, "claim.changed").await >= 1);
 }
+
+// --- Reads: queue ordering, filters, cursors, membership ---
+
+#[tokio::test]
+async fn submissions_list_newest_first_with_filters_and_cursor() {
+    use shepherd_core::model::{SubmissionKind, SubmissionStatus};
+    use shepherd_core::queries::{ListParams, SubmissionListFilters};
+
+    let s = setup().await;
+    // Task A: one rejected and one pending work submission.
+    let f = pending_work_submission(&s, ReviewPolicy::Human).await;
+    let first_submission = f.submission_id;
+    try_review(
+        &s,
+        &s.owner,
+        f.project,
+        first_submission,
+        Some(1),
+        ReviewDecision::Reject,
+        "redo",
+        None,
+    )
+    .await
+    .unwrap();
+    let (claim_id, token) = claim(
+        &s,
+        &f.producer,
+        f.project,
+        f.task,
+        ClaimPhase::Execute,
+        None,
+    )
+    .await;
+    let output = create_doc(&s, f.project, f.task, DocumentKind::Finding).await;
+    report_success(
+        &s,
+        &f.producer,
+        f.project,
+        claim_id,
+        &token,
+        vec![output.latest_revision_id.as_uuid()],
+    )
+    .await;
+    let second_submission = pending_submission_id(&s.store, f.task).await;
+
+    let all = s
+        .store
+        .list_submissions(
+            &f.project,
+            &SubmissionListFilters::default(),
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(all.items.len(), 2);
+    assert_eq!(all.items[0].id, second_submission, "newest first");
+    assert_eq!(all.items[1].id, first_submission);
+    assert!(all.next_cursor.is_none());
+
+    let rejected = s
+        .store
+        .list_submissions(
+            &f.project,
+            &SubmissionListFilters {
+                status: Some(SubmissionStatus::Rejected),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.items.len(), 1);
+    assert_eq!(rejected.items[0].id, first_submission);
+
+    let work_for_task = s
+        .store
+        .list_submissions(
+            &f.project,
+            &SubmissionListFilters {
+                task_id: Some(f.task),
+                kind: Some(SubmissionKind::Work),
+                policy: Some(ReviewPolicy::Human),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(work_for_task.items.len(), 2);
+
+    // Keyset page walk: newest on page one, cursor reaches the older row.
+    let page_one = s
+        .store
+        .list_submissions(
+            &f.project,
+            &SubmissionListFilters::default(),
+            &ListParams {
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page_one.items[0].id, second_submission);
+    let cursor = page_one.next_cursor.clone().unwrap();
+    let page_two = s
+        .store
+        .list_submissions(
+            &f.project,
+            &SubmissionListFilters::default(),
+            &ListParams {
+                limit: Some(1),
+                cursor: Some(cursor.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page_two.items[0].id, first_submission);
+
+    // A cursor minted for a different filter fingerprint is rejected.
+    let err = s
+        .store
+        .list_submissions(
+            &f.project,
+            &SubmissionListFilters {
+                status: Some(SubmissionStatus::Pending),
+                ..Default::default()
+            },
+            &ListParams {
+                limit: Some(1),
+                cursor: Some(cursor),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, DomainError::InvalidCursor(_)),
+        "expected invalid_cursor, got: {err:?}"
+    );
+    let err = s
+        .store
+        .list_submissions(
+            &f.project,
+            &SubmissionListFilters::default(),
+            &ListParams {
+                cursor: Some("tampered".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, DomainError::InvalidCursor(_)),
+        "expected invalid_cursor, got: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn submission_reads_enforce_project_membership() {
+    use shepherd_core::queries::{ListParams, SubmissionListFilters};
+
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Human).await;
+
+    let submission = s
+        .store
+        .get_submission(&f.project, &f.submission_id)
+        .await
+        .unwrap();
+    assert_eq!(submission.task_id, f.task);
+    assert_eq!(submission.producer_id, f.producer.id);
+    assert_eq!(submission.status.as_str(), "pending");
+    assert_eq!(submission.kind.as_str(), "work");
+    assert_eq!(submission.policy.as_str(), "human");
+    assert_eq!(submission.document_revision_ids.len(), 1);
+
+    let foreign = create_project(&s, "Other").await;
+    let err = s
+        .store
+        .get_submission(&foreign.id, &f.submission_id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+
+    let err = s
+        .store
+        .get_submission(&f.project, &Uuid::nil())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+
+    let err = s
+        .store
+        .list_submissions(
+            &f.project,
+            &SubmissionListFilters {
+                task_id: Some(TaskId::from_uuid(Uuid::nil())),
+                ..Default::default()
+            },
+            &ListParams::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+
+    let err = s
+        .store
+        .list_submission_reviews(&f.project, &Uuid::nil(), &ListParams::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::NotFound));
+}
+
+#[tokio::test]
+async fn submission_reviews_list_returns_the_decision() {
+    use shepherd_core::queries::ListParams;
+
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Human).await;
+    try_review(
+        &s,
+        &s.owner,
+        f.project,
+        f.submission_id,
+        Some(1),
+        ReviewDecision::Reject,
+        "not enough proof",
+        None,
+    )
+    .await
+    .unwrap();
+
+    let page = s
+        .store
+        .list_submission_reviews(&f.project, &f.submission_id, &ListParams::default())
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+    let review = &page.items[0];
+    assert_eq!(review.submission_id, f.submission_id);
+    assert_eq!(review.actor_id, s.owner.id);
+    assert_eq!(review.decision.as_str(), "reject");
+    assert_eq!(review.reason, "not enough proof");
+    assert!(page.next_cursor.is_none());
+}
