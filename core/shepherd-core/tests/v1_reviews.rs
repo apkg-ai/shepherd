@@ -1787,3 +1787,332 @@ async fn revoking_reviewer_closes_claim_and_frees_the_review() {
     assert_eq!(status, "done");
     assert_eq!(phase, "complete");
 }
+
+// --- Acceptance: none policy creates accepted submission without fake human Review ---
+
+#[tokio::test]
+async fn none_policy_accepts_submission_without_fake_review() {
+    let s = setup().await;
+    let (project, _, task) = scaffold(&s, false, ReviewPolicy::None, ReviewPolicy::None).await;
+    let producer = agent(&s, "producer").await;
+    let (claim_id, token) = claim(&s, &producer, project, task.id, ClaimPhase::Execute, None).await;
+    let output = create_doc(&s, project, task.id, DocumentKind::Finding).await;
+    report_success(
+        &s,
+        &producer,
+        project,
+        claim_id,
+        &token,
+        vec![output.latest_revision_id.as_uuid()],
+    )
+    .await;
+
+    let (sub_status,): (String,) =
+        sqlx::query_as("SELECT status FROM submissions WHERE task_id = ?1")
+            .bind(task.id.to_string())
+            .fetch_one(s.store.pool())
+            .await
+            .unwrap();
+    assert_eq!(sub_status, "accepted");
+    let (status, phase, ..) = task_state(&s.store, task.id).await;
+    assert_eq!(status, "done");
+    assert_eq!(phase, "complete");
+    assert_eq!(reviews_count(&s.store).await, 0, "no fabricated review");
+    assert_eq!(event_type_count(&s.store, "review.recorded").await, 0);
+}
+
+// --- Expiry: late review fails, the queue is not deadlocked ---
+
+#[tokio::test]
+async fn expired_review_claim_fails_late_decision_and_frees_the_queue() {
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Agent).await;
+    let reviewer = agent(&s, "reviewer").await;
+    let (claim_id, token) = claim(
+        &s,
+        &reviewer,
+        f.project,
+        f.task,
+        ClaimPhase::Review,
+        Some(f.submission_id),
+    )
+    .await;
+
+    // Past the 300s default TTL: the lease no longer authorizes a decision.
+    s.clock.advance(TimeDelta::seconds(1_000));
+    let err = try_review(
+        &s,
+        &reviewer,
+        f.project,
+        f.submission_id,
+        Some(1),
+        ReviewDecision::Approve,
+        "",
+        Some((claim_id, &token)),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, DomainError::LeaseInvalid),
+        "expected lease_invalid after expiry, got: {err:?}"
+    );
+    // The failed decision rolled back whole, reconcile included: the raw row
+    // still says active until the next successful command sweeps it.
+    let (claim_status, ..) = claim_state(&s.store, claim_id).await;
+    assert_eq!(claim_status, "active");
+
+    // A distinct agent claims the still-pending submission and decides.
+    let replacement = agent(&s, "replacement").await;
+    let (new_claim, new_token) = claim(
+        &s,
+        &replacement,
+        f.project,
+        f.task,
+        ClaimPhase::Review,
+        Some(f.submission_id),
+    )
+    .await;
+    // Acquiring the replacement claim reconciled the stale one to expired.
+    let (claim_status, ..) = claim_state(&s.store, claim_id).await;
+    assert_eq!(claim_status, "expired");
+    try_review(
+        &s,
+        &replacement,
+        f.project,
+        f.submission_id,
+        Some(1),
+        ReviewDecision::Approve,
+        "",
+        Some((new_claim, &new_token)),
+    )
+    .await
+    .unwrap();
+    let (status, ..) = task_state(&s.store, f.task).await;
+    assert_eq!(status, "done");
+}
+
+// --- Blocking: claim revoked, submission stays pending ---
+
+#[tokio::test]
+async fn blocking_task_revokes_review_claim_but_submission_stays_pending() {
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Agent).await;
+    let reviewer = agent(&s, "reviewer").await;
+    let (claim_id, _token) = claim(
+        &s,
+        &reviewer,
+        f.project,
+        f.task,
+        ClaimPhase::Review,
+        Some(f.submission_id),
+    )
+    .await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let revision = task_revision(&s.store, f.task).await;
+    s.store
+        .block_task(
+            ctx(&s.owner, s.clock.now(), Some(revision)),
+            f.project,
+            f.task,
+            "hold the line".to_string(),
+        )
+        .await
+        .unwrap();
+
+    let (claim_status, ..) = claim_state(&s.store, claim_id).await;
+    assert_eq!(claim_status, "revoked");
+    let (sub_status, ..) = submission_state(&s.store, f.submission_id).await;
+    assert_eq!(sub_status, "pending", "block keeps the submission pending");
+
+    // Blocked tasks accept no new review claim.
+    let other = agent(&s, "other").await;
+    let err = try_claim(
+        &s,
+        &other,
+        f.project,
+        f.task,
+        ClaimPhase::Review,
+        Some(f.submission_id),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, DomainError::NotEligible(_)),
+        "expected not_eligible while blocked, got: {err:?}"
+    );
+
+    // Unblock: the pending review resumes.
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let revision = task_revision(&s.store, f.task).await;
+    s.store
+        .unblock_task(
+            ctx(&s.owner, s.clock.now(), Some(revision)),
+            f.project,
+            f.task,
+        )
+        .await
+        .unwrap();
+    let (new_claim, new_token) = claim(
+        &s,
+        &other,
+        f.project,
+        f.task,
+        ClaimPhase::Review,
+        Some(f.submission_id),
+    )
+    .await;
+    try_review(
+        &s,
+        &other,
+        f.project,
+        f.submission_id,
+        Some(1),
+        ReviewDecision::Approve,
+        "",
+        Some((new_claim, &new_token)),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn blocked_task_rejects_human_decision_as_not_eligible() {
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Human).await;
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let revision = task_revision(&s.store, f.task).await;
+    s.store
+        .block_task(
+            ctx(&s.owner, s.clock.now(), Some(revision)),
+            f.project,
+            f.task,
+            "frozen".to_string(),
+        )
+        .await
+        .unwrap();
+
+    let err = try_review(
+        &s,
+        &s.owner,
+        f.project,
+        f.submission_id,
+        Some(1),
+        ReviewDecision::Approve,
+        "",
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, DomainError::NotEligible(_)),
+        "expected not_eligible while blocked, got: {err:?}"
+    );
+}
+
+// --- Superseded: an old submission id never matches a new pending one ---
+
+#[tokio::test]
+async fn review_claim_with_superseded_submission_id_fails() {
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Agent).await;
+    let old_submission = f.submission_id;
+    let reviewer = agent(&s, "reviewer").await;
+    let (claim_id, token) = claim(
+        &s,
+        &reviewer,
+        f.project,
+        f.task,
+        ClaimPhase::Review,
+        Some(old_submission),
+    )
+    .await;
+    try_review(
+        &s,
+        &reviewer,
+        f.project,
+        old_submission,
+        Some(1),
+        ReviewDecision::Reject,
+        "insufficient",
+        Some((claim_id, &token)),
+    )
+    .await
+    .unwrap();
+
+    // Producer re-executes; a new pending submission replaces the rejected one.
+    let (claim_id, token) = claim(
+        &s,
+        &f.producer,
+        f.project,
+        f.task,
+        ClaimPhase::Execute,
+        None,
+    )
+    .await;
+    let output = create_doc(&s, f.project, f.task, DocumentKind::Finding).await;
+    report_success(
+        &s,
+        &f.producer,
+        f.project,
+        claim_id,
+        &token,
+        vec![output.latest_revision_id.as_uuid()],
+    )
+    .await;
+
+    let err = try_claim(
+        &s,
+        &reviewer,
+        f.project,
+        f.task,
+        ClaimPhase::Review,
+        Some(old_submission),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, DomainError::SubmissionSuperseded(_)),
+        "expected submission_superseded for the old id, got: {err:?}"
+    );
+}
+
+// --- Withdrawal replays idempotently ---
+
+#[tokio::test]
+async fn withdrawal_replays_idempotently() {
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Human).await;
+    let key = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let first = s
+        .store
+        .withdraw_submission(
+            ctx_with_key(&s.owner, s.clock.now(), Some(1), key),
+            f.project,
+            f.submission_id,
+            "rethinking".to_string(),
+            "withdraw-replay",
+        )
+        .await
+        .unwrap();
+    assert!(!first.is_replay());
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    let second = s
+        .store
+        .withdraw_submission(
+            ctx_with_key(&s.owner, s.clock.now(), Some(1), key),
+            f.project,
+            f.submission_id,
+            "rethinking".to_string(),
+            "withdraw-replay",
+        )
+        .await
+        .unwrap();
+    assert!(second.is_replay());
+    let (sub_status, sub_revision, _) = submission_state(&s.store, f.submission_id).await;
+    assert_eq!(sub_status, "withdrawn");
+    assert_eq!(sub_revision, 2, "replay does not withdraw twice");
+}
