@@ -338,6 +338,7 @@ pub(crate) async fn epic_has_active_work(
 pub(crate) enum ClaimScope {
     Task(TaskId),
     Epic(EpicId),
+    Actor(ActorId),
 }
 
 impl ClaimScope {
@@ -345,6 +346,7 @@ impl ClaimScope {
         match self {
             ClaimScope::Task(_) => "task_id = ?1",
             ClaimScope::Epic(_) => "task_id IN (SELECT id FROM tasks WHERE epic_id = ?1)",
+            ClaimScope::Actor(_) => "actor_id = ?1",
         }
     }
 
@@ -352,6 +354,7 @@ impl ClaimScope {
         match self {
             ClaimScope::Task(task) => task.as_uuid(),
             ClaimScope::Epic(epic) => epic.as_uuid(),
+            ClaimScope::Actor(actor) => actor.as_uuid(),
         }
     }
 }

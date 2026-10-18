@@ -1,8 +1,14 @@
 use sqlx::{QueryBuilder, Sqlite};
 
+use std::collections::BTreeMap;
+
 use super::credentials::{actor_from_joined_row, insert_credential, security_audit};
-use crate::commands::{CommandContext, CommandResult, Replay, live_actor};
+use crate::commands::{
+    ClaimScope, CommandContext, CommandResult, PendingEvent, Replay, append_events, live_actor,
+    revoke_active_claims,
+};
 use crate::error::DomainError;
+use crate::model::ProjectId;
 use crate::model::{
     Ack, Actor, ActorId, ActorKind, AgentCreate, AgentTokenGrant, Capability, NAME_MAX_CHARS,
     REASON_MAX_CHARS, generate_token, require_capability, token_digest, validate_required_text,
@@ -58,8 +64,8 @@ impl Store {
         .await
     }
 
-    /// Atomically marks the actor revoked and closes its credentials and
-    /// browser sessions. Claim closure joins in step 009 when claims exist.
+    /// Atomically marks the actor revoked and closes its credentials, browser
+    /// sessions and active claims (plan/03: reviews and reports are preserved).
     pub async fn revoke_agent(
         &self,
         ctx: CommandContext,
@@ -104,6 +110,34 @@ impl Store {
                     .bind(agent.to_string())
                     .execute(&mut **tx)
                     .await?;
+                let closed =
+                    revoke_active_claims(tx, ClaimScope::Actor(agent), &now, &reason).await?;
+                // Claims may span projects; claim.changed events group per project.
+                let mut by_project: BTreeMap<String, Vec<PendingEvent>> = BTreeMap::new();
+                for claim in closed.all() {
+                    let project: String =
+                        sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = ?1")
+                            .bind(claim.task_id.to_string())
+                            .fetch_one(&mut **tx)
+                            .await?;
+                    by_project
+                        .entry(project)
+                        .or_default()
+                        .push(PendingEvent::claim(
+                            claim.id,
+                            claim.task_revision,
+                            claim.task_id,
+                        ));
+                }
+                let events_ctx = CommandContext::for_events(actor, command_id, at);
+                for (project, events) in by_project {
+                    let project_id = ProjectId::from_uuid(crate::storage::rows::parse_uuid(
+                        "tasks.project_id",
+                        &project,
+                    )?);
+                    append_events(tx, &project_id, &events_ctx, "revokeAgent", &reason, events)
+                        .await?;
+                }
                 security_audit(
                     &mut *tx,
                     &caller,

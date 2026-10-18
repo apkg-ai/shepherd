@@ -1706,3 +1706,84 @@ async fn submission_reviews_list_returns_the_decision() {
     assert_eq!(review.reason, "not enough proof");
     assert!(page.next_cursor.is_none());
 }
+
+// --- Revocation closes the reviewer's claim (plan/03, plan/12) ---
+
+#[tokio::test]
+async fn revoking_reviewer_closes_claim_and_frees_the_review() {
+    let s = setup().await;
+    let f = pending_work_submission(&s, ReviewPolicy::Agent).await;
+    let reviewer = agent(&s, "reviewer").await;
+    let (claim_id, token) = claim(
+        &s,
+        &reviewer,
+        f.project,
+        f.task,
+        ClaimPhase::Review,
+        Some(f.submission_id),
+    )
+    .await;
+
+    s.clock.advance(TimeDelta::milliseconds(2));
+    s.store
+        .revoke_agent(
+            ctx(&s.owner, s.clock.now(), None),
+            reviewer.id,
+            "compromised credential".to_string(),
+            "revoke-hash",
+        )
+        .await
+        .unwrap();
+
+    let (claim_status, close_reason, _) = claim_state(&s.store, claim_id).await;
+    assert_eq!(claim_status, "revoked");
+    assert_eq!(close_reason, "compromised credential");
+
+    // The revoked principal cannot decide.
+    let err = try_review(
+        &s,
+        &reviewer,
+        f.project,
+        f.submission_id,
+        Some(1),
+        ReviewDecision::Approve,
+        "",
+        Some((claim_id, &token)),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, DomainError::Forbidden(_)),
+        "expected forbidden for a revoked actor, got: {err:?}"
+    );
+
+    // The submission stays pending and a distinct agent takes over
+    // immediately — no TTL wait behind the revoked claim.
+    let (sub_status, ..) = submission_state(&s.store, f.submission_id).await;
+    assert_eq!(sub_status, "pending");
+    let replacement = agent(&s, "replacement").await;
+    let (new_claim, new_token) = claim(
+        &s,
+        &replacement,
+        f.project,
+        f.task,
+        ClaimPhase::Review,
+        Some(f.submission_id),
+    )
+    .await;
+    try_review(
+        &s,
+        &replacement,
+        f.project,
+        f.submission_id,
+        Some(1),
+        ReviewDecision::Approve,
+        "",
+        Some((new_claim, &new_token)),
+    )
+    .await
+    .unwrap();
+    let (status, phase, ..) = task_state(&s.store, f.task).await;
+    assert_eq!(status, "done");
+    assert_eq!(phase, "complete");
+}
