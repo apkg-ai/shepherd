@@ -577,6 +577,18 @@ impl PendingEvent {
             affected_ids: vec![owner],
         }
     }
+
+    // Immutable like session.recorded; affected carries submission then task
+    // (plan/08: review history, submission detail/queue, task context).
+    pub(crate) fn review(id: Uuid, submission: Uuid, task: TaskId) -> Self {
+        Self {
+            event_type: "review.recorded",
+            kind_rank: 10,
+            resource_id: id,
+            resource_revision: 0,
+            affected_ids: vec![submission, task.as_uuid()],
+        }
+    }
 }
 
 // `reason` is the command reason or empty string; durable explanations for

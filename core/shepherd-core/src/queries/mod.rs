@@ -1,6 +1,7 @@
 pub(crate) mod claims;
 pub(crate) mod graph;
 pub(crate) mod hierarchy;
+pub(crate) mod submissions;
 pub(crate) mod work;
 
 pub use claims::ClaimListFilters;
