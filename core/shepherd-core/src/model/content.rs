@@ -103,7 +103,7 @@ typed_id_serde!(serde_document_id, DocumentId);
 typed_id_serde!(serde_document_revision_id, DocumentRevisionId);
 typed_id_serde!(serde_project_id, ProjectId);
 
-mod serde_revision {
+pub(super) mod serde_revision {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     use crate::model::Revision;
