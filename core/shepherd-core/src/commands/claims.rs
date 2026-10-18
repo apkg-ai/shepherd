@@ -141,19 +141,18 @@ impl Store {
         input: ClaimInput,
         request_hash: &str,
     ) -> Result<Replay<ClaimGrant>, DomainError> {
-        if input.phase == ClaimPhase::Review {
-            return Err(DomainError::Validation {
-                field: "phase",
-                message: "review claims are not yet supported".into(),
-            });
-        }
-        // plan/04: only review claims reference a submission.
-        if input.submission_id.is_some() {
+        // plan/04: review claims reference the pending submission; no other
+        // phase does.
+        if input.phase == ClaimPhase::Review && input.submission_id.is_none() {
             return Err(DomainError::Validation {
                 field: "submission_id",
-                message: "submission_id is only valid for review claims, which are not yet \
-                          supported"
-                    .into(),
+                message: "review claims must reference the pending submission".into(),
+            });
+        }
+        if input.phase != ClaimPhase::Review && input.submission_id.is_some() {
+            return Err(DomainError::Validation {
+                field: "submission_id",
+                message: "only review claims reference a submission".into(),
             });
         }
         let ttl = validate_ttl(input.ttl_seconds)?;
@@ -172,6 +171,10 @@ impl Store {
                 let scope = task_scope(tx, &project, &task_id).await?;
                 let actor = super::live_actor(tx, &actor_id).await?;
                 require_capability(&actor, Capability::ClaimWork)?;
+                // plan/12: agent review is agent-only; humans review claimless.
+                if phase == ClaimPhase::Review {
+                    require_capability(&actor, Capability::ReviewAgentPolicy)?;
+                }
                 require_revision(expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.task.status.is_terminal() || scope.epic.status.is_terminal() {
@@ -187,15 +190,26 @@ impl Store {
                 let eligible = match phase {
                     ClaimPhase::Plan => eligibility.can_plan,
                     ClaimPhase::Execute => eligibility.can_execute,
-                    ClaimPhase::Review => unreachable!(),
+                    ClaimPhase::Review => eligibility.can_review,
                 };
                 if !eligible {
+                    if phase == ClaimPhase::Review {
+                        return Err(super::reviews::review_gate_error(&eligibility.reasons));
+                    }
                     let reasons: Vec<&str> = eligibility
                         .reasons
                         .iter()
                         .map(|r| r.code.as_str())
                         .collect();
                     return Err(DomainError::NotEligible(reasons.join(", ")));
+                }
+                if phase == ClaimPhase::Review {
+                    let pending_id = snapshot.pending_submission.as_ref().map(|p| p.id);
+                    if pending_id != input.submission_id {
+                        return Err(DomainError::SubmissionSuperseded(
+                            "submission is not the pending submission for this task".into(),
+                        ));
+                    }
                 }
 
                 let lease_token = lease::generate_lease_token();
@@ -235,19 +249,6 @@ impl Store {
                 .execute(&mut **tx)
                 .await?;
 
-                sqlx::query(
-                    "UPDATE tasks SET status = 'active', revision = revision + 1, \
-                     updated_at = ?1 WHERE id = ?2",
-                )
-                .bind(&now_text)
-                .bind(task_id.to_string())
-                .execute(&mut **tx)
-                .await?;
-
-                let updated_task = task_row(tx, &project, &task_id)
-                    .await?
-                    .ok_or_else(|| missing_after_write("task"))?;
-
                 let mut pending = Vec::new();
 
                 for closed in &expired {
@@ -260,22 +261,40 @@ impl Store {
 
                 let epic_id = scope.epic.id;
                 let goal_id = scope.epic.goal_id;
-                if phase == ClaimPhase::Execute && scope.epic.status == EpicStatus::Open {
+                // plan/04: review claims leave the task row untouched and emit
+                // claim.changed only.
+                if phase != ClaimPhase::Review {
                     sqlx::query(
-                        "UPDATE epics SET status = 'active', revision = revision + 1, \
-                         updated_at = ?1 WHERE id = ?2 AND status = 'open'",
+                        "UPDATE tasks SET status = 'active', revision = revision + 1, \
+                         updated_at = ?1 WHERE id = ?2",
                     )
                     .bind(&now_text)
-                    .bind(epic_id.to_string())
+                    .bind(task_id.to_string())
                     .execute(&mut **tx)
                     .await?;
-                    let updated_epic = epic_row(tx, &project, &epic_id)
+
+                    let updated_task = task_row(tx, &project, &task_id)
                         .await?
-                        .ok_or_else(|| missing_after_write("epic"))?;
-                    pending.push(PendingEvent::epic(epic_id, updated_epic.revision, goal_id));
+                        .ok_or_else(|| missing_after_write("task"))?;
+
+                    if phase == ClaimPhase::Execute && scope.epic.status == EpicStatus::Open {
+                        sqlx::query(
+                            "UPDATE epics SET status = 'active', revision = revision + 1, \
+                             updated_at = ?1 WHERE id = ?2 AND status = 'open'",
+                        )
+                        .bind(&now_text)
+                        .bind(epic_id.to_string())
+                        .execute(&mut **tx)
+                        .await?;
+                        let updated_epic = epic_row(tx, &project, &epic_id)
+                            .await?
+                            .ok_or_else(|| missing_after_write("epic"))?;
+                        pending.push(PendingEvent::epic(epic_id, updated_epic.revision, goal_id));
+                    }
+
+                    pending.push(PendingEvent::task(task_id, updated_task.revision, epic_id));
                 }
 
-                pending.push(PendingEvent::task(task_id, updated_task.revision, epic_id));
                 pending.push(PendingEvent::claim(claim_id, task_rev, task_id));
 
                 let ctx_for_events = CommandContext::for_events(actor, command_id, now);

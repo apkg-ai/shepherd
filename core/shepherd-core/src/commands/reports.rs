@@ -74,11 +74,12 @@ impl Store {
                 let expected_phase = match row.phase {
                     ClaimPhase::Plan => TaskPhase::Planning,
                     ClaimPhase::Execute => TaskPhase::Execution,
+                    // sessions.phase only stores plan|execute; review claims
+                    // conclude via reviewSubmission or release/expiry.
                     ClaimPhase::Review => {
-                        return Err(DomainError::Validation {
-                            field: "phase",
-                            message: "review reports are not yet supported".into(),
-                        });
+                        return Err(DomainError::InvalidState(
+                            "review claims do not report".into(),
+                        ));
                     }
                 };
                 if scope.task.phase != expected_phase {
@@ -312,10 +313,9 @@ impl Store {
                     (ClaimPhase::Review, _) => {
                         // Defense in depth: the expected_phase guard above
                         // already rejects this; reordering must not panic.
-                        return Err(DomainError::Validation {
-                            field: "phase",
-                            message: "review reports are not yet supported".into(),
-                        });
+                        return Err(DomainError::InvalidState(
+                            "review claims do not report".into(),
+                        ));
                     }
                 }
 
@@ -1078,7 +1078,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn review_claim_report_is_unsupported() {
+    async fn review_claims_never_report() {
         let f = fixture(false, ReviewPolicy::None, ReviewPolicy::None).await;
         let claim_id = crate::model::new_v7(f.clock.now());
         let hash = crate::lease::lease_hash("seed-token");
@@ -1100,9 +1100,6 @@ mod tests {
         let err = report(&f, &f.owner, claim_id, "seed-token", failed_input())
             .await
             .unwrap_err();
-        assert!(matches!(
-            err,
-            DomainError::Validation { field: "phase", .. }
-        ));
+        assert!(matches!(err, DomainError::InvalidState(_)));
     }
 }

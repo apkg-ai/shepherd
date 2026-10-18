@@ -5,6 +5,7 @@ mod dependencies;
 mod hierarchy;
 mod identity;
 mod reports;
+mod reviews;
 
 pub use content::DocumentListFilters;
 pub use identity::IdentityPaths;
