@@ -1,6 +1,6 @@
 # 012 — Human and independent agent review
 
-Status: not started. Requirements: REVIEW-01 REVIEW-02.
+Status: implemented on branch `v1-012-reviews` (PR pending). Requirements: REVIEW-01 REVIEW-02.
 
 ## Objective and prerequisites
 
@@ -58,13 +58,27 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Completion checklist
 
-- [ ] Referenced requirements and every acceptance sentence implemented.
-- [ ] Schemas, permissions, transitions and clients remain consistent.
-- [ ] Success and rejection behavior verified at the public boundary.
-- [ ] Required commands pass; material environmental limitation recorded accurately.
-- [ ] Temporary code and next-step dependencies documented.
-- [ ] Handoff below completed; next eligible step linked.
+- [x] Referenced requirements and every acceptance sentence implemented.
+- [x] Schemas, permissions, transitions and clients remain consistent.
+- [x] Success and rejection behavior verified at the public boundary.
+- [x] Required commands pass; material environmental limitation recorded accurately.
+- [x] Temporary code and next-step dependencies documented.
+- [x] Handoff below completed; next eligible step linked.
 
 ## Implementation handoff record
 
-Fill when implementing, not during planning: commit/branch; files changed; test commands and results; any reproduced limitation; temporary interfaces; next eligible step IDs. If an acceptance criterion cannot pass, leave this step incomplete and explain the concrete blocker. Do not mark complete for code that merely compiles.
+Branch: `v1-012-reviews`. Commits: `0e9466d` (review model vocabulary + error variants), `9cbb6f3` (review claim acquisition + permanent report guards), `816a57b` (review decisions with approve/reject transitions), `3e19c30` (submission withdrawal), `84f2cc9` (submission/review read commands), `fac3252` (revoke_agent claim closure), `258e443` (expiry/blocking/replay scenarios), `af10b9e` (in-module unit tests for the coverage gate).
+
+Files changed: `core/shepherd-core/src/model/review.rs` (new: SubmissionKind/SubmissionStatus/ReviewDecision enums, wire `Submission` — omits persisted-only `withdraw_reason` — immutable `Review`, `ReviewInput`), `src/error.rs` (new variants `ReviewerPolicy` → `reviewer_policy` 403, `ProducerCannotReview` → `producer_cannot_review` 403, `SubmissionSuperseded` → `submission_superseded` 409), `src/commands/reviews.rs` (new: `review_submission`, `withdraw_submission`, shared `review_gate_error`, in-module unit suite), `src/commands/claims.rs` (review-phase claims implemented: `ReviewAgentPolicy` capability gate, `can_review` eligibility, pending-submission pin, no task bump — `claim.changed` only per plan/04), `src/commands/reports.rs` (scaffold guards now permanent `invalid_state`: review claims never report, sessions CHECK only stores plan|execute), `src/queries/submissions.rs` (new: shared `submission_row` loader/mapper, `list_submissions` newest-first descending keyset with task/status/kind/policy filters, `get_submission`, `list_submission_reviews`), `src/commands/identity/agents.rs` + `commands/mod.rs` (`ClaimScope::Actor`, `PendingEvent::review` rank 10, revocation closes claims), `src/model/mod.rs`/`model/content.rs`/`queries/mod.rs` (wiring; `serde_revision` widened to `pub(super)`), `tests/v1_reviews.rs` (new, 35 named tests), `tests/v1_phase_claims.rs` (scaffold-guard test became `review_claim_shape_is_validated`).
+
+Test commands and results (run from `core/`): `cargo fmt --check` clean; `cargo clippy --all-targets -- -D warnings` clean; `cargo test --workspace` all suites pass (341 lib tests incl. 10 review command/read unit tests; 35 v1_reviews integration tests; 601 workspace total); `cargo test --workspace --doc` pass; coverage via `cargo llvm-cov` + `node scripts/coverage-report.ts --dir core/coverage --report core`: unit 96.9% (gate ≥ 95), integration 93.1% (gate ≥ 70), union 96.8% (gate ≥ 92); `python3 plan/validate.py` PASS. No reproduced limitation; the served contract in `openapi/shepherd.yaml` is untouched — review operations are core-only until step 015 wires HTTP (If-Match/Idempotency-Key/X-Lease-Token header mapping; wire `ReasonInput` maps to the `reason: String` parameter).
+
+Acceptance sentence → regression test: producer/other-session → `producer_cannot_agent_review_own_output_using_another_session` (fresh claim = fresh session; a separately registered agent succeeds, D06); agent on human gate → `agent_token_cannot_approve_human_gate` (plus `owner_cannot_decide_agent_policy_review` for the hard agent gate, D15); rejected plan → `rejected_plan_returns_planning_and_clears_selection_and_acceptance` — **discharges the 010/011 obligation: rejection clears both `selected_plan_revision_id` and `accepted_plan_submission_id`**; rejected work → `rejected_work_returns_execution_with_plan_retained`; withdrawal → `withdrawal_revokes_review_claim_and_late_review_fails`; none policy → `none_policy_accepts_submission_without_fake_review` (zero reviews rows, zero review.recorded events). Adversarial coverage: stale If-Match + idempotent replay on decide and withdraw, two-pool races (double review claim; decide-vs-withdraw), TTL expiry via TestClock with queue recovery, block revokes the claim while the submission stays pending, superseded submission ids, blank/oversize reasons, with persisted-state rollback asserts (`mutation_snapshot`).
+
+Design decisions recorded: review claims close as `released` on decision, `revoked` on withdraw/block/cancel/actor revocation, `expired` on TTL — never `reported`; `review.recorded` is immutable (resource_revision 0, rank 10, affected `[submission, task]`); a failed decision rolls back whole including the reconcile sweep, so a stale claim row reads `active` until the next successful command sweeps it (asserted in `expired_review_claim_fails_late_decision_and_frees_the_queue`); missing lease token on an agent decision maps to `lease_invalid` (409), not `precondition_required` — 428 stays revision-only; 403 (`reviewer_policy`/`producer_cannot_review`) wins over 409 `not_eligible` per plan/04 "human policy enforcement always returns 403"; the review-report guard is permanent `invalid_state` (pre-existing API-02 deviation, re-noted).
+
+Boundary exception (owner-approved): `commands/identity/agents.rs` is outside this step's file list, but `revoke_agent` violated plan/03/plan/12 ("revoking an actor revokes all its active claims") — fixed in the dedicated commit `fac3252` via `ClaimScope::Actor` with per-project `claim.changed` events; regression `revoking_reviewer_closes_claim_and_frees_the_review` lives in `tests/v1_reviews.rs` (not the identity suite) because the full public review flow exists there.
+
+Remaining `testing::seed_claim`/`seed_submission` call sites (kept deliberately): `tests/v1_completion_and_blocking.rs` and `tests/v1_proposals_and_policy.rs` seed claims/submissions to isolate active-work guards with exact revision/event-count assertions — driving the public claim flow there would bump revisions and add events, weakening those assertions; the review flow itself is exercised exclusively through public commands in `tests/v1_reviews.rs` and the reviews in-module suite. `Store::report_failpoint` and `complete_task_for_test` remain test-only drivers; `select_task_plan` idempotency remains the step-015 obligation.
+
+Next eligible step: [013 — context and history](013-context-and-history.md), which consumes the review events and immutable records added here.
