@@ -422,3 +422,755 @@ impl Store {
         .await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use chrono::TimeDelta;
+
+    use super::*;
+    use crate::model::{
+        Actor, ActorKind, ClaimInput, Clock, CommandId, DocumentKind, EpicCreate, GoalCreate,
+        ProjectCreate, ProjectId, ReportInput, SelectPlanInput, SessionOutcome, Task, TaskCreate,
+        TaskId, TestClock,
+    };
+    use crate::queries::{ListParams, SubmissionListFilters};
+    use crate::storage::open;
+    use crate::storage::rows::insert_actor;
+    use crate::storage::testing::{store_options, test_clock};
+    use crate::workflow::eligibility::GateReason;
+    use uuid::Uuid;
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        clock: Arc<TestClock>,
+        store: Store,
+        owner: Actor,
+        producer: Actor,
+        project: ProjectId,
+        task: Task,
+    }
+
+    fn ctx(actor: &Actor, clock: &TestClock, revision: Option<i64>) -> CommandContext {
+        CommandContext {
+            actor: actor.clone(),
+            command_id: CommandId::generate(clock.now()),
+            idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            expected_revision: revision,
+            now: clock.now(),
+        }
+    }
+
+    async fn register(store: &Store, clock: &TestClock, kind: ActorKind, label: &str) -> Actor {
+        let actor = Actor {
+            id: crate::model::ActorId::generate(clock.now()),
+            kind,
+            label: label.to_string(),
+            revoked: false,
+            created_at: clock.now(),
+        };
+        let registered = actor.clone();
+        store
+            .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &registered).await }))
+            .await
+            .unwrap();
+        actor
+    }
+
+    async fn fixture(
+        planning_required: bool,
+        plan_review: ReviewPolicy,
+        work_review: ReviewPolicy,
+    ) -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = test_clock();
+        let store = open(store_options(dir.path(), "shepherd.db", clock.clone()))
+            .await
+            .unwrap();
+        let owner = register(&store, &clock, ActorKind::Human, "owner").await;
+        let producer = register(&store, &clock, ActorKind::Agent, "producer").await;
+        let project = store
+            .create_project(
+                ctx(&owner, &clock, None),
+                ProjectCreate {
+                    name: "P".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let goal = store
+            .create_goal(
+                ctx(&owner, &clock, None),
+                project,
+                GoalCreate {
+                    title: "G".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let epic = store
+            .create_epic(
+                ctx(&owner, &clock, None),
+                project,
+                goal,
+                EpicCreate {
+                    title: "E".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let task = store
+            .create_task(
+                ctx(&owner, &clock, None),
+                project,
+                epic,
+                TaskCreate {
+                    title: "T".to_string(),
+                    description: None,
+                    type_key: "code".to_string(),
+                    planning_required: Some(planning_required),
+                    plan_review: Some(plan_review),
+                    work_review: Some(work_review),
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        Fixture {
+            _dir: dir,
+            clock,
+            store,
+            owner,
+            producer,
+            project,
+            task,
+        }
+    }
+
+    async fn task_revision(f: &Fixture) -> i64 {
+        sqlx::query_scalar("SELECT revision FROM tasks WHERE id = ?1")
+            .bind(f.task.id.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap()
+    }
+
+    /// (phase, selected_plan_revision_id, accepted_plan_submission_id, status)
+    async fn task_state(f: &Fixture) -> (String, Option<String>, Option<String>, String) {
+        sqlx::query_as(
+            "SELECT phase, selected_plan_revision_id, accepted_plan_submission_id, status \
+             FROM tasks WHERE id = ?1",
+        )
+        .bind(f.task.id.to_string())
+        .fetch_one(f.store.pool())
+        .await
+        .unwrap()
+    }
+
+    async fn claim_as(
+        f: &Fixture,
+        who: &Actor,
+        phase: ClaimPhase,
+        submission_id: Option<Uuid>,
+    ) -> (Uuid, String) {
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let revision = task_revision(f).await;
+        let grant = f
+            .store
+            .claim_task(
+                ctx(who, &f.clock, Some(revision)),
+                f.project,
+                f.task.id,
+                ClaimInput {
+                    phase,
+                    submission_id,
+                    ttl_seconds: None,
+                },
+                "claim-hash",
+            )
+            .await
+            .unwrap()
+            .into_inner();
+        (grant.claim.id, grant.lease_token)
+    }
+
+    async fn report_success(f: &Fixture, claim_id: Uuid, token: &str, revisions: Vec<Uuid>) {
+        f.clock.advance(TimeDelta::milliseconds(2));
+        f.store
+            .report_claim(
+                ctx(&f.producer, &f.clock, None),
+                f.project,
+                claim_id,
+                token,
+                ReportInput {
+                    outcome: SessionOutcome::Succeeded,
+                    summary: "done".into(),
+                    failure_reason: String::new(),
+                    document_revision_ids: revisions,
+                    links: serde_json::json!([]),
+                },
+                "report-hash",
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn doc_revision(f: &Fixture, kind: DocumentKind) -> Uuid {
+        f.clock.advance(TimeDelta::milliseconds(2));
+        crate::storage::testing::create_task_document(
+            &f.store, &f.owner, f.project, f.task.id, kind,
+        )
+        .await
+        .latest_revision_id
+        .as_uuid()
+    }
+
+    async fn pending_submission(f: &Fixture) -> Uuid {
+        let id: String = sqlx::query_scalar(
+            "SELECT id FROM submissions WHERE task_id = ?1 AND status = 'pending'",
+        )
+        .bind(f.task.id.to_string())
+        .fetch_one(f.store.pool())
+        .await
+        .unwrap();
+        Uuid::parse_str(&id).unwrap()
+    }
+
+    /// Plan flow to a pending (or auto-accepted) plan submission.
+    async fn run_plan_flow(f: &Fixture) {
+        let (claim_id, token) = claim_as(f, &f.producer, ClaimPhase::Plan, None).await;
+        let revision = doc_revision(f, DocumentKind::Plan).await;
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let task_rev = task_revision(f).await;
+        f.store
+            .select_task_plan(
+                ctx(&f.owner, &f.clock, Some(task_rev)),
+                f.project,
+                f.task.id,
+                SelectPlanInput {
+                    document_revision_id: revision,
+                },
+            )
+            .await
+            .unwrap();
+        report_success(f, claim_id, &token, vec![revision]).await;
+    }
+
+    /// Execute flow to a pending work submission.
+    async fn run_work_flow(f: &Fixture) {
+        let (claim_id, token) = claim_as(f, &f.producer, ClaimPhase::Execute, None).await;
+        let revision = doc_revision(f, DocumentKind::Finding).await;
+        report_success(f, claim_id, &token, vec![revision]).await;
+    }
+
+    async fn decide(
+        f: &Fixture,
+        who: &Actor,
+        submission: Uuid,
+        revision: i64,
+        decision: ReviewDecision,
+        reason: &str,
+        claim: Option<(Uuid, &str)>,
+    ) -> Result<Review, DomainError> {
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let (claim_id, token) = match claim {
+            Some((id, token)) => (Some(id), Some(token)),
+            None => (None, None),
+        };
+        f.store
+            .review_submission(
+                ctx(who, &f.clock, Some(revision)),
+                f.project,
+                submission,
+                token,
+                ReviewInput {
+                    decision,
+                    reason: reason.to_string(),
+                    claim_id,
+                },
+                "review-hash",
+            )
+            .await
+            .map(Replay::into_inner)
+    }
+
+    #[test]
+    fn gate_error_maps_the_review_reasons() {
+        let producer = GateReason {
+            code: GateCode::ProducerCannotReview,
+            resource_id: Uuid::nil(),
+            message: "producer".into(),
+        };
+        let policy = GateReason {
+            code: GateCode::ReviewerPolicy,
+            resource_id: Uuid::nil(),
+            message: "policy".into(),
+        };
+        let claimed = GateReason {
+            code: GateCode::Claimed,
+            resource_id: Uuid::nil(),
+            message: "claimed".into(),
+        };
+        assert!(matches!(
+            review_gate_error(&[policy.clone(), producer]),
+            DomainError::ProducerCannotReview
+        ));
+        assert!(matches!(
+            review_gate_error(&[claimed.clone(), policy]),
+            DomainError::ReviewerPolicy(_)
+        ));
+        assert!(matches!(
+            review_gate_error(&[claimed]),
+            DomainError::NotEligible(_)
+        ));
+        assert!(matches!(
+            review_gate_error(&[]),
+            DomainError::NotEligible(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn human_plan_review_approves_into_execution() {
+        let f = fixture(true, ReviewPolicy::Human, ReviewPolicy::None).await;
+        run_plan_flow(&f).await;
+        let submission = pending_submission(&f).await;
+
+        let review = decide(
+            &f,
+            &f.owner,
+            submission,
+            1,
+            ReviewDecision::Approve,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(review.decision, ReviewDecision::Approve));
+
+        let (phase, selected, accepted, _) = task_state(&f).await;
+        assert_eq!(phase, "execution");
+        assert!(selected.is_some());
+        assert_eq!(accepted, Some(submission.to_string()));
+    }
+
+    #[tokio::test]
+    async fn human_plan_review_rejects_back_to_planning() {
+        let f = fixture(true, ReviewPolicy::Human, ReviewPolicy::None).await;
+        run_plan_flow(&f).await;
+        let submission = pending_submission(&f).await;
+
+        decide(
+            &f,
+            &f.owner,
+            submission,
+            1,
+            ReviewDecision::Reject,
+            "thin plan",
+            None,
+        )
+        .await
+        .unwrap();
+
+        let (phase, selected, accepted, _) = task_state(&f).await;
+        assert_eq!(phase, "planning");
+        assert_eq!(selected, None);
+        assert_eq!(accepted, None);
+    }
+
+    #[tokio::test]
+    async fn human_work_review_approves_to_done_and_rejects_to_execution() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::Human).await;
+        run_work_flow(&f).await;
+        let first = pending_submission(&f).await;
+        decide(&f, &f.owner, first, 1, ReviewDecision::Reject, "redo", None)
+            .await
+            .unwrap();
+        let (phase, _, _, status) = task_state(&f).await;
+        assert_eq!(phase, "execution");
+        assert_eq!(status, "active");
+
+        run_work_flow(&f).await;
+        let second = pending_submission(&f).await;
+        decide(&f, &f.owner, second, 1, ReviewDecision::Approve, "", None)
+            .await
+            .unwrap();
+        let (phase, _, _, status) = task_state(&f).await;
+        assert_eq!(phase, "complete");
+        assert_eq!(status, "done");
+    }
+
+    #[tokio::test]
+    async fn agent_review_decides_with_lease_and_releases_claim() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::Agent).await;
+        run_work_flow(&f).await;
+        let submission = pending_submission(&f).await;
+        let reviewer = register(&f.store, &f.clock, ActorKind::Agent, "reviewer").await;
+        let (claim_id, token) = claim_as(&f, &reviewer, ClaimPhase::Review, Some(submission)).await;
+
+        // Wrong token, then missing claim, then the real decision.
+        let err = decide(
+            &f,
+            &reviewer,
+            submission,
+            1,
+            ReviewDecision::Approve,
+            "",
+            Some((claim_id, "forged")),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, DomainError::LeaseInvalid));
+        let err = decide(
+            &f,
+            &reviewer,
+            submission,
+            1,
+            ReviewDecision::Approve,
+            "",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "claim_id",
+                ..
+            }
+        ));
+
+        decide(
+            &f,
+            &reviewer,
+            submission,
+            1,
+            ReviewDecision::Approve,
+            "",
+            Some((claim_id, &token)),
+        )
+        .await
+        .unwrap();
+        let status: String = sqlx::query_scalar("SELECT status FROM claims WHERE id = ?1")
+            .bind(claim_id.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(status, "released");
+    }
+
+    #[tokio::test]
+    async fn decision_shape_errors_are_rejected() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::Human).await;
+        run_work_flow(&f).await;
+        let submission = pending_submission(&f).await;
+
+        let err = decide(
+            &f,
+            &f.owner,
+            submission,
+            1,
+            ReviewDecision::Reject,
+            " ",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "reason",
+                ..
+            }
+        ));
+        let oversize = "x".repeat(REASON_MAX_CHARS + 1);
+        let err = decide(
+            &f,
+            &f.owner,
+            submission,
+            1,
+            ReviewDecision::Reject,
+            &oversize,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "reason",
+                ..
+            }
+        ));
+        let err = decide(
+            &f,
+            &f.owner,
+            submission,
+            1,
+            ReviewDecision::Approve,
+            "",
+            Some((Uuid::nil(), "token")),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "claim_id",
+                ..
+            }
+        ));
+        let err = decide(
+            &f,
+            &f.producer,
+            submission,
+            1,
+            ReviewDecision::Approve,
+            "",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)));
+        let err = decide(
+            &f,
+            &f.owner,
+            Uuid::nil(),
+            1,
+            ReviewDecision::Approve,
+            "",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, DomainError::NotFound));
+
+        decide(
+            &f,
+            &f.owner,
+            submission,
+            1,
+            ReviewDecision::Reject,
+            "redo",
+            None,
+        )
+        .await
+        .unwrap();
+        let err = decide(
+            &f,
+            &f.owner,
+            submission,
+            2,
+            ReviewDecision::Approve,
+            "",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, DomainError::SubmissionSuperseded(_)));
+    }
+
+    #[tokio::test]
+    async fn withdrawal_routes_phase_and_guards_actors() {
+        let f = fixture(true, ReviewPolicy::Human, ReviewPolicy::None).await;
+        run_plan_flow(&f).await;
+        let submission = pending_submission(&f).await;
+        let bystander = register(&f.store, &f.clock, ActorKind::Agent, "bystander").await;
+
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let err = f
+            .store
+            .withdraw_submission(
+                ctx(&bystander, &f.clock, Some(1)),
+                f.project,
+                submission,
+                "mine".to_string(),
+                "withdraw-hash",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)));
+
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let err = f
+            .store
+            .withdraw_submission(
+                ctx(&f.producer, &f.clock, Some(1)),
+                f.project,
+                submission,
+                "  ".to_string(),
+                "withdraw-hash",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "reason",
+                ..
+            }
+        ));
+
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let withdrawn = f
+            .store
+            .withdraw_submission(
+                ctx(&f.producer, &f.clock, Some(1)),
+                f.project,
+                submission,
+                "found a gap".to_string(),
+                "withdraw-hash",
+            )
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(withdrawn.status, SubmissionStatus::Withdrawn);
+        let (phase, ..) = task_state(&f).await;
+        assert_eq!(phase, "planning");
+
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let err = f
+            .store
+            .withdraw_submission(
+                ctx(&f.owner, &f.clock, Some(2)),
+                f.project,
+                submission,
+                "again".to_string(),
+                "withdraw-hash",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::SubmissionSuperseded(_)));
+    }
+
+    #[tokio::test]
+    async fn submission_reads_list_get_and_reviews() {
+        let f = fixture(false, ReviewPolicy::None, ReviewPolicy::Human).await;
+        run_work_flow(&f).await;
+        let first = pending_submission(&f).await;
+        decide(&f, &f.owner, first, 1, ReviewDecision::Reject, "redo", None)
+            .await
+            .unwrap();
+        run_work_flow(&f).await;
+        let second = pending_submission(&f).await;
+
+        let all = f
+            .store
+            .list_submissions(
+                &f.project,
+                &SubmissionListFilters::default(),
+                &ListParams::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(all.items.len(), 2);
+        assert_eq!(all.items[0].id, second, "newest first");
+        assert!(all.next_cursor.is_none());
+
+        let filtered = f
+            .store
+            .list_submissions(
+                &f.project,
+                &SubmissionListFilters {
+                    task_id: Some(f.task.id),
+                    status: Some(SubmissionStatus::Rejected),
+                    kind: Some(SubmissionKind::Work),
+                    policy: Some(ReviewPolicy::Human),
+                },
+                &ListParams::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(filtered.items.len(), 1);
+        assert_eq!(filtered.items[0].id, first);
+
+        let page_one = f
+            .store
+            .list_submissions(
+                &f.project,
+                &SubmissionListFilters::default(),
+                &ListParams {
+                    limit: Some(1),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let cursor = page_one.next_cursor.unwrap();
+        let page_two = f
+            .store
+            .list_submissions(
+                &f.project,
+                &SubmissionListFilters::default(),
+                &ListParams {
+                    limit: Some(1),
+                    cursor: Some(cursor),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(page_two.items[0].id, first);
+        let err = f
+            .store
+            .list_submissions(
+                &f.project,
+                &SubmissionListFilters::default(),
+                &ListParams {
+                    cursor: Some("tampered".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::InvalidCursor(_)));
+        let err = f
+            .store
+            .list_submissions(
+                &f.project,
+                &SubmissionListFilters {
+                    task_id: Some(TaskId::from_uuid(Uuid::nil())),
+                    ..Default::default()
+                },
+                &ListParams::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotFound));
+
+        let fetched = f.store.get_submission(&f.project, &first).await.unwrap();
+        assert_eq!(fetched.status, SubmissionStatus::Rejected);
+        assert_eq!(fetched.producer_id, f.producer.id);
+        let err = f
+            .store
+            .get_submission(&f.project, &Uuid::nil())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotFound));
+
+        let reviews = f
+            .store
+            .list_submission_reviews(&f.project, &first, &ListParams::default())
+            .await
+            .unwrap();
+        assert_eq!(reviews.items.len(), 1);
+        assert!(matches!(reviews.items[0].decision, ReviewDecision::Reject));
+        assert_eq!(reviews.items[0].reason, "redo");
+        let err = f
+            .store
+            .list_submission_reviews(&f.project, &Uuid::nil(), &ListParams::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotFound));
+    }
+}
