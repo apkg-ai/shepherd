@@ -4,8 +4,8 @@ use crate::error::DomainError;
 use crate::lease;
 use crate::model::{
     Capability, ClaimPhase, ClaimStatus, REASON_MAX_CHARS, Review, ReviewDecision, ReviewInput,
-    ReviewPolicy, Submission, SubmissionKind, SubmissionStatus, TaskPhase, require_capability,
-    validate_required_text,
+    ReviewPolicy, Submission, SubmissionKind, SubmissionStatus, TaskId, TaskPhase,
+    require_capability, validate_long_text, validate_required_text,
 };
 use crate::queries::hierarchy::task_row;
 use crate::queries::submissions::submission_row;
@@ -16,8 +16,8 @@ use crate::workflow::eligibility::{GateCode, GateReason, evaluate_task, load_tas
 
 use super::claims::{load_claim_row, reconcile_task_claims};
 use super::{
-    CommandContext, PendingEvent, Replay, append_events, missing_after_write, require_revision,
-    task_scope,
+    ClaimScope, CommandContext, PendingEvent, Replay, append_events, missing_after_write,
+    require_revision, revoke_active_claims, task_scope, withdraw_pending_submissions,
 };
 
 // plan/04: human-policy and self-review violations are 403, never a
@@ -52,6 +52,24 @@ fn require_pending(submission: &Submission) -> Result<(), DomainError> {
     Ok(())
 }
 
+// plan/04: reject-work and withdraw perform the same phase return.
+async fn set_task_phase(
+    tx: &mut sqlx::SqliteConnection,
+    now_text: &str,
+    task_id: TaskId,
+    phase: TaskPhase,
+) -> Result<(), DomainError> {
+    sqlx::query(
+        "UPDATE tasks SET revision = revision + 1, updated_at = ?1, phase = ?2 WHERE id = ?3",
+    )
+    .bind(now_text)
+    .bind(phase.as_str())
+    .bind(task_id.to_string())
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
+}
+
 impl Store {
     pub async fn review_submission(
         &self,
@@ -62,12 +80,6 @@ impl Store {
         input: ReviewInput,
         request_hash: &str,
     ) -> Result<Replay<Review>, DomainError> {
-        if input.reason.chars().count() > REASON_MAX_CHARS {
-            return Err(DomainError::Validation {
-                field: "reason",
-                message: format!("must be at most {REASON_MAX_CHARS} characters"),
-            });
-        }
         let actor_id = ctx.actor.id;
         let expected_revision = ctx.expected_revision;
         let now = ctx.now;
@@ -165,7 +177,10 @@ impl Store {
                     ReviewDecision::Reject => {
                         validate_required_text("reason", &input.reason, REASON_MAX_CHARS)?
                     }
-                    ReviewDecision::Approve => input.reason.clone(),
+                    ReviewDecision::Approve => {
+                        validate_long_text("reason", &input.reason, REASON_MAX_CHARS)?;
+                        input.reason.clone()
+                    }
                 };
 
                 let review_id = crate::model::new_v7(now);
@@ -241,15 +256,7 @@ impl Store {
                     }
                     // Plan retained: selection and acceptance stay untouched.
                     (SubmissionKind::Work, ReviewDecision::Reject) => {
-                        sqlx::query(
-                            "UPDATE tasks SET revision = revision + 1, updated_at = ?1, \
-                             phase = ?2 WHERE id = ?3",
-                        )
-                        .bind(&now_text)
-                        .bind(TaskPhase::Execution.as_str())
-                        .bind(task_id.to_string())
-                        .execute(&mut **tx)
-                        .await?;
+                        set_task_phase(tx, &now_text, task_id, TaskPhase::Execution).await?;
                     }
                 }
 
@@ -346,15 +353,14 @@ impl Store {
                 require_pending(&submission)?;
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
 
-                sqlx::query(
-                    "UPDATE submissions SET status = 'withdrawn', withdraw_reason = ?1, \
-                     revision = revision + 1, updated_at = ?2 WHERE id = ?3",
-                )
-                .bind(&reason)
-                .bind(&now_text)
-                .bind(submission_id.to_string())
-                .execute(&mut **tx)
-                .await?;
+                // one_pending_submission_per_task: the shared task-scoped
+                // sweep hits exactly this submission.
+                let withdrawn_row =
+                    withdraw_pending_submissions(tx, ClaimScope::Task(task_id), &now_text, &reason)
+                        .await?
+                        .into_iter()
+                        .find(|row| row.id == submission_id)
+                        .ok_or_else(|| missing_after_write("pending submission"))?;
 
                 // plan/04: plan withdrawal returns planning; work withdrawal
                 // returns execution. Selection and acceptance stay untouched.
@@ -362,32 +368,19 @@ impl Store {
                     SubmissionKind::Plan => TaskPhase::Planning,
                     SubmissionKind::Work => TaskPhase::Execution,
                 };
-                sqlx::query(
-                    "UPDATE tasks SET revision = revision + 1, updated_at = ?1, phase = ?2 \
-                     WHERE id = ?3",
-                )
-                .bind(&now_text)
-                .bind(next_phase.as_str())
-                .bind(task_id.to_string())
-                .execute(&mut **tx)
-                .await?;
+                set_task_phase(tx, &now_text, task_id, next_phase).await?;
 
                 let mut pending = Vec::new();
                 pending.push(PendingEvent::submission(
                     submission_id,
-                    submission.revision.value() + 1,
+                    withdrawn_row.revision,
                     task_id,
                 ));
 
                 // Withdrawal revokes the active review claim; no Review row is
                 // fabricated (plan/04).
-                let closed = super::revoke_active_claims(
-                    tx,
-                    super::ClaimScope::Task(task_id),
-                    &now_text,
-                    &reason,
-                )
-                .await?;
+                let closed =
+                    revoke_active_claims(tx, ClaimScope::Task(task_id), &now_text, &reason).await?;
                 for claim in closed.all() {
                     pending.push(PendingEvent::claim(
                         claim.id,
@@ -437,8 +430,7 @@ mod tests {
     };
     use crate::queries::{ListParams, SubmissionListFilters};
     use crate::storage::open;
-    use crate::storage::rows::insert_actor;
-    use crate::storage::testing::{store_options, test_clock};
+    use crate::storage::testing::{seed_actor, store_options, test_clock};
     use crate::workflow::eligibility::GateReason;
     use uuid::Uuid;
 
@@ -462,22 +454,6 @@ mod tests {
         }
     }
 
-    async fn register(store: &Store, clock: &TestClock, kind: ActorKind, label: &str) -> Actor {
-        let actor = Actor {
-            id: crate::model::ActorId::generate(clock.now()),
-            kind,
-            label: label.to_string(),
-            revoked: false,
-            created_at: clock.now(),
-        };
-        let registered = actor.clone();
-        store
-            .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &registered).await }))
-            .await
-            .unwrap();
-        actor
-    }
-
     async fn fixture(
         planning_required: bool,
         plan_review: ReviewPolicy,
@@ -488,8 +464,8 @@ mod tests {
         let store = open(store_options(dir.path(), "shepherd.db", clock.clone()))
             .await
             .unwrap();
-        let owner = register(&store, &clock, ActorKind::Human, "owner").await;
-        let producer = register(&store, &clock, ActorKind::Agent, "producer").await;
+        let owner = seed_actor(&store, ActorKind::Human, "owner").await;
+        let producer = seed_actor(&store, ActorKind::Agent, "producer").await;
         let project = store
             .create_project(
                 ctx(&owner, &clock, None),
@@ -815,7 +791,7 @@ mod tests {
         let f = fixture(false, ReviewPolicy::None, ReviewPolicy::Agent).await;
         run_work_flow(&f).await;
         let submission = pending_submission(&f).await;
-        let reviewer = register(&f.store, &f.clock, ActorKind::Agent, "reviewer").await;
+        let reviewer = seed_actor(&f.store, ActorKind::Agent, "reviewer").await;
         let (claim_id, token) = claim_as(&f, &reviewer, ClaimPhase::Review, Some(submission)).await;
 
         // Wrong token, then missing claim, then the real decision.
@@ -985,7 +961,7 @@ mod tests {
         let f = fixture(true, ReviewPolicy::Human, ReviewPolicy::None).await;
         run_plan_flow(&f).await;
         let submission = pending_submission(&f).await;
-        let bystander = register(&f.store, &f.clock, ActorKind::Agent, "bystander").await;
+        let bystander = seed_actor(&f.store, ActorKind::Agent, "bystander").await;
 
         f.clock.advance(TimeDelta::milliseconds(2));
         let err = f

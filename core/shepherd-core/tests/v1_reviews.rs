@@ -5,9 +5,9 @@ use shepherd_core::commands::CommandContext;
 use shepherd_core::error::DomainError;
 use shepherd_core::model::{
     Actor, ActorId, ActorKind, ClaimGrant, ClaimInput, ClaimPhase, Clock, CommandId, Document,
-    DocumentCreate, DocumentKind, DocumentOwner, Epic, EpicCreate, EpicId, GoalCreate, GoalId,
-    Project, ProjectCreate, ProjectId, ReportInput, Review, ReviewDecision, ReviewInput,
-    ReviewPolicy, SelectPlanInput, SessionOutcome, Task, TaskCreate, TaskId, TestClock,
+    DocumentKind, Epic, EpicCreate, EpicId, GoalCreate, GoalId, Project, ProjectCreate, ProjectId,
+    ReportInput, Review, ReviewDecision, ReviewInput, ReviewPolicy, SelectPlanInput,
+    SessionOutcome, Task, TaskCreate, TaskId, TestClock,
 };
 use shepherd_core::storage::rows::insert_actor;
 use shepherd_core::storage::{Store, open, testing};
@@ -191,22 +191,7 @@ async fn scaffold(
 
 async fn create_doc(s: &Setup, project: ProjectId, task: TaskId, kind: DocumentKind) -> Document {
     s.clock.advance(TimeDelta::milliseconds(2));
-    s.store
-        .create_document(
-            ctx(&s.owner, s.clock.now(), None),
-            project,
-            DocumentCreate {
-                owner: DocumentOwner::Task(task),
-                kind,
-                title: "Doc".to_string(),
-                body: "# body".to_string(),
-                links: Vec::new(),
-            },
-            "doc-hash",
-        )
-        .await
-        .unwrap()
-        .into_inner()
+    testing::create_task_document(&s.store, &s.owner, project, task, kind).await
 }
 
 async fn try_claim(
@@ -710,6 +695,10 @@ async fn agent_review_decision_releases_claim() {
     )
     .await;
 
+    let claims_before = event_type_count(&s.store, "claim.changed").await;
+    let submissions_before = event_type_count(&s.store, "submission.changed").await;
+    let tasks_before = event_type_count(&s.store, "task.changed").await;
+
     try_review(
         &s,
         &reviewer,
@@ -731,6 +720,21 @@ async fn agent_review_decision_releases_claim() {
     let (decision, actor_id, _) = review_row(&s.store, f.submission_id).await;
     assert_eq!(decision, "approve");
     assert_eq!(actor_id, reviewer.id.to_string());
+    // plan/08: the decision emits review.recorded plus one submission,
+    // claim (release) and task (completion) event.
+    assert_eq!(event_type_count(&s.store, "review.recorded").await, 1);
+    assert_eq!(
+        event_type_count(&s.store, "claim.changed").await,
+        claims_before + 1
+    );
+    assert_eq!(
+        event_type_count(&s.store, "submission.changed").await,
+        submissions_before + 1
+    );
+    assert_eq!(
+        event_type_count(&s.store, "task.changed").await,
+        tasks_before + 1
+    );
 }
 
 #[tokio::test]
@@ -1004,6 +1008,10 @@ async fn withdrawal_revokes_review_claim_and_late_review_fails() {
     )
     .await;
 
+    let claims_before = event_type_count(&s.store, "claim.changed").await;
+    let submissions_before = event_type_count(&s.store, "submission.changed").await;
+    let tasks_before = event_type_count(&s.store, "task.changed").await;
+
     let withdrawn = try_withdraw(
         &s,
         &s.owner,
@@ -1027,6 +1035,21 @@ async fn withdrawal_revokes_review_claim_and_late_review_fails() {
     let (_, phase, ..) = task_state(&s.store, f.task).await;
     assert_eq!(phase, "execution");
     assert_eq!(reviews_count(&s.store).await, 0, "no fabricated review");
+    // plan/08: withdrawal emits one submission, claim (revoke) and task
+    // event, and no review.recorded.
+    assert_eq!(event_type_count(&s.store, "review.recorded").await, 0);
+    assert_eq!(
+        event_type_count(&s.store, "claim.changed").await,
+        claims_before + 1
+    );
+    assert_eq!(
+        event_type_count(&s.store, "submission.changed").await,
+        submissions_before + 1
+    );
+    assert_eq!(
+        event_type_count(&s.store, "task.changed").await,
+        tasks_before + 1
+    );
 
     // Late review: the revoked claim no longer authorizes a decision.
     let err = try_review(
@@ -1724,6 +1747,8 @@ async fn revoking_reviewer_closes_claim_and_frees_the_review() {
     )
     .await;
 
+    let revision_before = task_revision(&s.store, f.task).await;
+    let tasks_before = event_type_count(&s.store, "task.changed").await;
     s.clock.advance(TimeDelta::milliseconds(2));
     s.store
         .revoke_agent(
@@ -1738,6 +1763,13 @@ async fn revoking_reviewer_closes_claim_and_frees_the_review() {
     let (claim_status, close_reason, _) = claim_state(&s.store, claim_id).await;
     assert_eq!(claim_status, "revoked");
     assert_eq!(close_reason, "compromised credential");
+    // The revoked claim changed the task's representation: bump plus event,
+    // matching the block/cancel revocation paths.
+    assert_eq!(task_revision(&s.store, f.task).await, revision_before + 1);
+    assert_eq!(
+        event_type_count(&s.store, "task.changed").await,
+        tasks_before + 1
+    );
 
     // The revoked principal cannot decide.
     let err = try_review(

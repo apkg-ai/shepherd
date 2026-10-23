@@ -460,7 +460,11 @@ fn allowed_task_actions(
     {
         actions.push("selectTaskPlan");
     }
-    if flags.can_review && owner {
+    // plan/04 FLOW-02: once the agent holds the review claim, acquisition
+    // eligibility is false but the claimant may still decide.
+    let holds_review_claim =
+        claim.is_some_and(|claim| claim.phase == "review" && claim.actor_id == actor.id);
+    if (flags.can_review && owner) || (holds_review_claim && pending) {
         actions.push("reviewSubmission");
     }
     // Agents may only link accepted dependents (plan/03): a proposed epic
@@ -1401,6 +1405,35 @@ mod tests {
         let human = person(ActorKind::Human);
         let verdict = evaluate_task(&snapshot, &human, now());
         assert!(!verdict.can_review, "human does not match agent policy");
+    }
+
+    #[test]
+    fn review_claimant_keeps_the_review_submission_action() {
+        let producer = person(ActorKind::Agent);
+        let reviewer = person(ActorKind::Agent);
+        let mut task = task();
+        task.phase = TaskPhase::WorkReview;
+        let mut snapshot = snapshot(task);
+        snapshot.pending_submission = Some(submission("work", ReviewPolicy::Agent, producer.id));
+        let mut held = claim(ts("2026-09-14T00:05:00Z"));
+        held.phase = "review".to_string();
+        held.actor_id = reviewer.id;
+        snapshot.active_claim = Some(held);
+
+        // plan/04 FLOW-02: acquisition eligibility is false for the claimant,
+        // yet deciding stays allowed; other actors gain nothing.
+        let verdict = evaluate_task(&snapshot, &reviewer, now());
+        assert!(!verdict.can_review);
+        assert!(verdict.allowed_actions.contains(&"reviewSubmission"));
+        assert!(!verdict.allowed_actions.contains(&"claimTask"));
+
+        let other = person(ActorKind::Agent);
+        let verdict = evaluate_task(&snapshot, &other, now());
+        assert!(!verdict.allowed_actions.contains(&"reviewSubmission"));
+
+        let owner = person(ActorKind::Human);
+        let verdict = evaluate_task(&snapshot, &owner, now());
+        assert!(!verdict.allowed_actions.contains(&"reviewSubmission"));
     }
 
     #[test]

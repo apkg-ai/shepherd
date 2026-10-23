@@ -342,11 +342,20 @@ pub(crate) enum ClaimScope {
 }
 
 impl ClaimScope {
-    fn task_filter(&self) -> &'static str {
+    fn claim_filter(&self) -> &'static str {
         match self {
             ClaimScope::Task(_) => "task_id = ?1",
             ClaimScope::Epic(_) => "task_id IN (SELECT id FROM tasks WHERE epic_id = ?1)",
             ClaimScope::Actor(_) => "actor_id = ?1",
+        }
+    }
+
+    // The submissions table names its actor column producer_id.
+    fn submission_filter(&self) -> &'static str {
+        match self {
+            ClaimScope::Task(_) => "task_id = ?1",
+            ClaimScope::Epic(_) => "task_id IN (SELECT id FROM tasks WHERE epic_id = ?1)",
+            ClaimScope::Actor(_) => "producer_id = ?1",
         }
     }
 
@@ -411,7 +420,7 @@ async fn close_claims(
         "UPDATE claims SET status = '{status}', closed_at = ?2, close_reason = ?3 \
          WHERE status = 'active' AND {expiry_filter} AND {} \
          RETURNING id, task_id, task_revision",
-        scope.task_filter()
+        scope.claim_filter()
     ));
     let rows: Vec<(String, String, i64)> = sqlx::query_as(query)
         .bind(scope.id().to_string())
@@ -446,7 +455,7 @@ pub(crate) async fn withdraw_pending_submissions(
         "UPDATE submissions SET status = 'withdrawn', withdraw_reason = ?3, \
          revision = revision + 1, updated_at = ?2 \
          WHERE status = 'pending' AND {} RETURNING id, revision, task_id",
-        scope.task_filter()
+        scope.submission_filter()
     ));
     let rows: Vec<(String, i64, String)> = sqlx::query_as(query)
         .bind(scope.id().to_string())
@@ -637,6 +646,16 @@ pub(crate) async fn append_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claim_scope_filters_name_each_tables_actor_column() {
+        let now = "2026-09-14T00:00:00Z".parse().unwrap();
+        let scope = ClaimScope::Actor(ActorId::generate(now));
+        assert_eq!(scope.claim_filter(), "actor_id = ?1");
+        assert_eq!(scope.submission_filter(), "producer_id = ?1");
+        let scope = ClaimScope::Task(TaskId::generate(now));
+        assert_eq!(scope.claim_filter(), scope.submission_filter());
+    }
 
     #[test]
     fn revision_checks_follow_the_precondition_contract() {

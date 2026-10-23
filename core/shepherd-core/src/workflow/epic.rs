@@ -174,7 +174,7 @@ pub(crate) async fn complete(
 // chunked IN lists keep blockEpic safe at any task count.
 const TASK_CHUNK: usize = 500;
 
-async fn bump_tasks(
+pub(crate) async fn bump_tasks(
     conn: &mut SqliteConnection,
     tasks: &[TaskId],
     now: &str,
