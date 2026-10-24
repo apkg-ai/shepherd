@@ -4,6 +4,7 @@ mod epic;
 mod goal;
 mod identity;
 mod project;
+mod review;
 mod session;
 mod task;
 
@@ -32,6 +33,9 @@ pub use project::{
 };
 pub(crate) use project::{
     DESCRIPTION_MAX_CHARS, NAME_MAX_CHARS, REASON_MAX_CHARS, validate_type_key, validate_type_label,
+};
+pub use review::{
+    Review, ReviewDecision, ReviewInput, Submission, SubmissionKind, SubmissionStatus,
 };
 pub(crate) use session::validate_report_input;
 pub use session::{ReportInput, Session, SessionOutcome};

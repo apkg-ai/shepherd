@@ -1,18 +1,57 @@
-use sqlx::{QueryBuilder, Sqlite};
+use sqlx::{QueryBuilder, Sqlite, SqliteConnection};
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::credentials::{actor_from_joined_row, insert_credential, security_audit};
-use crate::commands::{CommandContext, CommandResult, Replay, live_actor};
+use crate::commands::{
+    ClaimScope, CommandContext, CommandResult, PendingEvent, Replay, append_events, live_actor,
+    missing_after_write, revoke_active_claims,
+};
 use crate::error::DomainError;
 use crate::model::{
     Ack, Actor, ActorId, ActorKind, AgentCreate, AgentTokenGrant, Capability, NAME_MAX_CHARS,
     REASON_MAX_CHARS, generate_token, require_capability, token_digest, validate_required_text,
 };
+use crate::model::{EpicId, ProjectId, TaskId};
 use crate::queries::{ListParams, Page, decode_cursor, effective_limit, encode_cursor, split_page};
-use crate::storage::rows::{format_ts, insert_actor};
+use crate::storage::rows::{format_ts, insert_actor, parse_uuid};
 use crate::storage::{StorageError, Store};
 
 const AGENTS_ENDPOINT: &str = "listAgents";
 const AGENTS_FILTER: &str = "kind=agent";
+
+/// task -> (project_id text, epic_id), batched for cross-project event grouping.
+async fn task_event_scopes(
+    conn: &mut SqliteConnection,
+    tasks: &BTreeSet<TaskId>,
+) -> Result<BTreeMap<TaskId, (String, EpicId)>, DomainError> {
+    let mut scopes = BTreeMap::new();
+    let ids: Vec<&TaskId> = tasks.iter().collect();
+    for chunk in ids.chunks(500) {
+        let mut builder =
+            QueryBuilder::<Sqlite>::new("SELECT id, project_id, epic_id FROM tasks WHERE id IN (");
+        let mut separated = builder.separated(", ");
+        for task in chunk {
+            separated.push_bind(task.to_string());
+        }
+        builder.push(")");
+        let rows: Vec<(String, String, String)> = builder
+            .build_query_as()
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(StorageError::from)?;
+        for (id, project, epic) in rows {
+            scopes.insert(
+                TaskId::from_uuid(parse_uuid("tasks.id", &id)?),
+                (
+                    project,
+                    EpicId::from_uuid(parse_uuid("tasks.epic_id", &epic)?),
+                ),
+            );
+        }
+    }
+    Ok(scopes)
+}
 
 impl Store {
     /// Owner-only issuance: a distinct agent Actor plus a token returned once.
@@ -58,8 +97,8 @@ impl Store {
         .await
     }
 
-    /// Atomically marks the actor revoked and closes its credentials and
-    /// browser sessions. Claim closure joins in step 009 when claims exist.
+    /// Atomically marks the actor revoked and closes its credentials, browser
+    /// sessions and active claims (plan/03: reviews and reports are preserved).
     pub async fn revoke_agent(
         &self,
         ctx: CommandContext,
@@ -104,6 +143,45 @@ impl Store {
                     .bind(agent.to_string())
                     .execute(&mut **tx)
                     .await?;
+                let closed =
+                    revoke_active_claims(tx, ClaimScope::Actor(agent), &now, &reason).await?;
+                // Claims may span projects; events group per project. Revoked
+                // claims change their task's representation, so those tasks
+                // bump and emit task.changed (same as workflow::epic::block).
+                let tasks: BTreeSet<TaskId> = closed.all().map(|claim| claim.task_id).collect();
+                let scopes = task_event_scopes(tx, &tasks).await?;
+                let scope_of =
+                    |task: &TaskId| scopes.get(task).ok_or_else(|| missing_after_write("task"));
+                let mut by_project: BTreeMap<String, Vec<PendingEvent>> = BTreeMap::new();
+                for claim in closed.all() {
+                    let (project, _) = scope_of(&claim.task_id)?;
+                    by_project
+                        .entry(project.clone())
+                        .or_default()
+                        .push(PendingEvent::claim(
+                            claim.id,
+                            claim.task_revision,
+                            claim.task_id,
+                        ));
+                }
+                let revoked: Vec<TaskId> =
+                    closed.revoked.iter().map(|claim| claim.task_id).collect();
+                for (task, revision) in
+                    crate::workflow::epic::bump_tasks(tx, &revoked, &now).await?
+                {
+                    let (project, epic) = scope_of(&task)?;
+                    by_project
+                        .entry(project.clone())
+                        .or_default()
+                        .push(PendingEvent::task(task, revision, *epic));
+                }
+                let events_ctx = CommandContext::for_events(actor, command_id, at);
+                for (project, events) in by_project {
+                    let project_id =
+                        ProjectId::from_uuid(parse_uuid("tasks.project_id", &project)?);
+                    append_events(tx, &project_id, &events_ctx, "revokeAgent", &reason, events)
+                        .await?;
+                }
                 security_audit(
                     &mut *tx,
                     &caller,

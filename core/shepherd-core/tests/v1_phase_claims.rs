@@ -611,7 +611,7 @@ async fn lost_claim_response_replay_returns_same_lease_release_does_not_erase_sa
 // --- Input validation ---
 
 #[tokio::test]
-async fn review_phase_and_submission_id_are_rejected_until_supported() {
+async fn review_claim_shape_is_validated() {
     let s = setup().await;
     let project = create_project(&s, "P").await;
     let goal = create_goal(&s, project.id, "G").await;
@@ -620,6 +620,7 @@ async fn review_phase_and_submission_id_are_rejected_until_supported() {
 
     s.clock.advance(TimeDelta::milliseconds(1));
 
+    // plan/04: review claims must reference the pending submission.
     let err = s
         .store
         .claim_task(
@@ -636,8 +637,14 @@ async fn review_phase_and_submission_id_are_rejected_until_supported() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, DomainError::Validation { field: "phase", .. }),
-        "expected phase validation, got: {err:?}"
+        matches!(
+            err,
+            DomainError::Validation {
+                field: "submission_id",
+                ..
+            }
+        ),
+        "expected submission_id validation, got: {err:?}"
     );
 
     // plan/04: only review claims reference a submission.

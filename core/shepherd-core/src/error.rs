@@ -41,6 +41,12 @@ pub enum DomainError {
     LeaseInvalid,
     #[error("task is not eligible: {0}")]
     NotEligible(String),
+    #[error("caller does not match the submission review policy: {0}")]
+    ReviewerPolicy(String),
+    #[error("producer cannot review its own submission")]
+    ProducerCannotReview,
+    #[error("submission is not the pending submission: {0}")]
+    SubmissionSuperseded(String),
     #[error(transparent)]
     Storage(#[from] StorageError),
 }
@@ -75,6 +81,9 @@ impl DomainError {
             DomainError::InvalidState(_) => "invalid_state",
             DomainError::LeaseInvalid => "lease_invalid",
             DomainError::NotEligible(_) => "not_eligible",
+            DomainError::ReviewerPolicy(_) => "reviewer_policy",
+            DomainError::ProducerCannotReview => "producer_cannot_review",
+            DomainError::SubmissionSuperseded(_) => "submission_superseded",
             DomainError::Storage(StorageError::Corrupt(_)) => "integrity_failure",
             // SQLITE_BUSY arrives as the low byte of the sqlite extended code.
             DomainError::Storage(StorageError::Sqlx(sqlx::Error::Database(db)))
@@ -161,6 +170,18 @@ mod tests {
         assert_eq!(
             DomainError::NotEligible("claimed".into()).code(),
             "not_eligible"
+        );
+        assert_eq!(
+            DomainError::ReviewerPolicy("human".into()).code(),
+            "reviewer_policy"
+        );
+        assert_eq!(
+            DomainError::ProducerCannotReview.code(),
+            "producer_cannot_review"
+        );
+        assert_eq!(
+            DomainError::SubmissionSuperseded("decided".into()).code(),
+            "submission_superseded"
         );
     }
 

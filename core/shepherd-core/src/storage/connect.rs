@@ -31,6 +31,10 @@ const TASKS_PAGE_INDEX_VERSION: i64 = 20_261_002_000_001;
 const DOCUMENTS_PAGE_INDEXES_SQL: &str =
     include_str!("../../migrations/20261012000001_documents_page_indexes.sql");
 const DOCUMENTS_PAGE_INDEXES_VERSION: i64 = 20_261_012_000_001;
+// Page order for submission lists; submissions_queue leads with status/policy.
+const SUBMISSIONS_PAGE_INDEX_SQL: &str =
+    include_str!("../../migrations/20261023000001_submissions_page_index.sql");
+const SUBMISSIONS_PAGE_INDEX_VERSION: i64 = 20_261_023_000_001;
 const SQLITE_MAGIC: &[u8] = b"SQLite format 3\0";
 // SQLite file format: 100-byte header, application_id big-endian at offset 68.
 const HEADER_LEN: usize = 100;
@@ -326,6 +330,13 @@ fn migrator() -> Migrator {
             DOCUMENTS_PAGE_INDEXES_SQL.into_sql_str(),
             false,
         ),
+        Migration::new(
+            SUBMISSIONS_PAGE_INDEX_VERSION,
+            "submissions_page_index".into(),
+            MigrationType::Simple,
+            SUBMISSIONS_PAGE_INDEX_SQL.into_sql_str(),
+            false,
+        ),
     ])
 }
 
@@ -451,8 +462,9 @@ mod tests {
             .await
             .unwrap();
         // Baseline, the step 005 project-scope indexes, the step 007 task page
-        // index, the step 011 document page indexes.
-        assert_eq!(applied, 4);
+        // index, the step 011 document page indexes, the step 012 submissions
+        // page index.
+        assert_eq!(applied, 5);
     }
 
     // A database created before the index migration existed upgrades in place:
@@ -477,11 +489,12 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(applied, 4);
+        assert_eq!(applied, 5);
         for name in [
             "epics_project",
             "tasks_project_page",
             "documents_project_page",
+            "submissions_task_page",
         ] {
             let index: Option<i64> = sqlx::query_scalar(
                 "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
