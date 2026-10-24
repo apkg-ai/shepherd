@@ -9,7 +9,7 @@ use super::{
 };
 use crate::error::DomainError;
 use crate::model::{ActorId, CommandId, Event, EventId, EventType, ProjectId};
-use crate::storage::rows::{format_ts, parse_ts, parse_uuid};
+use crate::storage::rows::{parse_ts, parse_uuid};
 use crate::storage::{StorageError, Store};
 
 /// Replay page bound per connection establishment (plan/08).
@@ -77,6 +77,16 @@ pub(crate) fn event_from_row(row: &SqliteRow) -> Result<Event, DomainError> {
 const EVENT_COLUMNS: &str = "id, project_id, actor_id, command_id, type, resource_id, \
      resource_revision, occurred_at, affected_ids, action, reason";
 
+// One definition of the global high-water mark, shared by the Store wrapper
+// and replay so the two reads cannot drift.
+pub(crate) async fn high_water(conn: &mut SqliteConnection) -> Result<EventId, DomainError> {
+    let max: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM events")
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(StorageError::from)?;
+    Ok(max)
+}
+
 fn history_filter(project: &ProjectId, resource_id: Option<Uuid>) -> String {
     format!("project={project}&resource={}", filter_token(resource_id))
 }
@@ -141,10 +151,9 @@ impl Store {
 
     /// Global high-water mark; the SSE "no cursor" starting point in step 015.
     pub async fn event_high_water(&self) -> Result<EventId, DomainError> {
-        let max: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM events")
-            .fetch_one(self.pool())
-            .await
-            .map_err(StorageError::from)?;
+        let mut tx = self.read_transaction().await?;
+        let max = high_water(&mut tx).await?;
+        tx.commit().await.map_err(StorageError::from)?;
         Ok(max)
     }
 
@@ -158,10 +167,7 @@ impl Store {
         if !project_exists(&mut tx, project).await? {
             return Err(DomainError::NotFound);
         }
-        let global_max: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM events")
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(StorageError::from)?;
+        let global_max = high_water(&mut tx).await?;
         // Backup restore can roll the cursor ahead of the database (plan/08).
         if after > global_max {
             return Ok(ReplayOutcome::ResyncRequired {
@@ -169,19 +175,22 @@ impl Store {
                 reason: ResyncReason::CursorAhead,
             });
         }
-        // The first indexed row after the cursor is the oldest; one probe tells
-        // whether the cursor predates the replay window.
-        let horizon = format_ts(&(now - TimeDelta::days(REPLAY_WINDOW_DAYS)));
-        let expired = sqlx::query(
-            "SELECT 1 FROM events WHERE project_id = ?1 AND id > ?2 AND occurred_at < ?3 LIMIT 1",
+        // The first indexed row after the cursor is the oldest project event;
+        // reading just that row keeps the window check O(1).
+        let horizon = now - TimeDelta::days(REPLAY_WINDOW_DAYS);
+        let oldest: Option<String> = sqlx::query_scalar(
+            "SELECT occurred_at FROM events WHERE project_id = ?1 AND id > ?2 \
+             ORDER BY id ASC LIMIT 1",
         )
         .bind(project.to_string())
         .bind(after)
-        .bind(&horizon)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(StorageError::from)?
-        .is_some();
+        .map_err(StorageError::from)?;
+        let expired = match oldest {
+            Some(occurred_at) => parse_ts("events.occurred_at", &occurred_at)? < horizon,
+            None => false,
+        };
         if expired {
             return Ok(ReplayOutcome::ResyncRequired {
                 current_cursor: global_max,
@@ -234,6 +243,7 @@ mod tests {
     use crate::commands::CommandContext;
     use crate::model::{Actor, ActorKind, Clock, GoalCreate, ProjectCreate, TestClock};
     use crate::storage::open;
+    use crate::storage::rows::format_ts;
     use crate::storage::rows::insert_actor;
     use crate::storage::testing::{store_options, test_clock};
 

@@ -1,24 +1,25 @@
-use serde::Serialize;
-use serde_json::{Value, json};
-use sqlx::{Row, SqliteConnection};
+mod measure;
+
+use std::collections::HashMap;
+
+use sqlx::{QueryBuilder, Row, Sqlite, SqliteConnection};
 use uuid::Uuid;
+
+pub use measure::CONTEXT_BUDGET_BYTES;
+use measure::{BudgetFill, mandatory_json, measured};
 
 use super::hierarchy::{epic_row, goal_row, project_row, task_row};
 use super::submissions::{review_from_row, submission_from_row};
 use crate::commands::{revision_from_row, revision_row};
 use crate::error::DomainError;
 use crate::model::{
-    ActorId, Claim, ClaimPhase, Counts, Dependency, DependencyLevel, DocumentRevision,
-    DocumentRevisionId, Epic, Goal, LifecycleRecord, Project, ProjectId, Review, Session,
-    SessionOutcome, Submission, Task, TaskId,
+    ActorId, Claim, ClaimPhase, Dependency, DependencyLevel, DocumentRevision, DocumentRevisionId,
+    Epic, Goal, Project, ProjectId, Review, Session, SessionOutcome, Submission, Task, TaskId,
 };
 use crate::queries::claims::claim_from_row;
 use crate::queries::graph::dependency_from_row;
 use crate::storage::rows::{format_ts, parse_ts, parse_uuid};
 use crate::storage::{StorageError, Store};
-
-/// Response budget in UTF-8 JSON bytes (plan/05): 256 KiB.
-pub const CONTEXT_BUDGET_BYTES: usize = 262_144;
 
 // Contract caps per ContextBundle section; queries fetch cap+1 to detect more rows.
 const DOCUMENTS_CAP: usize = 100;
@@ -46,194 +47,6 @@ pub struct ContextBundle {
     pub sibling_claims: Vec<Claim>,
     pub truncated: bool,
     pub continuation_paths: Vec<String>,
-}
-
-fn measured<T: Serialize>(item: &T) -> Result<usize, DomainError> {
-    Ok(serde_json::to_vec(item)
-        .map_err(|err| StorageError::Corrupt(format!("context item: {err}")))?
-        .len())
-}
-
-fn lifecycle_json(record: Option<&LifecycleRecord>) -> Value {
-    match record {
-        Some(record) => json!([{
-            "actor_id": record.actor_id.to_string(),
-            "reason": record.reason,
-            "created_at": format_ts(&record.created_at),
-        }]),
-        None => json!([]),
-    }
-}
-
-fn counts_json(counts: &Counts) -> Value {
-    json!({
-        "total": counts.total,
-        "done": counts.done,
-        "cancelled": counts.cancelled,
-        "waived": counts.waived,
-    })
-}
-
-// Eligibility is actor-relative and computed at wire conversion (step 015);
-// the budget measures its fixed skeleton and the handoff records the delta.
-fn eligibility_json() -> Value {
-    json!({
-        "can_plan": true,
-        "can_execute": true,
-        "can_review": true,
-        "reasons": [],
-        "allowed_actions": [],
-    })
-}
-
-fn uuid_strings(ids: &[Uuid]) -> Vec<String> {
-    ids.iter().map(Uuid::to_string).collect()
-}
-
-// Wire-shaped mandatory entities (core Task/Epic/Goal/Project carry no serde);
-// step 015's conversion must keep these field sets identical.
-fn mandatory_json(
-    bundle_task: &Task,
-    epic: &Epic,
-    goal: &Goal,
-    project: &Project,
-    selected_plan_revision_ids: &[Uuid],
-    accepted_plan_submission_ids: &[Uuid],
-) -> Value {
-    let task = json!({
-        "id": bundle_task.id.to_string(),
-        "revision": bundle_task.revision.value(),
-        "created_at": format_ts(&bundle_task.created_at),
-        "updated_at": format_ts(&bundle_task.updated_at),
-        "project_id": bundle_task.project_id.to_string(),
-        "epic_id": bundle_task.epic_id.to_string(),
-        "title": bundle_task.title,
-        "description": bundle_task.description,
-        "type_key": bundle_task.type_key,
-        "status": bundle_task.status.as_str(),
-        "phase": bundle_task.phase.as_str(),
-        "planning_required": bundle_task.planning_required,
-        "plan_review": bundle_task.plan_review.as_str(),
-        "work_review": bundle_task.work_review.as_str(),
-        "selected_plan_revision_ids": uuid_strings(selected_plan_revision_ids),
-        "accepted_plan_submission_ids": uuid_strings(accepted_plan_submission_ids),
-        "archived": bundle_task.archived,
-        "blocks": lifecycle_json(bundle_task.block.as_ref()),
-        "waivers": lifecycle_json(bundle_task.waiver.as_ref()),
-        "attempt_count": bundle_task.attempt_count,
-        "eligibility": eligibility_json(),
-        "cancellations": lifecycle_json(bundle_task.cancellation.as_ref()),
-        "archives": lifecycle_json(bundle_task.archive.as_ref()),
-    });
-    let epic = json!({
-        "id": epic.id.to_string(),
-        "revision": epic.revision.value(),
-        "created_at": format_ts(&epic.created_at),
-        "updated_at": format_ts(&epic.updated_at),
-        "project_id": epic.project_id.to_string(),
-        "goal_id": epic.goal_id.to_string(),
-        "title": epic.title,
-        "description": epic.description,
-        "status": epic.status.as_str(),
-        "archived": epic.archived,
-        "blocks": lifecycle_json(epic.block.as_ref()),
-        "eligibility": eligibility_json(),
-        "task_counts": counts_json(&epic.task_counts),
-        "cancellations": lifecycle_json(epic.cancellation.as_ref()),
-        "archives": lifecycle_json(epic.archive.as_ref()),
-    });
-    let goal = json!({
-        "id": goal.id.to_string(),
-        "revision": goal.revision.value(),
-        "created_at": format_ts(&goal.created_at),
-        "updated_at": format_ts(&goal.updated_at),
-        "project_id": goal.project_id.to_string(),
-        "title": goal.title,
-        "description": goal.description,
-        "archived": goal.archived,
-        "epic_counts": counts_json(&goal.epic_counts),
-        "completed": goal.completed,
-        "archives": lifecycle_json(goal.archive.as_ref()),
-    });
-    let project = json!({
-        "id": project.id.to_string(),
-        "revision": project.revision.value(),
-        "created_at": format_ts(&project.created_at),
-        "updated_at": format_ts(&project.updated_at),
-        "name": project.name,
-        "description": project.description,
-        "settings": {
-            "proposal_gate": project.settings.proposal_gate,
-            "planning_required": project.settings.planning_required,
-            "plan_review": project.settings.plan_review.as_str(),
-            "work_review": project.settings.work_review.as_str(),
-        },
-        "archived": project.archived,
-        "epic_counts": counts_json(&project.epic_counts),
-        "archives": lifecycle_json(project.archive.as_ref()),
-    });
-    // Full bundle skeleton: section keys, flag and paths cost bytes too.
-    json!({
-        "task": task,
-        "epic": epic,
-        "goal": goal,
-        "project": project,
-        "selected_plan": [],
-        "documents": [],
-        "submissions": [],
-        "reviews": [],
-        "sessions": [],
-        "dependencies": [],
-        "sibling_claims": [],
-        "truncated": false,
-        "continuation_paths": [],
-    })
-}
-
-// Deterministic item-level fill in fixed section priority: the first item that
-// does not fit closes its section and every lower-priority one (plan/05).
-struct BudgetFill {
-    remaining: usize,
-    open: bool,
-    truncated: bool,
-    continuation_paths: Vec<String>,
-}
-
-impl BudgetFill {
-    fn take<T: Serialize>(
-        &mut self,
-        rows: Vec<T>,
-        cap: usize,
-        paths: &[String],
-    ) -> Result<Vec<T>, DomainError> {
-        let mut rows = rows;
-        let mut cut = rows.len() > cap;
-        rows.truncate(cap);
-        let mut kept = Vec::with_capacity(rows.len());
-        for item in rows {
-            if !self.open {
-                cut = true;
-                break;
-            }
-            let cost = measured(&item)? + 1;
-            if cost > self.remaining {
-                self.open = false;
-                cut = true;
-                break;
-            }
-            self.remaining -= cost;
-            kept.push(item);
-        }
-        if cut {
-            self.truncated = true;
-            for path in paths {
-                if !self.continuation_paths.contains(path) {
-                    self.continuation_paths.push(path.clone());
-                }
-            }
-        }
-        Ok(kept)
-    }
 }
 
 fn session_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Session, DomainError> {
@@ -331,23 +144,57 @@ pub(crate) async fn task_context(
     let task_text = task_id.to_string();
     let epic_text = task.epic_id.to_string();
 
-    // Latest committed revisions of project- and epic-owned documents, newest first.
-    let document_rows = sqlx::query(
-        "SELECT dr.id, dr.document_id, dr.number, dr.body, dr.links, dr.actor_id, dr.created_at \
+    // Latest committed revisions of project- and epic-owned documents, newest
+    // revision first. A metadata pass bounds body I/O to roughly one budget:
+    // characters lower-bound serialized bytes, so once the running total
+    // passes the whole budget that candidate cannot fit and later ones never
+    // will — it is still fetched so BudgetFill records the cut.
+    let candidate_rows = sqlx::query(
+        "SELECT dr.id, LENGTH(dr.body) AS body_chars \
          FROM documents d JOIN document_revisions dr ON dr.id = d.latest_revision_id \
          WHERE d.project_id = ?1 AND ((d.owner_kind = 'project' AND d.owner_id = ?1) \
          OR (d.owner_kind = 'epic' AND d.owner_id = ?2)) \
-         ORDER BY d.created_at DESC, d.id DESC LIMIT ?3",
+         ORDER BY dr.created_at DESC, dr.id DESC LIMIT ?3",
     )
     .bind(&project_text)
     .bind(&epic_text)
     .bind(DOCUMENTS_CAP as i64 + 1)
     .fetch_all(&mut *conn)
     .await?;
-    let documents = document_rows
-        .iter()
-        .map(revision_from_row)
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut wanted: Vec<String> = Vec::new();
+    let mut body_chars_total: i64 = 0;
+    for row in &candidate_rows {
+        wanted.push(row.try_get("id")?);
+        body_chars_total += row.try_get::<i64, _>("body_chars")?;
+        if body_chars_total > CONTEXT_BUDGET_BYTES as i64 {
+            break;
+        }
+    }
+    let mut documents = Vec::with_capacity(wanted.len());
+    if !wanted.is_empty() {
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            "SELECT dr.id, dr.document_id, dr.number, dr.body, dr.links, dr.actor_id, \
+             dr.created_at FROM document_revisions dr WHERE dr.id IN (",
+        );
+        let mut ids = builder.separated(", ");
+        for id in &wanted {
+            ids.push_bind(id.clone());
+        }
+        builder.push(")");
+        let rows = builder.build().fetch_all(&mut *conn).await?;
+        let mut by_id = HashMap::new();
+        for row in &rows {
+            let revision = revision_from_row(row)?;
+            by_id.insert(revision.id.to_string(), revision);
+        }
+        for id in &wanted {
+            documents.push(
+                by_id
+                    .remove(id)
+                    .ok_or_else(|| StorageError::Corrupt(format!("context: lost revision {id}")))?,
+            );
+        }
+    }
 
     let session_rows = sqlx::query(
         "SELECT id, task_id, claim_id, actor_id, phase, started_at, ended_at, outcome, \
@@ -495,11 +342,15 @@ fn assemble(
         mandatory += measured(revision)? + 1;
     }
     if mandatory > CONTEXT_BUDGET_BYTES {
-        // Return the plan's metadata path rather than silently dropping it (plan/05).
+        // Only the selected plan can push mandatory content past the budget
+        // (entity field limits sum well below it); return the plan's metadata
+        // path rather than silently dropping it (plan/05).
         let continuation = selected_plan_revision_ids
             .first()
             .map(|id| format!("{prefix}/document-revisions/{id}"))
-            .unwrap_or_else(|| format!("{prefix}/documents"));
+            .ok_or_else(|| {
+                StorageError::Corrupt("context: mandatory fields alone exceed the budget".into())
+            })?;
         return Err(DomainError::ContextTooLarge { continuation });
     }
 
@@ -735,63 +586,6 @@ mod tests {
             .await
             .unwrap()
             .into_inner()
-    }
-
-    #[test]
-    fn budget_fill_cuts_items_then_sections_deterministically() {
-        let path_a = vec!["/a".to_string()];
-        let path_b = vec!["/b".to_string(), "/b2".to_string()];
-        let mut fill = BudgetFill {
-            remaining: 20,
-            open: true,
-            truncated: false,
-            continuation_paths: Vec::new(),
-        };
-
-        // Three 9-byte items (8 serialized + separator): the third exceeds the
-        // 20-byte budget and closes every lower-priority section.
-        let items = vec![
-            "xxxxxx".to_string(),
-            "yyyyyy".to_string(),
-            "zzzzzz".to_string(),
-        ];
-        let kept = fill.take(items, 10, &path_a).unwrap();
-        assert_eq!(kept.len(), 2);
-        assert!(!fill.open);
-        assert!(fill.truncated);
-        let lower = fill.take(vec!["a".to_string()], 10, &path_b).unwrap();
-        assert!(lower.is_empty());
-        assert_eq!(fill.continuation_paths, vec!["/a", "/b", "/b2"]);
-
-        // A count-cap cut keeps lower sections open and deduplicates paths.
-        let mut fill = BudgetFill {
-            remaining: 1_000,
-            open: true,
-            truncated: false,
-            continuation_paths: Vec::new(),
-        };
-        let kept = fill
-            .take(vec!["a".to_string(), "b".to_string()], 1, &path_a)
-            .unwrap();
-        assert_eq!(kept, vec!["a".to_string()]);
-        assert!(fill.open);
-        let kept = fill
-            .take(vec!["c".to_string(), "d".to_string()], 1, &path_a)
-            .unwrap();
-        assert_eq!(kept, vec!["c".to_string()]);
-        assert_eq!(fill.continuation_paths, vec!["/a"]);
-        assert!(fill.truncated);
-
-        // Nothing to cut: no flag, no paths.
-        let mut fill = BudgetFill {
-            remaining: 1_000,
-            open: true,
-            truncated: false,
-            continuation_paths: Vec::new(),
-        };
-        fill.take(vec!["a".to_string()], 10, &path_a).unwrap();
-        assert!(!fill.truncated);
-        assert!(fill.continuation_paths.is_empty());
     }
 
     #[tokio::test]
