@@ -576,3 +576,434 @@ impl Store {
         Ok(bundle)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use chrono::TimeDelta;
+
+    use super::*;
+    use crate::commands::CommandContext;
+    use crate::model::{
+        Actor, ActorKind, Clock, DependencyCreate, Document, DocumentCreate, DocumentKind,
+        DocumentOwner, EpicCreate, EpicId, GoalCreate, ProjectCreate, SelectPlanInput, TaskCreate,
+        TestClock,
+    };
+    use crate::storage::open;
+    use crate::storage::rows::insert_actor;
+    use crate::storage::testing::{seed_claim, seed_submission, store_options, test_clock};
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        clock: Arc<TestClock>,
+        store: Store,
+        owner: Actor,
+        project: ProjectId,
+        epic: EpicId,
+        task: TaskId,
+        sibling: TaskId,
+        stale: TaskId,
+    }
+
+    fn ctx(actor: &Actor, clock: &TestClock, expected_revision: Option<i64>) -> CommandContext {
+        CommandContext {
+            actor: actor.clone(),
+            command_id: crate::model::CommandId::generate(clock.now()),
+            idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            expected_revision,
+            now: clock.now(),
+        }
+    }
+
+    async fn fixture() -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = test_clock();
+        let store = open(store_options(dir.path(), "shepherd.db", clock.clone()))
+            .await
+            .unwrap();
+        let owner = Actor {
+            id: crate::model::ActorId::generate(clock.now()),
+            kind: ActorKind::Human,
+            label: "owner".into(),
+            revoked: false,
+            created_at: clock.now(),
+        };
+        let registered = owner.clone();
+        store
+            .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &registered).await }))
+            .await
+            .unwrap();
+        let project = store
+            .create_project(
+                ctx(&owner, &clock, None),
+                ProjectCreate {
+                    name: "P".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let goal = store
+            .create_goal(
+                ctx(&owner, &clock, None),
+                project,
+                GoalCreate {
+                    title: "G".into(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        clock.advance(TimeDelta::milliseconds(2));
+        let epic = store
+            .create_epic(
+                ctx(&owner, &clock, None),
+                project,
+                goal,
+                EpicCreate {
+                    title: "E".into(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let mut tasks = Vec::new();
+        for title in ["T1", "T2", "T3"] {
+            clock.advance(TimeDelta::milliseconds(2));
+            tasks.push(
+                store
+                    .create_task(
+                        ctx(&owner, &clock, None),
+                        project,
+                        epic,
+                        TaskCreate {
+                            title: title.into(),
+                            type_key: "code".into(),
+                            planning_required: Some(true),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .value
+                    .id,
+            );
+        }
+        let stale = tasks.pop().unwrap();
+        let sibling = tasks.pop().unwrap();
+        let task = tasks.pop().unwrap();
+        Fixture {
+            _dir: dir,
+            clock,
+            store,
+            owner,
+            project,
+            epic,
+            task,
+            sibling,
+            stale,
+        }
+    }
+
+    async fn create_document(
+        f: &Fixture,
+        owner: DocumentOwner,
+        kind: DocumentKind,
+        body: &str,
+    ) -> Document {
+        f.clock.advance(TimeDelta::milliseconds(2));
+        f.store
+            .create_document(
+                ctx(&f.owner, &f.clock, None),
+                f.project,
+                DocumentCreate {
+                    owner,
+                    kind,
+                    title: format!("{} doc", kind.as_str()),
+                    body: body.into(),
+                    links: Vec::new(),
+                },
+                "doc-hash",
+            )
+            .await
+            .unwrap()
+            .into_inner()
+    }
+
+    #[test]
+    fn budget_fill_cuts_items_then_sections_deterministically() {
+        let path_a = vec!["/a".to_string()];
+        let path_b = vec!["/b".to_string(), "/b2".to_string()];
+        let mut fill = BudgetFill {
+            remaining: 20,
+            open: true,
+            truncated: false,
+            continuation_paths: Vec::new(),
+        };
+
+        // Three 9-byte items (8 serialized + separator): the third exceeds the
+        // 20-byte budget and closes every lower-priority section.
+        let items = vec![
+            "xxxxxx".to_string(),
+            "yyyyyy".to_string(),
+            "zzzzzz".to_string(),
+        ];
+        let kept = fill.take(items, 10, &path_a).unwrap();
+        assert_eq!(kept.len(), 2);
+        assert!(!fill.open);
+        assert!(fill.truncated);
+        let lower = fill.take(vec!["a".to_string()], 10, &path_b).unwrap();
+        assert!(lower.is_empty());
+        assert_eq!(fill.continuation_paths, vec!["/a", "/b", "/b2"]);
+
+        // A count-cap cut keeps lower sections open and deduplicates paths.
+        let mut fill = BudgetFill {
+            remaining: 1_000,
+            open: true,
+            truncated: false,
+            continuation_paths: Vec::new(),
+        };
+        let kept = fill
+            .take(vec!["a".to_string(), "b".to_string()], 1, &path_a)
+            .unwrap();
+        assert_eq!(kept, vec!["a".to_string()]);
+        assert!(fill.open);
+        let kept = fill
+            .take(vec!["c".to_string(), "d".to_string()], 1, &path_a)
+            .unwrap();
+        assert_eq!(kept, vec!["c".to_string()]);
+        assert_eq!(fill.continuation_paths, vec!["/a"]);
+        assert!(fill.truncated);
+
+        // Nothing to cut: no flag, no paths.
+        let mut fill = BudgetFill {
+            remaining: 1_000,
+            open: true,
+            truncated: false,
+            continuation_paths: Vec::new(),
+        };
+        fill.take(vec!["a".to_string()], 10, &path_a).unwrap();
+        assert!(!fill.truncated);
+        assert!(fill.continuation_paths.is_empty());
+    }
+
+    #[tokio::test]
+    async fn context_assembles_every_section_from_one_snapshot() {
+        let f = fixture().await;
+
+        // Pinned plan: select the first revision, then move the latest on.
+        let plan = create_document(&f, DocumentOwner::Task(f.task), DocumentKind::Plan, "v1").await;
+        let pinned = plan.latest_revision_id.as_uuid();
+        f.clock.advance(TimeDelta::milliseconds(2));
+        f.store
+            .create_document_revision(
+                ctx(&f.owner, &f.clock, Some(1)),
+                f.project,
+                plan.id,
+                crate::model::RevisionCreate {
+                    body: "v2".into(),
+                    links: Vec::new(),
+                },
+                "rev-hash",
+            )
+            .await
+            .unwrap();
+        f.clock.advance(TimeDelta::milliseconds(2));
+        f.store
+            .select_task_plan(
+                ctx(&f.owner, &f.clock, Some(1)),
+                f.project,
+                f.task,
+                SelectPlanInput {
+                    document_revision_id: pinned,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Scoped documents: project- and this-epic-owned only.
+        let brief = create_document(
+            &f,
+            DocumentOwner::Project(f.project),
+            DocumentKind::Brief,
+            "b",
+        )
+        .await;
+        let note = create_document(&f, DocumentOwner::Epic(f.epic), DocumentKind::Note, "n").await;
+
+        // Seeded history rows: one submission (with its session) and a review.
+        let now_text = format_ts(&f.clock.now());
+        let submission =
+            seed_submission(f.store.pool(), f.task, f.owner.id, "accepted", &now_text).await;
+        sqlx::query(
+            "INSERT INTO reviews (id, submission_id, actor_id, decision, reason, created_at) \
+             VALUES (?1, ?2, ?3, 'approve', 'fine', ?4)",
+        )
+        .bind(Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string())
+        .bind(&submission)
+        .bind(f.owner.id.to_string())
+        .bind(&now_text)
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+
+        f.clock.advance(TimeDelta::milliseconds(2));
+        f.store
+            .create_dependency(
+                ctx(&f.owner, &f.clock, None),
+                f.project,
+                DependencyCreate::Task {
+                    dependent_id: f.task,
+                    prerequisite_id: f.sibling,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Sibling awareness: one live claim, one expired, one on the task itself.
+        let live_until = format_ts(&(f.clock.now() + TimeDelta::seconds(300)));
+        let lapsed = format_ts(&(f.clock.now() - TimeDelta::seconds(1)));
+        let live = seed_claim(
+            f.store.pool(),
+            f.sibling,
+            f.owner.id,
+            "execute",
+            "active",
+            &now_text,
+            &live_until,
+        )
+        .await;
+        seed_claim(
+            f.store.pool(),
+            f.stale,
+            f.owner.id,
+            "plan",
+            "active",
+            &now_text,
+            &lapsed,
+        )
+        .await;
+        seed_claim(
+            f.store.pool(),
+            f.task,
+            f.owner.id,
+            "execute",
+            "active",
+            &now_text,
+            &live_until,
+        )
+        .await;
+
+        let bundle = f.store.get_task_context(&f.project, &f.task).await.unwrap();
+
+        assert_eq!(bundle.task.id, f.task);
+        assert_eq!(bundle.epic.id, f.epic);
+        assert_eq!(bundle.selected_plan_revision_ids, vec![pinned]);
+        assert_eq!(bundle.selected_plan.len(), 1);
+        assert_eq!(bundle.selected_plan[0].body, "v1");
+        let document_ids: Vec<Uuid> = bundle
+            .documents
+            .iter()
+            .map(|revision| revision.document_id.as_uuid())
+            .collect();
+        assert_eq!(document_ids, vec![note.id.as_uuid(), brief.id.as_uuid()]);
+        assert_eq!(bundle.submissions.len(), 1);
+        assert_eq!(bundle.reviews.len(), 1);
+        assert_eq!(bundle.reviews[0].reason, "fine");
+        assert_eq!(bundle.sessions.len(), 1);
+        assert_eq!(bundle.sibling_claims.len(), 1);
+        assert_eq!(bundle.sibling_claims[0].id.to_string(), live);
+        assert_eq!(bundle.dependencies.len(), 1);
+        assert_eq!(bundle.dependencies[0].level, DependencyLevel::Task);
+        assert!(!bundle.truncated);
+        assert!(bundle.continuation_paths.is_empty());
+    }
+
+    #[tokio::test]
+    async fn context_truncates_by_bytes_with_continuation_paths() {
+        let f = fixture().await;
+        for _ in 0..5 {
+            create_document(
+                &f,
+                DocumentOwner::Epic(f.epic),
+                DocumentKind::Note,
+                &"x".repeat(60_000),
+            )
+            .await;
+        }
+
+        let bundle = f.store.get_task_context(&f.project, &f.task).await.unwrap();
+        assert!(bundle.truncated);
+        assert_eq!(bundle.documents.len(), 4, "budget keeps the newest four");
+        assert_eq!(
+            bundle.continuation_paths,
+            vec![
+                format!(
+                    "/api/v1/projects/{}/documents?owner_kind=project&owner_id={}",
+                    f.project, f.project
+                ),
+                format!(
+                    "/api/v1/projects/{}/documents?owner_kind=epic&owner_id={}",
+                    f.project, f.epic
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn context_rejects_unknown_task_and_oversized_mandatory_plan() {
+        let f = fixture().await;
+        let unknown = TaskId::generate(f.clock.now());
+        assert!(matches!(
+            f.store.get_task_context(&f.project, &unknown).await,
+            Err(DomainError::NotFound)
+        ));
+
+        // 65,536 four-byte characters: the plan alone fills the 256 KiB budget.
+        let plan = create_document(
+            &f,
+            DocumentOwner::Task(f.task),
+            DocumentKind::Plan,
+            &"\u{1F4A5}".repeat(65_536),
+        )
+        .await;
+        let revision = plan.latest_revision_id.as_uuid();
+        f.clock.advance(TimeDelta::milliseconds(2));
+        f.store
+            .select_task_plan(
+                ctx(&f.owner, &f.clock, Some(1)),
+                f.project,
+                f.task,
+                SelectPlanInput {
+                    document_revision_id: revision,
+                },
+            )
+            .await
+            .unwrap();
+
+        let err = f
+            .store
+            .get_task_context(&f.project, &f.task)
+            .await
+            .unwrap_err();
+        match err {
+            DomainError::ContextTooLarge { continuation } => {
+                assert_eq!(
+                    continuation,
+                    format!(
+                        "/api/v1/projects/{}/document-revisions/{revision}",
+                        f.project
+                    )
+                );
+            }
+            other => panic!("expected ContextTooLarge, got {other:?}"),
+        }
+    }
+}

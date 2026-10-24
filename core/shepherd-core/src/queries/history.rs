@@ -223,3 +223,256 @@ impl Store {
         Ok(ReplayOutcome::Events(events))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use chrono::TimeDelta;
+
+    use super::*;
+    use crate::commands::CommandContext;
+    use crate::model::{Actor, ActorKind, Clock, GoalCreate, ProjectCreate, TestClock};
+    use crate::storage::open;
+    use crate::storage::rows::insert_actor;
+    use crate::storage::testing::{store_options, test_clock};
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        clock: Arc<TestClock>,
+        store: Store,
+        owner: Actor,
+        project: ProjectId,
+    }
+
+    fn ctx(actor: &Actor, clock: &TestClock) -> CommandContext {
+        CommandContext {
+            actor: actor.clone(),
+            command_id: crate::model::CommandId::generate(clock.now()),
+            idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            expected_revision: None,
+            now: clock.now(),
+        }
+    }
+
+    async fn fixture() -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = test_clock();
+        let store = open(store_options(dir.path(), "shepherd.db", clock.clone()))
+            .await
+            .unwrap();
+        let owner = Actor {
+            id: crate::model::ActorId::generate(clock.now()),
+            kind: ActorKind::Human,
+            label: "owner".into(),
+            revoked: false,
+            created_at: clock.now(),
+        };
+        let registered = owner.clone();
+        store
+            .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &registered).await }))
+            .await
+            .unwrap();
+        let project = store
+            .create_project(
+                ctx(&owner, &clock),
+                ProjectCreate {
+                    name: "P".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        Fixture {
+            _dir: dir,
+            clock,
+            store,
+            owner,
+            project,
+        }
+    }
+
+    fn params(limit: Option<u32>, cursor: Option<String>) -> ListParams {
+        ListParams {
+            limit,
+            cursor,
+            include_archived: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn history_pages_newest_first_and_validates_cursors() {
+        let f = fixture().await;
+        let goal = f
+            .store
+            .create_goal(
+                ctx(&f.owner, &f.clock),
+                f.project,
+                GoalCreate {
+                    title: "G".into(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+
+        let first = f
+            .store
+            .list_history(&f.project, None, &params(Some(3), None))
+            .await
+            .unwrap();
+        assert_eq!(first.items.len(), 3);
+        let cursor = first.next_cursor.clone().unwrap();
+        let second = f
+            .store
+            .list_history(&f.project, None, &params(Some(200), Some(cursor.clone())))
+            .await
+            .unwrap();
+        assert!(second.next_cursor.is_none());
+        let mut ids: Vec<EventId> = first
+            .items
+            .iter()
+            .chain(second.items.iter())
+            .map(|event| event.id)
+            .collect();
+        assert_eq!(ids.len(), 8, "project create (7) plus goal create");
+        let sorted = {
+            ids.sort_by(|a, b| b.cmp(a));
+            ids.clone()
+        };
+        assert_eq!(ids, sorted, "newest first");
+
+        // Resource filter scopes rows and binds the cursor fingerprint.
+        let filtered = f
+            .store
+            .list_history(&f.project, Some(goal.as_uuid()), &params(None, None))
+            .await
+            .unwrap();
+        assert_eq!(filtered.items.len(), 1);
+        assert!(matches!(
+            f.store
+                .list_history(
+                    &f.project,
+                    Some(goal.as_uuid()),
+                    &params(None, Some(cursor))
+                )
+                .await,
+            Err(DomainError::InvalidCursor(_))
+        ));
+
+        // Unknown project wins over a malformed cursor; limits validate.
+        let unknown = ProjectId::generate(f.clock.now());
+        assert!(matches!(
+            f.store
+                .list_history(&unknown, None, &params(None, Some("junk".into())))
+                .await,
+            Err(DomainError::NotFound)
+        ));
+        assert!(matches!(
+            f.store
+                .list_history(&f.project, None, &params(Some(0), None))
+                .await,
+            Err(DomainError::Validation { field: "limit", .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn replay_covers_ascending_window_and_resync_outcomes() {
+        let f = fixture().await;
+        let high_water = f.store.event_high_water().await.unwrap();
+        assert_eq!(high_water, 7, "project create emits seven events");
+
+        match f.store.replay_events(&f.project, 0).await.unwrap() {
+            ReplayOutcome::Events(events) => {
+                let ids: Vec<EventId> = events.iter().map(|event| event.id).collect();
+                assert_eq!(ids, (1..=7).collect::<Vec<_>>());
+            }
+            other => panic!("expected events, got {other:?}"),
+        }
+
+        match f
+            .store
+            .replay_events(&f.project, high_water + 1)
+            .await
+            .unwrap()
+        {
+            ReplayOutcome::ResyncRequired {
+                current_cursor,
+                reason,
+            } => {
+                assert_eq!(current_cursor, high_water);
+                assert_eq!(reason, ResyncReason::CursorAhead);
+            }
+            other => panic!("expected resync, got {other:?}"),
+        }
+
+        // Eight days on, the old cursor predates the seven-day window; a
+        // cursor at the retained maximum still replays fresh events.
+        f.clock.advance(TimeDelta::days(8));
+        match f.store.replay_events(&f.project, 0).await.unwrap() {
+            ReplayOutcome::ResyncRequired { reason, .. } => {
+                assert_eq!(reason, ResyncReason::CursorExpired);
+            }
+            other => panic!("expected resync, got {other:?}"),
+        }
+        f.store
+            .create_goal(
+                ctx(&f.owner, &f.clock),
+                f.project,
+                GoalCreate {
+                    title: "G2".into(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap();
+        match f.store.replay_events(&f.project, high_water).await.unwrap() {
+            ReplayOutcome::Events(events) => {
+                assert_eq!(events.len(), 1);
+                assert_eq!(events[0].event_type, EventType::GoalChanged);
+            }
+            other => panic!("expected events, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn replay_backlog_over_the_bound_requires_resync() {
+        let f = fixture().await;
+        let actor = f.owner.id.to_string();
+        let project = f.project.to_string();
+        let occurred = format_ts(&f.clock.now());
+        f.store
+            .command_transaction(move |tx| {
+                Box::pin(async move {
+                    for _ in 0..REPLAY_MAX_EVENTS + 1 {
+                        sqlx::query(
+                            "INSERT INTO events (action, reason, project_id, actor_id, \
+                             command_id, type, resource_id, resource_revision, occurred_at, \
+                             affected_ids) VALUES ('seed', '', ?1, ?2, ?3, 'task.changed', \
+                             ?4, 1, ?5, '[]')",
+                        )
+                        .bind(&project)
+                        .bind(&actor)
+                        .bind(Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string())
+                        .bind(Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string())
+                        .bind(&occurred)
+                        .execute(&mut **tx)
+                        .await?;
+                    }
+                    Ok(())
+                })
+            })
+            .await
+            .unwrap();
+        match f.store.replay_events(&f.project, 0).await.unwrap() {
+            ReplayOutcome::ResyncRequired { reason, .. } => {
+                assert_eq!(reason, ResyncReason::BacklogLimit);
+            }
+            other => panic!("expected resync, got {other:?}"),
+        }
+    }
+}
