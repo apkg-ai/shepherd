@@ -8,6 +8,7 @@ mod reports;
 mod reviews;
 
 pub use content::DocumentListFilters;
+pub(crate) use content::{revision_from_row, revision_row};
 pub use identity::IdentityPaths;
 
 use std::future::Future;

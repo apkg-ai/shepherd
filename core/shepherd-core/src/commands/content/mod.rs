@@ -271,7 +271,9 @@ fn document_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Document, DomainEr
 
 const REVISION_COLUMNS: &str = "id, document_id, number, body, links, actor_id, created_at";
 
-fn revision_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<DocumentRevision, DomainError> {
+pub(crate) fn revision_from_row(
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<DocumentRevision, DomainError> {
     let id: String = row.try_get("id")?;
     let document_id: String = row.try_get("document_id")?;
     let number: i64 = row.try_get("number")?;
@@ -355,7 +357,7 @@ async fn document_row(
         .transpose()
 }
 
-async fn revision_row(
+pub(crate) async fn revision_row(
     conn: &mut SqliteConnection,
     project: &ProjectId,
     id: &DocumentRevisionId,

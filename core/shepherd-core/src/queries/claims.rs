@@ -28,7 +28,7 @@ fn claims_filter(project: &ProjectId, filters: &ClaimListFilters) -> String {
     parts.join("&")
 }
 
-fn claim_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Claim, DomainError> {
+pub(crate) fn claim_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Claim, DomainError> {
     let id: String = row.try_get("id")?;
     let task_id: String = row.try_get("task_id")?;
     let actor_id: String = row.try_get("actor_id")?;

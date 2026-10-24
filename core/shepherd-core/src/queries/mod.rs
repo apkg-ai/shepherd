@@ -1,4 +1,5 @@
 pub(crate) mod claims;
+pub(crate) mod context;
 pub(crate) mod graph;
 pub(crate) mod hierarchy;
 pub(crate) mod history;
@@ -6,6 +7,7 @@ pub(crate) mod submissions;
 pub(crate) mod work;
 
 pub use claims::ClaimListFilters;
+pub use context::{CONTEXT_BUDGET_BYTES, ContextBundle};
 pub use graph::{DependencyListFilters, GRAPH_MAX_DEPENDENCIES, GRAPH_MAX_NODES, Graph, GraphNode};
 pub use hierarchy::{EpicListFilters, TaskListFilters};
 pub use history::{REPLAY_MAX_EVENTS, REPLAY_WINDOW_DAYS, ReplayOutcome, ResyncReason};
