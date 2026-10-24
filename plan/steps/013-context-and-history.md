@@ -1,6 +1,6 @@
 # 013 — Context assembly and durable history
 
-Status: implemented on branch `v1-013-context-and-history` (PR pending). Requirements: CONTENT-01 DATA-01.
+Status: implemented on branch `v1-013-context-and-history` (PR #96). Requirements: CONTENT-01 DATA-01.
 
 ## Objective and prerequisites
 
