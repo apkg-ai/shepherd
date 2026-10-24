@@ -101,7 +101,7 @@ impl DocumentKind {
 
 typed_id_serde!(serde_document_id, DocumentId);
 typed_id_serde!(serde_document_revision_id, DocumentRevisionId);
-typed_id_serde!(serde_project_id, ProjectId);
+typed_id_serde!(pub(super) serde_project_id, ProjectId);
 
 pub(super) mod serde_revision {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};

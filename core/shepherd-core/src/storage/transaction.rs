@@ -16,6 +16,14 @@ use super::{IdempotencyCodec, ReplayKeyProvider, SealedResponse, StorageError, S
 pub type TxFuture<'t, T> = Pin<Box<dyn Future<Output = Result<T, StorageError>> + Send + 't>>;
 
 impl Store {
+    // One deferred read transaction = one consistent WAL snapshot (plan/05:
+    // context and export read everything from a single snapshot).
+    pub(crate) async fn read_transaction(
+        &self,
+    ) -> Result<Transaction<'static, Sqlite>, StorageError> {
+        self.pool().begin().await.map_err(StorageError::from)
+    }
+
     // Write reservation before reads (plan/05): the no-op UPDATE upgrades BEGIN to a write lock.
     pub(crate) async fn begin_command(&self) -> Result<Transaction<'static, Sqlite>, StorageError> {
         let mut tx = self.pool().begin().await?;

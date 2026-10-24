@@ -1,12 +1,14 @@
 pub(crate) mod claims;
 pub(crate) mod graph;
 pub(crate) mod hierarchy;
+pub(crate) mod history;
 pub(crate) mod submissions;
 pub(crate) mod work;
 
 pub use claims::ClaimListFilters;
 pub use graph::{DependencyListFilters, GRAPH_MAX_DEPENDENCIES, GRAPH_MAX_NODES, Graph, GraphNode};
 pub use hierarchy::{EpicListFilters, TaskListFilters};
+pub use history::{REPLAY_MAX_EVENTS, REPLAY_WINDOW_DAYS, ReplayOutcome, ResyncReason};
 pub use submissions::SubmissionListFilters;
 pub use work::{WorkFilters, WorkItem, WorkPhase};
 
@@ -242,6 +244,48 @@ pub(crate) fn decode_cursor(
     filter: &str,
 ) -> Result<(String, String), DomainError> {
     let invalid = |reason: &str| DomainError::InvalidCursor(reason.to_string());
+    let (created_at, id) = verify_cursor(cursor, endpoint, filter)?;
+    let created_at =
+        parse_ts("cursor.c", &created_at).map_err(|_| invalid("malformed sort timestamp"))?;
+    let id = Uuid::parse_str(&id).map_err(|_| invalid("malformed sort id"))?;
+    Ok((format_ts(&created_at), id.to_string()))
+}
+
+// Events sort on the integer rowid alone, so their cursor carries an empty
+// sort column and a decimal tiebreaker instead of a (created_at, uuid) tuple.
+pub(crate) fn encode_rowid_cursor(
+    endpoint: &str,
+    filter: &str,
+    id: crate::model::EventId,
+) -> String {
+    encode_cursor(endpoint, filter, "", &id.to_string())
+}
+
+pub(crate) fn decode_rowid_cursor(
+    cursor: &str,
+    endpoint: &str,
+    filter: &str,
+) -> Result<crate::model::EventId, DomainError> {
+    let invalid = |reason: &str| DomainError::InvalidCursor(reason.to_string());
+    let (created_at, id) = verify_cursor(cursor, endpoint, filter)?;
+    if !created_at.is_empty() {
+        return Err(invalid("malformed sort tuple"));
+    }
+    let id: crate::model::EventId = id.parse().map_err(|_| invalid("malformed sort id"))?;
+    if id < 1 {
+        return Err(invalid("malformed sort id"));
+    }
+    Ok(id)
+}
+
+// MAC, version, endpoint and filter verification shared by both cursor shapes;
+// returns the raw (c, i) sort tuple for the caller to parse.
+fn verify_cursor(
+    cursor: &str,
+    endpoint: &str,
+    filter: &str,
+) -> Result<(String, String), DomainError> {
+    let invalid = |reason: &str| DomainError::InvalidCursor(reason.to_string());
     let bytes = URL_SAFE_NO_PAD
         .decode(cursor)
         .map_err(|_| invalid("malformed base64url"))?;
@@ -273,10 +317,7 @@ pub(crate) fn decode_cursor(
     if payload.f != filter {
         return Err(invalid("filter mismatch"));
     }
-    let created_at =
-        parse_ts("cursor.c", &payload.c).map_err(|_| invalid("malformed sort timestamp"))?;
-    let id = Uuid::parse_str(&payload.i).map_err(|_| invalid("malformed sort id"))?;
-    Ok((format_ts(&created_at), id.to_string()))
+    Ok((payload.c, payload.i))
 }
 
 #[cfg(test)]
@@ -370,6 +411,52 @@ mod tests {
         ] {
             assert!(matches!(
                 decode_cursor(&tampered, "listProjects", &filter),
+                Err(DomainError::InvalidCursor(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn rowid_cursors_round_trip_their_id() {
+        let filter = "project=p&resource=none";
+        let cursor = encode_rowid_cursor("listHistory", filter, 42);
+        assert_eq!(
+            decode_rowid_cursor(&cursor, "listHistory", filter).unwrap(),
+            42
+        );
+        assert!(matches!(
+            decode_rowid_cursor(&cursor, "listProjects", filter),
+            Err(DomainError::InvalidCursor(_))
+        ));
+        assert!(matches!(
+            decode_rowid_cursor(&cursor, "listHistory", "project=p&resource=other"),
+            Err(DomainError::InvalidCursor(_))
+        ));
+    }
+
+    #[test]
+    fn rowid_and_uuid_cursors_do_not_cross_decode() {
+        let filter = "project=p&resource=none";
+        let rowid_cursor = encode_rowid_cursor("listHistory", filter, 7);
+        assert!(matches!(
+            decode_cursor(&rowid_cursor, "listHistory", filter),
+            Err(DomainError::InvalidCursor(_))
+        ));
+        let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+        let uuid_cursor = encode_cursor("listHistory", filter, "2026-09-14T00:00:00.000Z", &id);
+        assert!(matches!(
+            decode_rowid_cursor(&uuid_cursor, "listHistory", filter),
+            Err(DomainError::InvalidCursor(_))
+        ));
+    }
+
+    #[test]
+    fn rowid_cursors_reject_non_positive_ids() {
+        let filter = "project=p&resource=none";
+        for bad in ["0", "-3", "abc", ""] {
+            let cursor = encode_cursor("listHistory", filter, "", bad);
+            assert!(matches!(
+                decode_rowid_cursor(&cursor, "listHistory", filter),
                 Err(DomainError::InvalidCursor(_))
             ));
         }
