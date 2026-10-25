@@ -20,7 +20,7 @@ use crate::middleware::set_etag;
 
 /// Wire body for one task: the post-commit view carrying eligibility and the
 /// plan-pointer arrays.
-async fn task_body(
+pub(crate) async fn task_body(
     store: &Store,
     project: ProjectId,
     task: TaskId,

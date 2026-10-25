@@ -134,3 +134,33 @@ pub(crate) fn context_bundle(
         continuation_paths: bundle.continuation_paths,
     }
 }
+
+/// Events serve listHistory and the SSE frames; the wire id is the decimal
+/// string form of the rowid cursor (plan/08).
+pub(crate) fn event(event: core::Event) -> wire::Event {
+    wire::Event {
+        id: event.id.to_string(),
+        project_id: event.project_id.as_uuid(),
+        actor_id: event.actor_id.as_uuid(),
+        command_id: event.command_id.as_uuid(),
+        r#type: match event.event_type {
+            core::EventType::ProjectChanged => wire::EventType::ProjectChanged,
+            core::EventType::GoalChanged => wire::EventType::GoalChanged,
+            core::EventType::EpicChanged => wire::EventType::EpicChanged,
+            core::EventType::TaskChanged => wire::EventType::TaskChanged,
+            core::EventType::TaskTypeChanged => wire::EventType::TaskTypeChanged,
+            core::EventType::DependencyChanged => wire::EventType::DependencyChanged,
+            core::EventType::ClaimChanged => wire::EventType::ClaimChanged,
+            core::EventType::SessionRecorded => wire::EventType::SessionRecorded,
+            core::EventType::DocumentChanged => wire::EventType::DocumentChanged,
+            core::EventType::SubmissionChanged => wire::EventType::SubmissionChanged,
+            core::EventType::ReviewRecorded => wire::EventType::ReviewRecorded,
+        },
+        resource_id: event.resource_id,
+        resource_revision: event.resource_revision as i32,
+        occurred_at: event.occurred_at,
+        affected_ids: event.affected_ids.iter().map(ToString::to_string).collect(),
+        action: event.action,
+        reason: event.reason,
+    }
+}

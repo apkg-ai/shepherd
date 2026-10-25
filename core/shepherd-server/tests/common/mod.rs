@@ -191,3 +191,54 @@ pub async fn seed_hierarchy(w: &World) -> Hierarchy {
         task,
     }
 }
+
+// ── Served-spec validation helpers shared by the contract suites ────────
+
+pub fn load_spec() -> Value {
+    let yaml_str = include_str!("../../../../openapi/shepherd.yaml");
+    serde_yaml::from_str(yaml_str).expect("failed to parse OpenAPI spec")
+}
+
+pub fn resolve_ref<'a>(spec: &'a Value, ref_path: &str) -> &'a Value {
+    let path = ref_path.strip_prefix("#/").unwrap_or(ref_path);
+    let mut current = spec;
+    for segment in path.split('/') {
+        current = &current[segment];
+    }
+    current
+}
+
+pub fn resolve_schema(spec: &Value, schema: &Value) -> Value {
+    match schema {
+        Value::Object(map) => {
+            if let Some(ref_val) = map.get("$ref") {
+                let ref_path = ref_val.as_str().unwrap();
+                let resolved = resolve_ref(spec, ref_path);
+                return resolve_schema(spec, resolved);
+            }
+            let mut result = serde_json::Map::new();
+            for (key, val) in map {
+                result.insert(key.clone(), resolve_schema(spec, val));
+            }
+            Value::Object(result)
+        }
+        Value::Array(arr) => Value::Array(arr.iter().map(|v| resolve_schema(spec, v)).collect()),
+        other => other.clone(),
+    }
+}
+
+pub fn validate_against(spec: &Value, schema_ref: &str, value: &Value) {
+    let raw = resolve_ref(spec, schema_ref);
+    validate_schema_value(spec, raw, value, schema_ref);
+}
+
+pub fn validate_schema_value(spec: &Value, raw_schema: &Value, value: &Value, label: &str) {
+    let resolved = resolve_schema(spec, raw_schema);
+    let validator = jsonschema_056::Validator::new(&resolved).expect("failed to compile schema");
+    if let Err(err) = validator.validate(value) {
+        panic!(
+            "Schema validation failed for {label}:\n  {err}\nValue: {}",
+            serde_json::to_string_pretty(value).unwrap()
+        );
+    }
+}

@@ -1,6 +1,9 @@
 pub(crate) mod claims;
+pub(crate) mod content;
+pub(crate) mod events;
 pub(crate) mod hierarchy;
 pub(crate) mod identity;
+pub(crate) mod reviews;
 
 use axum::body::Body;
 use axum::http::{Response, StatusCode};

@@ -580,12 +580,13 @@ impl PendingEvent {
         }
     }
 
+    // Immutable records exist at exactly one revision; the contract floor is 1.
     pub(crate) fn session(id: Uuid, task: TaskId) -> Self {
         Self {
             event_type: "session.recorded",
             kind_rank: 8,
             resource_id: id,
-            resource_revision: 0,
+            resource_revision: 1,
             affected_ids: vec![task.as_uuid()],
         }
     }
@@ -608,7 +609,7 @@ impl PendingEvent {
             event_type: "review.recorded",
             kind_rank: 10,
             resource_id: id,
-            resource_revision: 0,
+            resource_revision: 1,
             affected_ids: vec![submission, task.as_uuid()],
         }
     }

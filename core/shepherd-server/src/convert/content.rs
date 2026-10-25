@@ -96,3 +96,79 @@ pub(crate) fn review(review: core::Review) -> wire::Review {
         created_at: review.created_at,
     }
 }
+
+pub(crate) fn document_kind(kind: core::DocumentKind) -> wire::DocumentKind {
+    match kind {
+        core::DocumentKind::Brief => wire::DocumentKind::Brief,
+        core::DocumentKind::Plan => wire::DocumentKind::Plan,
+        core::DocumentKind::Finding => wire::DocumentKind::Finding,
+        core::DocumentKind::Handoff => wire::DocumentKind::Handoff,
+        core::DocumentKind::Note => wire::DocumentKind::Note,
+        core::DocumentKind::Decision => wire::DocumentKind::Decision,
+    }
+}
+
+pub(crate) fn owner_kind(kind: core::DocumentOwnerKind) -> wire::DocumentOwnerKind {
+    match kind {
+        core::DocumentOwnerKind::Project => wire::DocumentOwnerKind::Project,
+        core::DocumentOwnerKind::Epic => wire::DocumentOwnerKind::Epic,
+        core::DocumentOwnerKind::Task => wire::DocumentOwnerKind::Task,
+    }
+}
+
+pub(crate) fn document(document: core::Document) -> wire::Document {
+    wire::Document {
+        id: document.id.as_uuid(),
+        revision: document.revision.value() as i32,
+        created_at: document.created_at,
+        updated_at: document.updated_at,
+        project_id: document.project_id.as_uuid(),
+        owner_kind: owner_kind(document.owner_kind),
+        owner_id: document.owner_id,
+        kind: document_kind(document.kind),
+        title: document.title,
+        latest_revision_id: document.latest_revision_id.as_uuid(),
+    }
+}
+
+pub(crate) fn core_document_create(input: wire::DocumentCreate) -> core::DocumentCreate {
+    core::DocumentCreate {
+        owner: core::DocumentOwner::from_parts(
+            match input.owner_kind {
+                wire::DocumentCreateOwnerKind::Project => core::DocumentOwnerKind::Project,
+                wire::DocumentCreateOwnerKind::Epic => core::DocumentOwnerKind::Epic,
+                wire::DocumentCreateOwnerKind::Task => core::DocumentOwnerKind::Task,
+            },
+            input.owner_id,
+        ),
+        kind: match input.kind {
+            wire::DocumentCreateKind::Brief => core::DocumentKind::Brief,
+            wire::DocumentCreateKind::Plan => core::DocumentKind::Plan,
+            wire::DocumentCreateKind::Finding => core::DocumentKind::Finding,
+            wire::DocumentCreateKind::Handoff => core::DocumentKind::Handoff,
+            wire::DocumentCreateKind::Note => core::DocumentKind::Note,
+            wire::DocumentCreateKind::Decision => core::DocumentKind::Decision,
+        },
+        title: input.title,
+        body: input.body,
+        links: input.links,
+    }
+}
+
+pub(crate) fn core_revision_create(input: wire::RevisionCreate) -> core::RevisionCreate {
+    core::RevisionCreate {
+        body: input.body,
+        links: input.links,
+    }
+}
+
+pub(crate) fn core_review_input(input: wire::ReviewInput) -> core::ReviewInput {
+    core::ReviewInput {
+        decision: match input.decision {
+            wire::ReviewInputDecision::Approve => core::ReviewDecision::Approve,
+            wire::ReviewInputDecision::Reject => core::ReviewDecision::Reject,
+        },
+        reason: input.reason,
+        claim_id: input.claim_id,
+    }
+}

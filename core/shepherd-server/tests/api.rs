@@ -1,3 +1,5 @@
+mod common;
+
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -245,55 +247,7 @@ async fn unknown_api_route_requires_authentication() {
 
 mod contract {
     use super::*;
-    use jsonschema_056::Validator;
-
-    fn load_spec() -> Value {
-        let yaml_str = include_str!("../../../openapi/shepherd.yaml");
-        serde_yaml::from_str(yaml_str).expect("failed to parse OpenAPI spec")
-    }
-
-    fn resolve_ref<'a>(spec: &'a Value, ref_path: &str) -> &'a Value {
-        let path = ref_path.strip_prefix("#/").unwrap_or(ref_path);
-        let mut current = spec;
-        for segment in path.split('/') {
-            current = &current[segment];
-        }
-        current
-    }
-
-    fn resolve_schema(spec: &Value, schema: &Value) -> Value {
-        match schema {
-            Value::Object(map) => {
-                if let Some(ref_val) = map.get("$ref") {
-                    let ref_path = ref_val.as_str().unwrap();
-                    let resolved = resolve_ref(spec, ref_path);
-                    return resolve_schema(spec, resolved);
-                }
-
-                let mut result = serde_json::Map::new();
-                for (key, val) in map {
-                    result.insert(key.clone(), resolve_schema(spec, val));
-                }
-                Value::Object(result)
-            }
-            Value::Array(arr) => {
-                Value::Array(arr.iter().map(|v| resolve_schema(spec, v)).collect())
-            }
-            other => other.clone(),
-        }
-    }
-
-    fn validate(spec: &Value, schema_ref: &str, value: &Value) {
-        let raw = resolve_ref(spec, schema_ref);
-        let resolved = resolve_schema(spec, raw);
-        let validator = Validator::new(&resolved).expect("failed to compile schema");
-        if let Err(err) = validator.validate(value) {
-            panic!(
-                "Schema validation failed for {schema_ref}:\n  {err}\nValue: {}",
-                serde_json::to_string_pretty(value).unwrap()
-            );
-        }
-    }
+    use crate::common::{load_spec, validate_against as validate};
 
     #[tokio::test]
     async fn health_response_conforms_to_spec() {

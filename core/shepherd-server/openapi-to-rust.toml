@@ -67,6 +67,19 @@ operations = [
     "releaseClaim",
     "reportClaim",
     "listTaskSessions",
+    "listDocuments",
+    "createDocument",
+    "getDocument",
+    "listDocumentRevisions",
+    "createDocumentRevision",
+    "getDocumentRevision",
+    "selectTaskPlan",
+    "listSubmissions",
+    "getSubmission",
+    "withdrawSubmission",
+    "reviewSubmission",
+    "listSubmissionReviews",
+    "listHistory",
 ]
 prune_models = true
 

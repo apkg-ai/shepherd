@@ -268,3 +268,84 @@ async fn context_endpoint_returns_caller_scoped_bundle() {
     assert_eq!(bundle["truncated"], false);
     assert_eq!(bundle["continuation_paths"], json!([]));
 }
+
+#[tokio::test]
+async fn context_over_budget_is_422_with_continuation() {
+    let w = world().await;
+    let h = seed_hierarchy(&w).await;
+    // Plan selection requires a planning task.
+    let (status, _, planned) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/tasks", h.project),
+        )
+        .idempotency()
+        .json(json!({
+            "epic_id": h.epic,
+            "title": "Planned",
+            "type_key": "code",
+            "planning_required": true,
+        }))
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{planned}");
+    let task = planned["id"].as_str().unwrap().to_string();
+
+    // A selected plan of 65,536 four-byte scalars serializes past the 256 KiB
+    // context budget on its own (plan/05): mandatory fields + plan cannot fit.
+    let body: String = "\u{1F980}".repeat(65_536);
+    let (status, _, document) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/documents", h.project),
+        )
+        .idempotency()
+        .json(json!({
+            "owner_kind": "task",
+            "owner_id": task,
+            "kind": "plan",
+            "title": "Oversized plan",
+            "body": body,
+            "links": [],
+        }))
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{document}");
+    let revision = document["latest_revision_id"].as_str().unwrap();
+
+    let (_, _, current) = w
+        .owner(
+            Method::GET,
+            &format!("/api/v1/projects/{}/tasks/{task}", h.project),
+        )
+        .send(&w.app)
+        .await;
+    let (status, _, selected) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/tasks/{task}/plan", h.project),
+        )
+        .idempotency()
+        .if_match(current["revision"].as_i64().unwrap())
+        .json(json!({ "document_revision_id": revision }))
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{selected}");
+
+    let (status, _, body) = w
+        .owner(
+            Method::GET,
+            &format!("/api/v1/projects/{}/tasks/{task}/context", h.project),
+        )
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "context_too_large");
+    assert!(
+        body["detail"]
+            .as_str()
+            .unwrap()
+            .contains("document-revisions"),
+        "continuation path points at getDocumentRevision: {body}"
+    );
+}
