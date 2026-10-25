@@ -1,6 +1,10 @@
 mod convert;
 // The generated module trips these style lints by design.
-#[allow(clippy::collapsible_if, clippy::double_must_use)]
+#[allow(
+    clippy::collapsible_if,
+    clippy::double_must_use,
+    clippy::too_many_arguments
+)]
 pub mod generated;
 mod handlers;
 mod middleware;
@@ -17,8 +21,8 @@ use shepherd_core::storage::Store;
 use tower_http::services::ServeDir;
 
 use crate::generated::server::router::{
-    goals_api_router, identity_api_router, projects_api_router, system_api_router,
-    task_types_api_router,
+    dependencies_api_router, epics_api_router, goals_api_router, identity_api_router,
+    projects_api_router, system_api_router, task_types_api_router, tasks_api_router,
 };
 pub use crate::middleware::{AuthConfig, REDACTED_HEADERS, redact_header};
 
@@ -76,6 +80,9 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
         .merge(projects_api_router(state.clone()))
         .merge(goals_api_router(state.clone()))
         .merge(task_types_api_router(state.clone()))
+        .merge(epics_api_router(state.clone()))
+        .merge(tasks_api_router(state.clone()))
+        .merge(dependencies_api_router(state.clone()))
         .route("/api/v1/openapi.yaml", get(openapi_spec))
         // Unrouted API paths answer problem+json, never the static shell.
         .route("/api/{*rest}", any(handlers::api_not_found))

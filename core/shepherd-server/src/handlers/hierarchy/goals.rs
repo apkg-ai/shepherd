@@ -8,7 +8,8 @@ use crate::convert::errors::{
 use crate::convert::{command_context, hierarchy, list_params, page};
 use crate::generated::server::api::GoalsApi;
 use crate::generated::server::errors::{
-    ArchiveGoalResponse, CreateGoalResponse, GetGoalResponse, ListGoalsResponse, UpdateGoalResponse,
+    ArchiveGoalResponse, CreateGoalResponse, GetGoalGraphResponse, GetGoalResponse,
+    ListGoalsResponse, UpdateGoalResponse,
 };
 use crate::generated::types as wire;
 use crate::middleware::set_etag;
@@ -139,6 +140,24 @@ impl GoalsApi for AppState {
         {
             Ok(result) => ArchiveGoalResponse::Ok(hierarchy::goal(result.value)),
             Err(err) => revision_problem!(ArchiveGoalResponse, err),
+        }
+    }
+
+    async fn get_goal_graph(&self, project_id: String, goal_id: String) -> GetGoalGraphResponse {
+        let store = require_store!(self, GetGoalGraphResponse);
+        let principal = require_principal!(GetGoalGraphResponse);
+        let project = parse_path_uuid!(GetGoalGraphResponse, project_id, "project_id");
+        let goal = parse_path_uuid!(GetGoalGraphResponse, goal_id, "goal_id");
+        match store
+            .get_goal_graph(
+                &principal,
+                &ProjectId::from_uuid(project),
+                &GoalId::from_uuid(goal),
+            )
+            .await
+        {
+            Ok(graph) => GetGoalGraphResponse::Ok(hierarchy::graph(graph)),
+            Err(err) => domain_problem!(GetGoalGraphResponse, err),
         }
     }
 }
