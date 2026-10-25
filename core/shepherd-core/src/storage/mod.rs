@@ -16,14 +16,20 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
-use crate::model::{ActorId, Clock};
+use crate::model::{ActorId, Clock, EventId};
+
+/// Broadcast backlog per subscriber; a receiver this far behind lags out and
+/// must resynchronize from persisted history (plan/08).
+pub const EVENT_CHANNEL_CAPACITY: usize = 256;
 
 pub struct Store {
     pool: SqlitePool,
     clock: Arc<dyn Clock>,
     codec: Arc<dyn IdempotencyCodec>,
+    events_tx: broadcast::Sender<EventId>,
     #[cfg(any(test, feature = "test-support"))]
     pub report_failpoint: std::sync::atomic::AtomicU8,
 }
@@ -38,9 +44,21 @@ impl Store {
             pool,
             clock,
             codec,
+            events_tx: broadcast::channel(EVENT_CHANNEL_CAPACITY).0,
             #[cfg(any(test, feature = "test-support"))]
             report_failpoint: std::sync::atomic::AtomicU8::new(0),
         }
+    }
+
+    /// Commit notifications carrying the last event ID; subscribers re-read
+    /// persisted history, never the notification payload alone (plan/05 step 7).
+    pub fn subscribe_events(&self) -> broadcast::Receiver<EventId> {
+        self.events_tx.subscribe()
+    }
+
+    pub(crate) fn notify_events(&self, last_event_id: EventId) {
+        // No receivers is not a failure; committed work already stands.
+        let _ = self.events_tx.send(last_event_id);
     }
 
     // crate-internal in production: downstream crates must not bypass command_transaction.

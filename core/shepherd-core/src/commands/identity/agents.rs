@@ -252,4 +252,10 @@ impl Store {
             )
         }))
     }
+
+    /// Plain actor read including the revoked flag; long-lived consumers such
+    /// as the SSE stream recheck revocation with it (plan/08).
+    pub async fn get_actor(&self, id: &ActorId) -> Result<Option<Actor>, DomainError> {
+        Ok(crate::storage::rows::get_actor(self.pool(), id).await?)
+    }
 }

@@ -49,7 +49,7 @@ pub struct ContextBundle {
     pub continuation_paths: Vec<String>,
 }
 
-fn session_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Session, DomainError> {
+pub(crate) fn session_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Session, DomainError> {
     let id: String = row.try_get("id")?;
     let task_id: String = row.try_get("task_id")?;
     let claim_id: String = row.try_get("claim_id")?;

@@ -24,6 +24,7 @@ use crate::model::{
     IDEMPOTENCY_TTL_DAYS, ProjectId, Revision, Task, TaskId, TaskTypeId,
 };
 use crate::queries::hierarchy::{epic_row, goal_row, project_archived, task_row};
+use crate::queries::history::high_water;
 use crate::storage::rows::format_ts;
 use crate::storage::{IdempotencyAad, StorageError, Store, rows};
 
@@ -87,7 +88,12 @@ impl Store {
         let mut tx = self.begin_command().await?;
         match command(&mut tx).await {
             Ok(value) => {
+                let high = high_water(&mut tx).await.ok();
                 tx.commit().await.map_err(StorageError::from)?;
+                // Plan/05 step 7: notify after commit; failure never rolls back.
+                if let Some(high) = high {
+                    self.notify_events(high);
+                }
                 Ok(value)
             }
             Err(err) => {
@@ -116,7 +122,11 @@ impl Store {
             .await
         {
             Ok(value) => {
+                let high = high_water(&mut tx).await.ok();
                 tx.commit().await.map_err(StorageError::from)?;
+                if let Some(high) = high {
+                    self.notify_events(high);
+                }
                 Ok(value)
             }
             Err(err) => {
