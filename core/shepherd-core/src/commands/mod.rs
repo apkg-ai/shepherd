@@ -88,12 +88,11 @@ impl Store {
         let mut tx = self.begin_command().await?;
         match command(&mut tx).await {
             Ok(value) => {
-                let high = high_water(&mut tx).await.ok();
+                // Subscribers re-read persisted history, so a failed high-water
+                // read must still notify (plan/05 step 7).
+                let high = high_water(&mut tx).await.unwrap_or(0);
                 tx.commit().await.map_err(StorageError::from)?;
-                // Plan/05 step 7: notify after commit; failure never rolls back.
-                if let Some(high) = high {
-                    self.notify_events(high);
-                }
+                self.notify_events(high);
                 Ok(value)
             }
             Err(err) => {
@@ -122,11 +121,9 @@ impl Store {
             .await
         {
             Ok(value) => {
-                let high = high_water(&mut tx).await.ok();
+                let high = high_water(&mut tx).await.unwrap_or(0);
                 tx.commit().await.map_err(StorageError::from)?;
-                if let Some(high) = high {
-                    self.notify_events(high);
-                }
+                self.notify_events(high);
                 Ok(value)
             }
             Err(err) => {
@@ -991,6 +988,70 @@ mod db_tests {
             .await
             .unwrap();
         assert_eq!(untouched, "accepted");
+    }
+
+    #[tokio::test]
+    async fn commits_notify_subscribers_with_the_last_event_id() {
+        let f = fixture().await;
+        let mut rx = f.store.subscribe_events();
+
+        // Plain domain transaction.
+        f.store
+            .create_goal(
+                ctx(&f.owner, &f.clock),
+                f.project,
+                crate::model::GoalCreate {
+                    title: "G2".into(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap();
+        let after_goal = rx.recv().await.unwrap();
+        assert_eq!(after_goal, f.store.event_high_water().await.unwrap());
+
+        // Idempotent transaction path notifies too.
+        crate::storage::testing::create_task_document(
+            &f.store,
+            &f.owner,
+            f.project,
+            f.task_a,
+            crate::model::DocumentKind::Note,
+        )
+        .await;
+        let after_document = rx.recv().await.unwrap();
+        assert_eq!(after_document, f.store.event_high_water().await.unwrap());
+        assert!(after_document > after_goal);
+    }
+
+    #[tokio::test]
+    async fn notifications_without_subscribers_do_not_fail_commits() {
+        let f = fixture().await;
+        // No subscriber exists; the commit must still succeed and persist.
+        let goal = f
+            .store
+            .create_goal(
+                ctx(&f.owner, &f.clock),
+                f.project,
+                crate::model::GoalCreate {
+                    title: "G2".into(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        let mut rx = f.store.subscribe_events();
+        assert!(
+            rx.try_recv().is_err(),
+            "no notification is buffered for a late subscriber"
+        );
+        let listed = f
+            .store
+            .list_goals(&f.project, &crate::queries::ListParams::default())
+            .await
+            .unwrap();
+        assert!(listed.items.iter().any(|g| g.id == goal.id));
     }
 
     #[tokio::test]

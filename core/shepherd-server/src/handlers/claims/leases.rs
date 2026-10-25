@@ -1,4 +1,3 @@
-use shepherd_core::error::DomainError;
 use shepherd_core::model::{ClaimStatus, ProjectId, TaskId};
 use shepherd_core::queries::ClaimListFilters;
 
@@ -48,12 +47,42 @@ impl ClaimsApi for AppState {
                 .claim_task(ctx, project, task, work::core_claim_input(body), &hash)
                 .await?
                 .into_inner();
-            let context = context_body(store, project, task, &principal).await?;
-            Ok::<_, DomainError>(wire::ClaimGrant {
-                claim: work::claim(grant.claim),
-                lease_token: grant.lease_token,
-                context,
-            })
+            match context_body(store, project, task, &principal).await {
+                Ok(context) => Ok(wire::ClaimGrant {
+                    claim: work::claim(grant.claim),
+                    lease_token: grant.lease_token,
+                    context,
+                }),
+                // A grant whose context cannot be assembled must not keep the
+                // lease: release it so the task stays claimable, then report
+                // the context failure truthfully.
+                Err(err) => {
+                    let release = command_context(
+                        &principal,
+                        uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+                        None,
+                        store,
+                    );
+                    let release_hash = request_hash(
+                        "POST",
+                        &format!(
+                            "/api/v1/projects/{project}/claims/{}/release",
+                            grant.claim.id
+                        ),
+                        &serde_json::json!({}),
+                    );
+                    let _ = store
+                        .release_claim(
+                            release,
+                            project,
+                            grant.claim.id,
+                            &grant.lease_token,
+                            &release_hash,
+                        )
+                        .await;
+                    Err(err)
+                }
+            }
         }
         .await;
         match outcome {

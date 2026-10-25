@@ -349,3 +349,131 @@ async fn context_over_budget_is_422_with_continuation() {
         "continuation path points at getDocumentRevision: {body}"
     );
 }
+
+#[tokio::test]
+async fn claim_with_unassemblable_context_releases_the_lease() {
+    let w = world().await;
+    let h = seed_hierarchy(&w).await;
+    // Same oversized-selected-plan state as the context-budget test.
+    let (_, _, planned) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/tasks", h.project),
+        )
+        .idempotency()
+        .json(json!({
+            "epic_id": h.epic,
+            "title": "Oversized",
+            "type_key": "code",
+            "planning_required": true,
+        }))
+        .send(&w.app)
+        .await;
+    let task = planned["id"].as_str().unwrap().to_string();
+    let body: String = "\u{1F980}".repeat(65_536);
+    let (_, _, document) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/documents", h.project),
+        )
+        .idempotency()
+        .json(json!({
+            "owner_kind": "task",
+            "owner_id": task,
+            "kind": "plan",
+            "title": "Oversized plan",
+            "body": body,
+            "links": [],
+        }))
+        .send(&w.app)
+        .await;
+    let revision = document["latest_revision_id"].as_str().unwrap();
+    let (_, _, current) = w
+        .owner(
+            Method::GET,
+            &format!("/api/v1/projects/{}/tasks/{task}", h.project),
+        )
+        .send(&w.app)
+        .await;
+    let (status, _, selected) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/tasks/{task}/plan", h.project),
+        )
+        .idempotency()
+        .if_match(current["revision"].as_i64().unwrap())
+        .json(json!({ "document_revision_id": revision }))
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{selected}");
+
+    // The claim commits, context assembly fails, and the handler releases the
+    // lease so the task does not stay locked behind an undeliverable grant.
+    let (status, _, body) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/tasks/{task}/claims", h.project),
+        )
+        .idempotency()
+        .if_match(selected["revision"].as_i64().unwrap())
+        .json(json!({ "phase": "plan" }))
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "context_too_large");
+
+    let (_, _, active) = w
+        .owner(
+            Method::GET,
+            &format!("/api/v1/projects/{}/claims?active=true", h.project),
+        )
+        .send(&w.app)
+        .await;
+    assert_eq!(active["items"], json!([]), "no lease stays active");
+    let (_, _, all) = w
+        .owner(
+            Method::GET,
+            &format!("/api/v1/projects/{}/claims", h.project),
+        )
+        .send(&w.app)
+        .await;
+    assert_eq!(all["items"][0]["status"], "released");
+}
+
+#[tokio::test]
+async fn corrupt_session_phase_is_integrity_failure_not_panic() {
+    let w = world().await;
+    let h = seed_hierarchy(&w).await;
+    let mut conn = w.store.pool().acquire().await.unwrap();
+    sqlx::raw_sql("PRAGMA ignore_check_constraints = ON")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO sessions (id, task_id, claim_id, actor_id, phase, started_at, ended_at, \
+         outcome, summary, failure_reason, document_revision_ids, links) \
+         VALUES (?1, ?2, ?3, ?4, 'review', ?5, ?5, 'succeeded', '', '', '[]', '[]')",
+    )
+    .bind(uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string())
+    .bind(&h.task)
+    .bind(uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string())
+    .bind({
+        let (_, _, principal) = w.owner(Method::GET, "/api/v1/principal").send(&w.app).await;
+        principal["id"].as_str().unwrap().to_string()
+    })
+    .bind("2026-09-14T00:00:00.000Z")
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+    drop(conn);
+
+    let (status, _, body) = w
+        .owner(
+            Method::GET,
+            &format!("/api/v1/projects/{}/tasks/{}/sessions", h.project, h.task),
+        )
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["code"], "integrity_failure");
+}

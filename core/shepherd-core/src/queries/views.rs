@@ -141,3 +141,253 @@ impl Store {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::commands::CommandContext;
+    use crate::error::DomainError;
+    use crate::model::{
+        Actor, ActorId, ActorKind, Clock, CommandId, DocumentKind, EpicCreate, GoalCreate, GoalId,
+        ProjectCreate, TaskCreate, TestClock,
+    };
+    use crate::storage::open;
+    use crate::storage::rows::insert_actor;
+    use crate::storage::testing::{
+        create_task_document, seed_submission, store_options, test_clock,
+    };
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        clock: Arc<TestClock>,
+        store: Store,
+        owner: Actor,
+        project: ProjectId,
+        goal: GoalId,
+        epic: EpicId,
+        task_a: TaskId,
+        task_b: TaskId,
+    }
+
+    fn ctx(actor: &Actor, clock: &TestClock, expected_revision: Option<i64>) -> CommandContext {
+        CommandContext {
+            actor: actor.clone(),
+            command_id: CommandId::generate(clock.now()),
+            idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            expected_revision,
+            now: clock.now(),
+        }
+    }
+
+    async fn fixture() -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = test_clock();
+        let store = open(store_options(dir.path(), "shepherd.db", clock.clone()))
+            .await
+            .unwrap();
+        let owner = Actor {
+            id: ActorId::generate(clock.now()),
+            kind: ActorKind::Human,
+            label: "owner".into(),
+            revoked: false,
+            created_at: clock.now(),
+        };
+        let registered = owner.clone();
+        store
+            .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &registered).await }))
+            .await
+            .unwrap();
+        let project = store
+            .create_project(
+                ctx(&owner, &clock, None),
+                ProjectCreate {
+                    name: "P".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let goal = store
+            .create_goal(
+                ctx(&owner, &clock, None),
+                project,
+                GoalCreate {
+                    title: "G".into(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let epic = store
+            .create_epic(
+                ctx(&owner, &clock, None),
+                project,
+                goal,
+                EpicCreate {
+                    title: "E".into(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let mut tasks = Vec::new();
+        for title in ["A", "B"] {
+            tasks.push(
+                store
+                    .create_task(
+                        ctx(&owner, &clock, None),
+                        project,
+                        epic,
+                        TaskCreate {
+                            title: title.into(),
+                            type_key: "code".into(),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .value
+                    .id,
+            );
+        }
+        Fixture {
+            _dir: dir,
+            clock,
+            store,
+            owner,
+            project,
+            goal,
+            epic,
+            task_a: tasks[0],
+            task_b: tasks[1],
+        }
+    }
+
+    #[tokio::test]
+    async fn task_view_carries_eligibility_and_selected_plan_ids() {
+        let f = fixture().await;
+
+        let view = f
+            .store
+            .task_view(&f.project, &f.task_a, &f.owner)
+            .await
+            .unwrap();
+        assert_eq!(view.task.id, f.task_a);
+        assert!(view.selected_plan_revision_ids.is_empty());
+        assert!(view.accepted_plan_submission_ids.is_empty());
+        assert!(
+            view.eligibility.can_plan || view.eligibility.can_execute,
+            "a fresh owner task is actionable: {:?}",
+            view.eligibility
+        );
+
+        // Views surface the stored plan pointers as 0/1-element arrays.
+        let document =
+            create_task_document(&f.store, &f.owner, f.project, f.task_a, DocumentKind::Plan).await;
+        let selected = document.latest_revision_id.as_uuid();
+        let accepted: Uuid = seed_submission(
+            f.store.pool(),
+            f.task_a,
+            f.owner.id,
+            "accepted",
+            "2026-09-14T00:00:00.000Z",
+        )
+        .await
+        .parse()
+        .unwrap();
+        sqlx::query(
+            "UPDATE tasks SET selected_plan_revision_id = ?1, accepted_plan_submission_id = ?2 \
+             WHERE id = ?3",
+        )
+        .bind(selected.to_string())
+        .bind(accepted.to_string())
+        .bind(f.task_a.to_string())
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+        let view = f
+            .store
+            .task_view(&f.project, &f.task_a, &f.owner)
+            .await
+            .unwrap();
+        assert_eq!(view.selected_plan_revision_ids, vec![selected]);
+        assert_eq!(view.accepted_plan_submission_ids, vec![accepted]);
+
+        // Blocking flips eligibility off with a reason.
+        f.store
+            .block_task(
+                ctx(&f.owner, &f.clock, Some(1)),
+                f.project,
+                f.task_a,
+                "blocked for the view test".into(),
+            )
+            .await
+            .unwrap();
+        let view = f
+            .store
+            .task_view(&f.project, &f.task_a, &f.owner)
+            .await
+            .unwrap();
+        assert!(!view.eligibility.can_plan && !view.eligibility.can_execute);
+        assert!(!view.eligibility.reasons.is_empty());
+
+        // Batches preserve input order; unknown ids are NotFound.
+        let views = f
+            .store
+            .task_views(&f.project, &[f.task_b, f.task_a], &f.owner)
+            .await
+            .unwrap();
+        assert_eq!(views[0].task.id, f.task_b);
+        assert_eq!(views[1].task.id, f.task_a);
+        assert!(matches!(
+            f.store
+                .task_views(
+                    &f.project,
+                    &[f.task_a, TaskId::generate(f.clock.now())],
+                    &f.owner
+                )
+                .await,
+            Err(DomainError::NotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn epic_view_matches_graph_node_eligibility() {
+        let f = fixture().await;
+        let view = f
+            .store
+            .epic_view(&f.project, &f.epic, &f.owner)
+            .await
+            .unwrap();
+        assert_eq!(view.epic.id, f.epic);
+
+        let graph = f
+            .store
+            .get_goal_graph(&f.owner, &f.project, &f.goal)
+            .await
+            .unwrap();
+        let node = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == f.epic.as_uuid())
+            .unwrap();
+        assert_eq!(view.eligibility, node.eligibility);
+
+        assert!(matches!(
+            f.store
+                .epic_view(&f.project, &EpicId::generate(f.clock.now()), &f.owner)
+                .await,
+            Err(DomainError::NotFound)
+        ));
+    }
+}

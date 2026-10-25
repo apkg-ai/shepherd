@@ -299,3 +299,51 @@ async fn agent_cannot_create_projects_but_can_read_them() {
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }
+
+#[tokio::test]
+async fn oversized_and_wrong_content_type_bodies_are_413_and_415() {
+    let w = world().await;
+
+    // Past the 2 MiB generated-validation cap -> 413 payload_too_large.
+    let oversized = json!({ "name": "big", "description": "x".repeat(2 * 1024 * 1024) });
+    let (status, _, body) = w
+        .owner(Method::POST, "/api/v1/projects")
+        .idempotency()
+        .json(oversized)
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{body}");
+    assert_eq!(body["code"], "payload_too_large");
+
+    // A non-JSON content type -> 415 unsupported_media_type.
+    let (status, _, body) = w
+        .owner(Method::POST, "/api/v1/projects")
+        .idempotency()
+        .header("content-type", "text/plain")
+        .body_text("name=plain")
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE, "{body}");
+    assert_eq!(body["code"], "unsupported_media_type");
+
+    // Unknown fields are rejected (additionalProperties: false in the contract).
+    let (status, _, body) = w
+        .owner(Method::POST, "/api/v1/projects")
+        .idempotency()
+        .json(json!({ "name": "ok", "surprise": true }))
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "validation_error");
+
+    // Syntactically broken JSON -> 400 malformed_request.
+    let (status, _, body) = w
+        .owner(Method::POST, "/api/v1/projects")
+        .idempotency()
+        .header("content-type", "application/json")
+        .body_text("{ not json")
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "malformed_request");
+}

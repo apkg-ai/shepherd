@@ -1,13 +1,12 @@
 use shepherd_core::model::{ActorId, AgentCreate as CoreAgentCreate, SecretString};
-use shepherd_core::queries::ListParams;
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::convert::errors::{
-    domain_problem, parse_idempotency_key, parse_path_uuid, require_principal, require_session,
-    require_store,
+    command_problem, domain_problem, parse_idempotency_key, parse_path_uuid, require_principal,
+    require_session, require_store,
 };
-use crate::convert::{command_context, request_hash, request_id, wire_actor};
+use crate::convert::{command_context, list_params, request_hash, request_id, wire_actor};
 use crate::generated::server::api::IdentityApi;
 use crate::generated::server::errors::{
     CreateAgentResponse, CreateBrowserSessionResponse, DeleteBrowserSessionResponse,
@@ -77,14 +76,10 @@ impl IdentityApi for AppState {
     async fn list_agents(&self, cursor: Option<String>, limit: Option<i32>) -> ListAgentsResponse {
         let store = require_store!(self, ListAgentsResponse);
         let principal = require_principal!(ListAgentsResponse);
-        let params = ListParams {
-            // Negatives are unreachable past the generated validation
-            // (minimum: 1); 0 falls to effective_limit's range error.
-            limit: limit.map(|value| u32::try_from(value).unwrap_or(0)),
-            cursor,
-            include_archived: false,
-        };
-        match store.list_agents(&principal.id, &params).await {
+        match store
+            .list_agents(&principal.id, &list_params(cursor, limit, None))
+            .await
+        {
             Ok(page) => ListAgentsResponse::Ok(wire::PageActor {
                 items: page.items.iter().map(wire_actor).collect(),
                 next_cursor: page.next_cursor,
@@ -143,15 +138,7 @@ impl IdentityApi for AppState {
             Ok(replay) => RevokeAgentResponse::Ok(wire::Ack {
                 ok: replay.into_inner().ok,
             }),
-            // revokeAgent's contract declares 428 (missing command header),
-            // which the shared macro cannot name for the other operations.
-            Err(err) => {
-                let (status, body) = crate::middleware::problem_for(&err, request_id());
-                if status == StatusCode::PRECONDITION_REQUIRED {
-                    return RevokeAgentResponse::Status428(body);
-                }
-                domain_problem!(RevokeAgentResponse, err)
-            }
+            Err(err) => command_problem!(RevokeAgentResponse, err),
         }
     }
 

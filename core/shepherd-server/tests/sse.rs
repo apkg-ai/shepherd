@@ -426,6 +426,16 @@ async fn sse_requires_auth_and_404s_unknown_project() {
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(body["code"], "not_found");
 
+    // Route membership wins over cursor validity (plan/04).
+    let (status, _, body) = w
+        .owner(
+            Method::GET,
+            "/api/v1/projects/00000000-0000-7000-8000-000000000000/events?after=junk",
+        )
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
     let (status, _, body) = w
         .owner(
             Method::GET,

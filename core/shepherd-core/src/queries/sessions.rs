@@ -69,3 +69,171 @@ impl Store {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeDelta;
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::commands::CommandContext;
+    use crate::model::{
+        Actor, ActorId, ActorKind, Clock, CommandId, EpicCreate, GoalCreate, ProjectCreate,
+        TaskCreate, TestClock,
+    };
+    use crate::storage::open;
+    use crate::storage::rows::{format_ts, insert_actor};
+    use crate::storage::testing::{seed_submission, store_options, test_clock};
+
+    fn ctx(actor: &Actor, clock: &TestClock) -> CommandContext {
+        CommandContext {
+            actor: actor.clone(),
+            command_id: CommandId::generate(clock.now()),
+            idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            expected_revision: None,
+            now: clock.now(),
+        }
+    }
+
+    fn params(limit: Option<u32>, cursor: Option<String>) -> ListParams {
+        ListParams {
+            limit,
+            cursor,
+            include_archived: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn task_sessions_page_newest_first_with_scoped_cursor_and_404s() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = test_clock();
+        let store = open(store_options(dir.path(), "shepherd.db", clock.clone()))
+            .await
+            .unwrap();
+        let owner = Actor {
+            id: ActorId::generate(clock.now()),
+            kind: ActorKind::Human,
+            label: "owner".into(),
+            revoked: false,
+            created_at: clock.now(),
+        };
+        let registered = owner.clone();
+        store
+            .command_transaction(|tx| Box::pin(async move { insert_actor(tx, &registered).await }))
+            .await
+            .unwrap();
+        let project = store
+            .create_project(
+                ctx(&owner, &clock),
+                ProjectCreate {
+                    name: "P".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let goal = store
+            .create_goal(
+                ctx(&owner, &clock),
+                project,
+                GoalCreate {
+                    title: "G".into(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let epic = store
+            .create_epic(
+                ctx(&owner, &clock),
+                project,
+                goal,
+                EpicCreate {
+                    title: "E".into(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap()
+            .value
+            .id;
+        let mut tasks = Vec::new();
+        for title in ["A", "B"] {
+            tasks.push(
+                store
+                    .create_task(
+                        ctx(&owner, &clock),
+                        project,
+                        epic,
+                        TaskCreate {
+                            title: title.into(),
+                            type_key: "code".into(),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .value
+                    .id,
+            );
+        }
+        let (task_a, task_b) = (tasks[0], tasks[1]);
+        for _ in 0..3 {
+            seed_submission(
+                store.pool(),
+                task_a,
+                owner.id,
+                "accepted",
+                &format_ts(&clock.now()),
+            )
+            .await;
+            clock.advance(TimeDelta::hours(1));
+        }
+
+        let first = store
+            .list_task_sessions(&project, &task_a, &params(Some(2), None))
+            .await
+            .unwrap();
+        assert_eq!(first.items.len(), 2);
+        assert!(
+            first.items[0].ended_at > first.items[1].ended_at,
+            "newest first"
+        );
+        let cursor = first.next_cursor.clone().unwrap();
+        let second = store
+            .list_task_sessions(&project, &task_a, &params(Some(2), Some(cursor.clone())))
+            .await
+            .unwrap();
+        assert_eq!(second.items.len(), 1);
+        assert!(second.next_cursor.is_none());
+        assert!(second.items[0].ended_at < first.items[1].ended_at);
+
+        // The cursor is bound to its task filter.
+        assert!(matches!(
+            store
+                .list_task_sessions(&project, &task_b, &params(Some(2), Some(cursor)))
+                .await,
+            Err(DomainError::InvalidCursor(_))
+        ));
+
+        // Route membership is 404 before anything else.
+        let unknown_project = ProjectId::generate(clock.now());
+        assert!(matches!(
+            store
+                .list_task_sessions(&unknown_project, &task_a, &params(None, None))
+                .await,
+            Err(DomainError::NotFound)
+        ));
+        let unknown_task = TaskId::generate(clock.now());
+        assert!(matches!(
+            store
+                .list_task_sessions(&project, &unknown_task, &params(None, None))
+                .await,
+            Err(DomainError::NotFound)
+        ));
+    }
+}

@@ -67,8 +67,12 @@ pub(crate) fn session_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Session,
         task_id: TaskId::from_uuid(parse_uuid("sessions.task_id", &task_id)?),
         claim_id: parse_uuid("sessions.claim_id", &claim_id)?,
         actor_id: ActorId::from_uuid(parse_uuid("sessions.actor_id", &actor_id)?),
-        phase: ClaimPhase::parse(&phase)
-            .ok_or_else(|| StorageError::Corrupt(format!("sessions.phase: {phase}")))?,
+        // The sessions CHECK allows plan/execute only; anything else is corrupt.
+        phase: match ClaimPhase::parse(&phase) {
+            Some(ClaimPhase::Plan) => ClaimPhase::Plan,
+            Some(ClaimPhase::Execute) => ClaimPhase::Execute,
+            _ => return Err(StorageError::Corrupt(format!("sessions.phase: {phase}")).into()),
+        },
         started_at: parse_ts("sessions.started_at", &started_at)?,
         ended_at: parse_ts("sessions.ended_at", &ended_at)?,
         outcome: SessionOutcome::parse(&outcome)

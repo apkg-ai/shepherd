@@ -107,6 +107,12 @@ pub(crate) async fn get_events(
     };
     let project = ProjectId::from_uuid(project);
 
+    // Route membership before cursor validity (plan/04).
+    if let Err(err) = store.get_project(&project).await {
+        let (status, body) = problem_for(&err, request_id);
+        return problem_body_response(status, &body);
+    }
+
     // Last-Event-ID takes precedence over `after`; no cursor starts at the
     // current high-water mark (plan/08).
     let cursor_text = headers
@@ -137,12 +143,6 @@ pub(crate) async fn get_events(
             }
         },
     };
-    // Route membership before streaming (plan/04).
-    if let Err(err) = store.get_project(&project).await {
-        let (status, body) = problem_for(&err, request_id);
-        return problem_body_response(status, &body);
-    }
-
     // Subscribe before the first replay so no committed event can fall
     // between the snapshot and the live feed (plan/08).
     let notifications = store.subscribe_events();
@@ -259,14 +259,19 @@ async fn caller_live(
     principal: &Actor,
     session_token: &Option<SecretString>,
 ) -> bool {
+    use shepherd_core::error::DomainError;
     match store.get_actor(&principal.id).await {
         Ok(Some(actor)) if !actor.revoked => {}
+        // Transient storage trouble must not drop every stream at once; the
+        // recheck simply waits for the next heartbeat.
+        Err(DomainError::Storage(_)) => return true,
         _ => return false,
     }
     if let Some(token) = session_token {
         let now = store.clock().now();
-        if store.browser_session(token, now).await.is_err() {
-            return false;
+        match store.browser_session(token, now).await {
+            Ok(_) | Err(DomainError::Storage(_)) => {}
+            Err(_) => return false,
         }
     }
     true

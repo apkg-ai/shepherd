@@ -178,11 +178,9 @@ async fn cross_project_dependency_is_rejected() {
         }),
     )
     .await;
-    // Identifiers in a route must resolve to its project (plan/07).
-    assert!(
-        status == StatusCode::NOT_FOUND || status == StatusCode::CONFLICT,
-        "{status}: {body}"
-    );
+    // Identifiers in a route must resolve to its project (plan/07): 404.
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["code"], "not_found");
 }
 
 #[tokio::test]

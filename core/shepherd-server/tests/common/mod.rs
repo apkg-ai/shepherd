@@ -109,6 +109,12 @@ impl TestRequest {
         self.header("if-match", &value)
     }
 
+    /// Raw body with whatever Content-Type was already set.
+    pub fn body_text(mut self, text: &str) -> Self {
+        self.body = Body::from(text.to_string());
+        self
+    }
+
     pub fn json(mut self, value: Value) -> Self {
         self.builder = self
             .builder

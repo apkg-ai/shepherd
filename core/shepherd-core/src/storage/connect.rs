@@ -1016,3 +1016,44 @@ mod tests {
         assert!(matches!(err, StorageError::Migrate(_)));
     }
 }
+
+#[cfg(test)]
+mod migration_tests {
+    #[tokio::test]
+    async fn legacy_immutable_event_revisions_are_migrated_to_one() {
+        // The migration targets databases written before step 015; prove its
+        // statement on a minimal events table seeded with the legacy shape.
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "CREATE TABLE events (id INTEGER PRIMARY KEY, type TEXT NOT NULL, \
+             resource_revision INTEGER NOT NULL); \
+             INSERT INTO events (type, resource_revision) VALUES \
+             ('session.recorded', 0), ('review.recorded', 0), ('task.changed', 2);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../migrations/20261025000001_immutable_event_revision.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let rows: Vec<(String, i64)> =
+            sqlx::query_as("SELECT type, resource_revision FROM events ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("session.recorded".into(), 1),
+                ("review.recorded".into(), 1),
+                ("task.changed".into(), 2),
+            ]
+        );
+    }
+}

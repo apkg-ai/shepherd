@@ -23,8 +23,8 @@ pub(crate) fn session(session: core::Session) -> wire::Session {
         phase: match session.phase {
             core::ClaimPhase::Plan => wire::SessionPhase::Plan,
             core::ClaimPhase::Execute => wire::SessionPhase::Execute,
-            // sessions.phase is CHECK-constrained to plan/execute; review
-            // claims record Review rows, never sessions.
+            // session_from_row rejects anything but plan/execute as corrupt
+            // (503), so this arm cannot be reached from stored data.
             core::ClaimPhase::Review => unreachable!("review claims never record sessions"),
         },
         started_at: session.started_at,
