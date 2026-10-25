@@ -5,8 +5,9 @@ mod preconditions;
 mod problem;
 
 pub use config::{AuthConfig, cors_layer};
-pub use context::{CookieAction, current_context, set_cookie_action};
+pub use context::{CookieAction, current_context, set_cookie_action, set_etag};
 pub use gate::gate;
+pub(crate) use preconditions::parse_if_match;
 pub(crate) use problem::problem_body_response;
 pub use problem::{problem, problem_for, problem_shaper};
 

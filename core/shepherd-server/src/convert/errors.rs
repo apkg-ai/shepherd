@@ -27,6 +27,45 @@ macro_rules! domain_problem {
     }};
 }
 
+/// domain_problem! plus the 428 variant every command contract declares.
+macro_rules! command_problem {
+    ($response:ident, $err:expr) => {{
+        let (status, body) = $crate::middleware::problem_for(&$err, $crate::convert::request_id());
+        match status {
+            axum::http::StatusCode::PRECONDITION_REQUIRED => $response::Status428(body),
+            _ => $crate::convert::errors::domain_problem!($response, $err),
+        }
+    }};
+}
+
+/// command_problem! plus the 412 variant If-Match mutations declare.
+macro_rules! revision_problem {
+    ($response:ident, $err:expr) => {{
+        let (status, body) = $crate::middleware::problem_for(&$err, $crate::convert::request_id());
+        match status {
+            axum::http::StatusCode::PRECONDITION_FAILED => $response::Status412(body),
+            _ => $crate::convert::errors::command_problem!($response, $err),
+        }
+    }};
+}
+
+/// If-Match presence is the gate's 428; any non-quoted-decimal value is 400.
+macro_rules! parse_revision {
+    ($response:ident, $value:expr) => {{
+        match $crate::middleware::parse_if_match(&$value) {
+            Some(revision) => revision,
+            None => {
+                return $response::BadRequest($crate::middleware::problem(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "malformed_request",
+                    "If-Match must be the quoted decimal resource revision",
+                    $crate::convert::request_id(),
+                ));
+            }
+        }
+    }};
+}
+
 // Cookie-only session endpoints return 404 for bearer callers: a bearer
 // client has no browser session resource.
 macro_rules! require_session {
@@ -106,6 +145,6 @@ macro_rules! parse_idempotency_key {
 }
 
 pub(crate) use {
-    domain_problem, parse_idempotency_key, parse_path_uuid, require_principal, require_session,
-    require_store,
+    command_problem, domain_problem, parse_idempotency_key, parse_path_uuid, parse_revision,
+    require_principal, require_session, require_store, revision_problem,
 };

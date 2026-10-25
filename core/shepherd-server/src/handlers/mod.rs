@@ -1,3 +1,4 @@
+pub(crate) mod hierarchy;
 pub(crate) mod identity;
 
 use axum::body::Body;

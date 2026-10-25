@@ -16,7 +16,10 @@ use shepherd_core::error::DomainError;
 use shepherd_core::storage::Store;
 use tower_http::services::ServeDir;
 
-use crate::generated::server::router::{identity_api_router, system_api_router};
+use crate::generated::server::router::{
+    goals_api_router, identity_api_router, projects_api_router, system_api_router,
+    task_types_api_router,
+};
 pub use crate::middleware::{AuthConfig, REDACTED_HEADERS, redact_header};
 
 pub enum ServiceState {
@@ -70,6 +73,9 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
         // plan/12 forbids advertising one that is not real.
         .merge(system_api_router(state.clone()))
         .merge(identity_api_router(state.clone()))
+        .merge(projects_api_router(state.clone()))
+        .merge(goals_api_router(state.clone()))
+        .merge(task_types_api_router(state.clone()))
         .route("/api/v1/openapi.yaml", get(openapi_spec))
         // Unrouted API paths answer problem+json, never the static shell.
         .route("/api/{*rest}", any(handlers::api_not_found))

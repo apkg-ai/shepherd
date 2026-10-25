@@ -58,3 +58,9 @@ pub fn set_cookie_action(action: CookieAction) {
     let ctx = current_context();
     *ctx.0.cookie_action.lock().unwrap() = Some(action);
 }
+
+/// GET resource responses carry ETag with the quoted decimal revision (plan/07).
+pub fn set_etag(revision: i64) {
+    let ctx = current_context();
+    *ctx.0.etag.lock().unwrap() = Some(format!("\"{revision}\""));
+}

@@ -21,6 +21,19 @@ operations = [
     "createAgent",
     "revokeAgent",
     "getPrincipal",
+    "listProjects",
+    "createProject",
+    "getProject",
+    "updateProject",
+    "archiveProject",
+    "listGoals",
+    "createGoal",
+    "getGoal",
+    "updateGoal",
+    "archiveGoal",
+    "listTaskTypes",
+    "createTaskType",
+    "updateTaskType",
 ]
 prune_models = true
 

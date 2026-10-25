@@ -194,6 +194,32 @@ async fn api_gate(
                 );
             }
         }
+        // Present but malformed command headers are 400, not the generated
+        // validator's 422 (plan/07: missing -> 428, malformed -> 400).
+        let header_value = |name: &str| {
+            req.headers()
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+        };
+        if entry.idempotency_key
+            && !header_value("Idempotency-Key").is_some_and(|value| value.parse::<Uuid>().is_ok())
+        {
+            return reject(
+                StatusCode::BAD_REQUEST,
+                "malformed_request",
+                "Idempotency-Key must be a UUID",
+            );
+        }
+        if entry.if_match
+            && !header_value("If-Match")
+                .is_some_and(|value| super::preconditions::parse_if_match(value).is_some())
+        {
+            return reject(
+                StatusCode::BAD_REQUEST,
+                "malformed_request",
+                "If-Match must be the quoted decimal resource revision",
+            );
+        }
     }
 
     let ctx = RequestContext::new(request_id, principal, session);

@@ -91,9 +91,38 @@ pub(crate) static PRECONDITIONS: LazyLock<PreconditionTable> = LazyLock::new(|| 
     PreconditionTable::from_spec(&spec)
 });
 
+/// If-Match is the quoted decimal revision of the route resource (plan/07);
+/// absence is a 428, any other shape a 400.
+pub(crate) fn parse_if_match(value: &str) -> Option<i64> {
+    let digits = value.strip_prefix('"')?.strip_suffix('"')?;
+    if digits.is_empty() || digits.len() > 19 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok().filter(|revision| *revision >= 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn if_match_accepts_only_quoted_positive_decimals() {
+        assert_eq!(parse_if_match("\"1\""), Some(1));
+        assert_eq!(parse_if_match("\"42\""), Some(42));
+        let malformed = [
+            "1",
+            "\"\"",
+            "\"0\"",
+            "\"-1\"",
+            "\"1.5\"",
+            "W/\"1\"",
+            "\"1\" ",
+            "\"99999999999999999999\"",
+        ];
+        for value in malformed {
+            assert_eq!(parse_if_match(value), None, "{value}");
+        }
+    }
 
     // The catalog's booleans mean "operation uses this header"; the gate only
     // pre-checks headers the spec marks required (reviewSubmission's lease is
