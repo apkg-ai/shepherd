@@ -41,12 +41,9 @@ impl Daemon {
 }
 
 fn spawn_daemon(data_dir: &Path, ui_dir: &Path, home: &Path, extra: &[&str]) -> Daemon {
-    let mut args = vec!["--port", "0", "--ui-dir"];
     let ui = ui_dir.to_str().unwrap();
     let data = data_dir.to_str().unwrap();
-    args.push(ui);
-    args.push("--data-dir");
-    args.push(data);
+    let mut args = vec!["--data-dir", data, "serve", "--port", "0", "--ui-dir", ui];
     args.extend_from_slice(extra);
     let child = Command::new(env!("CARGO_BIN_EXE_shepherd-server"))
         .args(&args)
@@ -158,12 +155,13 @@ fn second_daemon_is_refused_by_the_advisory_lock() {
     let first = spawn_daemon(data_dir.path(), ui_dist.path(), fake_home.path(), &[]);
     let second = Command::new(env!("CARGO_BIN_EXE_shepherd-server"))
         .args([
+            "--data-dir",
+            data_dir.path().to_str().unwrap(),
+            "serve",
             "--port",
             "0",
             "--ui-dir",
             ui_dist.path().to_str().unwrap(),
-            "--data-dir",
-            data_dir.path().to_str().unwrap(),
         ])
         .env("HOME", fake_home.path())
         .output()
@@ -233,12 +231,13 @@ fn missing_owner_token_fails_loud_and_reissue_recovers() {
 
     let failed = Command::new(env!("CARGO_BIN_EXE_shepherd-server"))
         .args([
+            "--data-dir",
+            data_dir.path().to_str().unwrap(),
+            "serve",
             "--port",
             "0",
             "--ui-dir",
             ui_dist.path().to_str().unwrap(),
-            "--data-dir",
-            data_dir.path().to_str().unwrap(),
         ])
         .env("HOME", fake_home.path())
         .output()
@@ -299,12 +298,13 @@ fn reissue_flag_fails_loudly_without_a_replay_key() {
 
     let failed = Command::new(env!("CARGO_BIN_EXE_shepherd-server"))
         .args([
+            "--data-dir",
+            data_dir.path().to_str().unwrap(),
+            "serve",
             "--port",
             "0",
             "--ui-dir",
             ui_dist.path().to_str().unwrap(),
-            "--data-dir",
-            data_dir.path().to_str().unwrap(),
             "--reissue-owner-token",
         ])
         .env("HOME", fake_home.path())
