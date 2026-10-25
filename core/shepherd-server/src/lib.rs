@@ -105,22 +105,17 @@ async fn openapi_spec() -> impl IntoResponse {
 #[async_trait::async_trait]
 impl SystemApi for AppState {
     async fn get_health(&self) -> GetHealthResponse {
-        match self.service.as_ref() {
-            ServiceState::Normal(_) => GetHealthResponse::Ok(wire::Health {
-                status: wire::HealthStatus::Pass,
-                version: shepherd_core::version().to_string(),
-                description: Some("shepherd local daemon".to_string()),
-                output: None,
-                notes: None,
-            }),
-            ServiceState::Diagnostic { reason } => GetHealthResponse::Ok(wire::Health {
-                status: wire::HealthStatus::Warn,
-                version: shepherd_core::version().to_string(),
-                description: Some("shepherd local daemon".to_string()),
-                output: Some(reason.clone()),
-                notes: None,
-            }),
-        }
+        // Diagnostic mode is unhealthy for API purposes (plan/12); the reason
+        // stays in logs, the stable contract carries no free-text field.
+        let status = match self.service.as_ref() {
+            ServiceState::Normal(_) => wire::HealthStatus::Pass,
+            ServiceState::Diagnostic { .. } => wire::HealthStatus::Fail,
+        };
+        GetHealthResponse::Ok(wire::Health {
+            status,
+            version: shepherd_core::version().to_string(),
+            schema_version: shepherd_core::storage::SCHEMA_VERSION as i32,
+        })
     }
 }
 

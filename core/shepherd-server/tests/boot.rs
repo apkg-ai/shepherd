@@ -273,8 +273,8 @@ fn missing_replay_key_enters_diagnostic_only_mode() {
     let daemon = spawn_daemon(data_dir.path(), ui_dist.path(), fake_home.path(), &[]);
     let health = http(&daemon.addr, "GET /health HTTP/1.1\r\n", "");
     assert!(
-        health.contains("\"status\":\"warn\""),
-        "health must warn in diagnostic mode: {health}"
+        health.contains("\"status\":\"fail\""),
+        "health must fail in diagnostic mode: {health}"
     );
     let api = http(&daemon.addr, "GET /api/v1/principal HTTP/1.1\r\n", "");
     assert!(

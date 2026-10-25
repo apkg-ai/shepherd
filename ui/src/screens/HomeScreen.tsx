@@ -25,12 +25,10 @@ export function HomeScreen() {
           <dt className={styles.factLabel}>{t("home.fact.version")}</dt>
           <dd className={styles.factValue}>{health.data.version}</dd>
         </div>
-        {health.data.description ? (
-          <div className={styles.fact}>
-            <dt className={styles.factLabel}>{t("home.fact.service")}</dt>
-            <dd className={styles.factValue}>{health.data.description}</dd>
-          </div>
-        ) : null}
+        <div className={styles.fact}>
+          <dt className={styles.factLabel}>{t("home.fact.schema")}</dt>
+          <dd className={styles.factValue}>{health.data.schema_version}</dd>
+        </div>
       </dl>
     </>
   );

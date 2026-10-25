@@ -4,7 +4,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "lint:spec": "spectral lint openapi/shepherd.yaml --fail-severity=error",
+    "lint:spec": "spectral lint openapi/shepherd.yaml --fail-severity=error && spectral lint openapi/shepherd-events.asyncapi.yaml --ruleset .spectral-asyncapi.yaml --fail-severity=error",
     "lint:specs": "node --run lint:spec",
     "typecheck": "tsc --noEmit"
   },
@@ -12,11 +12,8 @@
     "lodash": "^4.18.0"
   },
   "devDependencies": {
-    "@apisyouwonthate/style-guide": "^1.5.0",
-    "@ibm-cloud/openapi-ruleset": "^1.33.13",
     "@types/node": "^26.6.1",
     "@stoplight/spectral-cli": "^6.16.3",
-    "@stoplight/spectral-owasp-ruleset": "^2.0.1",
     "ajv-formats": "^3.0.1",
     "typescript": "^7.0.2"
   }

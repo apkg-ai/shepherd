@@ -588,8 +588,7 @@ async fn missing_replay_key_enters_diagnostic_only_mode() {
 
     let (status, _, body) = req(Method::GET, "/health").send(&app).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["status"], "warn");
-    assert!(body["output"].as_str().unwrap().contains("replay key"));
+    assert_eq!(body["status"], "fail");
 
     let (status, _, body) = req(Method::GET, "/api/v1/principal").send(&app).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
