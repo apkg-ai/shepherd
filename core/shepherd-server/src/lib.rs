@@ -68,6 +68,14 @@ impl AppState {
             )),
         }
     }
+
+    /// Owned handle for tasks that outlive the request (the SSE producer).
+    fn store_owned(&self) -> Result<Arc<Store>, DomainError> {
+        match self.service.as_ref() {
+            ServiceState::Normal(store) => Ok(Arc::clone(store)),
+            ServiceState::Diagnostic { .. } => self.store().map(|_| unreachable!()),
+        }
+    }
 }
 
 pub(crate) const OPENAPI_SPEC: &str = include_str!("../../../openapi/shepherd.yaml");
@@ -92,6 +100,14 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
         .merge(reviews_api_router(state.clone()))
         .merge(history_api_router(state.clone()))
         .route("/api/v1/openapi.yaml", get(openapi_spec))
+        // The SSE stream is the handwritten exception to the generated
+        // handlers (plan/07): same gate authentication, streamed body.
+        .route("/api/v1/projects/{project_id}/events", {
+            let state = state.clone();
+            get(move |path, query, headers| {
+                handlers::events::get_events(state, path, query, headers)
+            })
+        })
         // Unrouted API paths answer problem+json, never the static shell.
         .route("/api/{*rest}", any(handlers::api_not_found))
         // The fallback must precede the layers — Router::layer wraps only what comes before it.
