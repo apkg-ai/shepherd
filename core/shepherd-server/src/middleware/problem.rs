@@ -35,8 +35,9 @@ pub fn problem_for(err: &DomainError, request_id: Uuid) -> (StatusCode, wire::Pr
         | "scope_mismatch"
         | "invalid_state" => StatusCode::CONFLICT,
         "revision_conflict" => StatusCode::PRECONDITION_FAILED,
-        // graph_too_large is 422 per plan/05 (recorded in the step-005 handoff).
-        "validation_error" | "invalid_cursor" | "graph_too_large" => {
+        // graph_too_large and context_too_large are 422 per plan/05 (recorded in
+        // the step-005 and step-013 handoffs; plan/07's API-02 table omits both).
+        "validation_error" | "invalid_cursor" | "graph_too_large" | "context_too_large" => {
             StatusCode::UNPROCESSABLE_ENTITY
         }
         "precondition_required" => StatusCode::PRECONDITION_REQUIRED,
@@ -192,6 +193,12 @@ mod tests {
                 DomainError::GraphTooLarge {
                     nodes: 2001,
                     dependencies: 0,
+                },
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                DomainError::ContextTooLarge {
+                    continuation: "/api/v1/projects/p/document-revisions/r".into(),
                 },
                 StatusCode::UNPROCESSABLE_ENTITY,
             ),

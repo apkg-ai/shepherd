@@ -101,7 +101,7 @@ fn submissions_filter(project: &ProjectId, filters: &SubmissionListFilters) -> S
     parts.join("&")
 }
 
-fn review_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Review, DomainError> {
+pub(crate) fn review_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Review, DomainError> {
     let id: String = row.try_get("id")?;
     let submission_id: String = row.try_get("submission_id")?;
     let actor_id: String = row.try_get("actor_id")?;

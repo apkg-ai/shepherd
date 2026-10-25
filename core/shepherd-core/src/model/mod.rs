@@ -1,6 +1,7 @@
 mod claim;
 mod content;
 mod epic;
+mod event;
 mod goal;
 mod identity;
 mod project;
@@ -20,6 +21,7 @@ pub(crate) use content::{
     revision_number_from_stored, validate_document_create, validate_revision_create,
 };
 pub use epic::{Epic, EpicCreate, EpicId, EpicStatus};
+pub use event::{Event, EventId, EventType};
 pub use goal::{Goal, GoalCreate, GoalId, TextPatch, goal_completed};
 pub use identity::{
     Ack, AgentCreate, AgentTokenGrant, BrowserSession, BrowserSessionGrant, Capability,
@@ -46,6 +48,7 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, SubsecRound, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::timestamp::context::ContextV7;
 use uuid::{Timestamp, Uuid};
 
@@ -187,9 +190,11 @@ impl From<TaskStatus> for EntityStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DependencyLevel {
+    #[serde(rename = "epic")]
     Epic,
+    #[serde(rename = "task")]
     Task,
 }
 
@@ -210,17 +215,26 @@ impl DependencyLevel {
     }
 }
 
+typed_id_serde!(serde_dependency_id, DependencyId);
+
 // Endpoints stay untyped Uuids: the wire model is level-discriminated; typed
 // safety lives in DependencyCreate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dependency {
+    #[serde(with = "serde_dependency_id")]
     pub id: DependencyId,
+    #[serde(with = "content::serde_revision")]
     pub revision: Revision,
+    #[serde(with = "claim::serde_datetime")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "claim::serde_datetime")]
     pub updated_at: DateTime<Utc>,
+    #[serde(with = "content::serde_project_id")]
     pub project_id: ProjectId,
     pub level: DependencyLevel,
+    #[serde(with = "claim::serde_uuid")]
     pub dependent_id: Uuid,
+    #[serde(with = "claim::serde_uuid")]
     pub prerequisite_id: Uuid,
 }
 
@@ -310,9 +324,6 @@ pub struct Actor {
     pub revoked: bool,
     pub created_at: DateTime<Utc>,
 }
-
-/// events.id is the SQLite rowid.
-pub type EventId = i64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Counts {

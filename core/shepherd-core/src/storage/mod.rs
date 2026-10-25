@@ -357,12 +357,13 @@ pub mod testing {
         sqlx::query(
             "INSERT INTO sessions (id, task_id, claim_id, actor_id, phase, started_at, \
              ended_at, outcome, summary, failure_reason, document_revision_ids, links) \
-             VALUES (?1, ?2, 'claim', ?3, 'execute', ?4, ?4, 'succeeded', '', '', '[]', '[]')",
+             VALUES (?1, ?2, ?5, ?3, 'execute', ?4, ?4, 'succeeded', '', '', '[]', '[]')",
         )
         .bind(&session)
         .bind(task.to_string())
         .bind(producer.to_string())
         .bind(now)
+        .bind(test_uuid())
         .execute(&mut *tx)
         .await
         .unwrap();

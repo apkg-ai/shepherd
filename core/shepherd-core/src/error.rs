@@ -35,6 +35,8 @@ pub enum DomainError {
     ScopeMismatch(String),
     #[error("graph exceeds contract bounds: {nodes} nodes, {dependencies} dependencies")]
     GraphTooLarge { nodes: i64, dependencies: i64 },
+    #[error("context exceeds the response budget; fetch the plan via {continuation}")]
+    ContextTooLarge { continuation: String },
     #[error("invalid state transition: {0}")]
     InvalidState(String),
     #[error("lease token is invalid or the claim is not active")]
@@ -78,6 +80,8 @@ impl DomainError {
             DomainError::ScopeMismatch(_) => "scope_mismatch",
             // 422 per plan/05; plan/07's API-02 table omits it — recorded in the step handoff.
             DomainError::GraphTooLarge { .. } => "graph_too_large",
+            // 422 per plan/05 (mandatory fields + selected plan over budget).
+            DomainError::ContextTooLarge { .. } => "context_too_large",
             DomainError::InvalidState(_) => "invalid_state",
             DomainError::LeaseInvalid => "lease_invalid",
             DomainError::NotEligible(_) => "not_eligible",
@@ -161,6 +165,13 @@ mod tests {
             }
             .code(),
             "graph_too_large"
+        );
+        assert_eq!(
+            DomainError::ContextTooLarge {
+                continuation: "/api/v1/projects/p/document-revisions/r".into()
+            }
+            .code(),
+            "context_too_large"
         );
         assert_eq!(
             DomainError::InvalidState("wrong".into()).code(),
