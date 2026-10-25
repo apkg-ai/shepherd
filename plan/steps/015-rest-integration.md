@@ -1,6 +1,6 @@
 # 015 — REST integration and resumable SSE
 
-Status: not started. Requirements: API-01 DATA-01.
+Status: in progress — REST and SSE delivered; portability wiring deferred to #97. Requirements: API-01 DATA-01.
 
 ## Objective and prerequisites
 
@@ -71,4 +71,22 @@ Expected: zero exit status, all named acceptance cases pass, no changes outside 
 
 ## Implementation handoff record
 
-Fill when implementing, not during planning: commit/branch; files changed; test commands and results; any reproduced limitation; temporary interfaces; next eligible step IDs. If an acceptance criterion cannot pass, leave this step incomplete and explain the concrete blocker. Do not mark complete for code that merely compiles.
+Branch `v1/015-rest-sse` (owner-approved scope split: REST + SSE in this step's PR; `exportProject`/`importProject` deferred to #97 because the owning core surface — step 014's `core/shepherd-core/src/export.rs` — was never implemented).
+
+Delivered:
+
+- `openapi/shepherd.yaml` promoted from `plan/contracts/openapi.yaml` minus the two deferred portability paths (68 operations served); `openapi/shepherd-events.asyncapi.yaml` copied verbatim; root `.spectral.yaml` replaced with the stable profile and `.spectral-asyncapi.yaml` added (`lint:spec` covers both). The trim is pinned by `served_spec_is_the_v1_contract_minus_deferred_portability`; the #97 PR restores verbatim equality.
+- Generator allowlist at 67 operations; all generated handlers implemented in `core/shepherd-server/src/handlers/{identity,hierarchy/*,claims/*,content/*,reviews,events}.rs` over `convert/{hierarchy,work,content,errors}.rs` (directory modules keep files small; owner-approved reading of the braces list). Gate derives Idempotency-Key/If-Match/X-Lease-Token requirements from the embedded served spec (missing → 428, malformed → 400); ETag rides the request context; unrouted `/api` paths answer problem 404.
+- Core additions owned by this step: `Store` post-commit broadcast notifier (`subscribe_events`, capacity 256), `queries/sessions.rs` (`list_task_sessions`), `queries/views.rs` (`TaskView`/`EpicView` for the wire eligibility fields), `Store::get_actor`; `session.recorded`/`review.recorded` events now carry `resource_revision: 1` (contract minimum; previously 0).
+- Handwritten SSE route with Last-Event-ID/after cursors, subscribe-before-replay, 15 s comment heartbeat doubling as revocation/session recheck, `resync_required` (cursor_ahead/cursor_expired/backlog_limit) then close, lag disconnect at the 256-notification bound.
+- Tests: `v1_rest_support` (core), `rest_hierarchy`, `rest_workflow`, `rest_claims`, `rest_contract` (`every_implemented_operation_conforms` validates all 67 operations' live responses against the served spec), `sse` (10 scenarios incl. AsyncAPI payload validation), `boot::non_v1_database_refuses_startup`; hurl `02` rewritten as the catalog boundary plus new `04-rest-crud.hurl`. Commands: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace`, `python3 plan/validate.py`, `node --run lint:spec`, UI `generate:api`/typecheck/lint/test, `scripts/hurl-e2e.sh` — all passing at each commit.
+
+Limitations and temporary interfaces:
+
+- Acceptance sentences about staged import (408 `import_timeout`, staging cleanup) are not dischargeable in this PR: no core export/import exists (see #97). The step stays incomplete until that PR lands and this record is finalized.
+- Hierarchy-family mutations accept the required Idempotency-Key but do not replay (prior-step deferral, tracked in #99); the replayable family (claims/report/reviews/documents/revokeAgent) has full replay semantics covered by `rest_claims`.
+- `tokio-stream` 0.1 added to shepherd-server (already in Cargo.lock transitively) for the SSE channel adapter; owner-approved addition in the fs2→`std::fs::File::try_lock` precedent's spirit, to be reflected in plan/dependencies.md if kept.
+- Replayed `claimTask` returns the original lease with a freshly assembled context bundle (the contract only guarantees the lease).
+- The non-v1 refusal applies once the install is provisioned: with the replay key missing the daemon enters the plan/12 diagnostic-only mode before ever opening the database, so a foreign file plus missing key serves 503s instead of exiting (`boot.rs` covers the provisioned path).
+
+Next eligible steps: #97 (portability completion, finalizes 014/015), #99 (hierarchy idempotent replay), then 016 (UI shell and hierarchy).

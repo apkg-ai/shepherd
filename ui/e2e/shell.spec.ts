@@ -7,7 +7,8 @@ test.describe("scaffold shell", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Shepherd" })).toBeVisible();
     await expect(page.getByText("pass", { exact: true })).toBeVisible();
     await expect(page.getByText(/^\d+\.\d+\.\d+/)).toBeVisible();
-    await expect(page.getByText("shepherd local daemon")).toBeVisible();
+    await expect(page.getByText("Schema", { exact: true })).toBeVisible();
+    await expect(page.getByText("1", { exact: true })).toBeVisible();
   });
 
   test("skip link focuses the main region without changing the route", async ({ page }) => {
