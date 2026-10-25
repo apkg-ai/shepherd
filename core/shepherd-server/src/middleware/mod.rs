@@ -1,11 +1,13 @@
 mod config;
 mod context;
 mod gate;
+mod preconditions;
 mod problem;
 
 pub use config::{AuthConfig, cors_layer};
 pub use context::{CookieAction, current_context, set_cookie_action};
 pub use gate::gate;
+pub(crate) use problem::problem_body_response;
 pub use problem::{problem, problem_for, problem_shaper};
 
 pub const SESSION_COOKIE: &str = "shepherd_session";

@@ -7,6 +7,7 @@ use shepherd_core::model::{SESSION_TTL_SECONDS, SecretString, digest_matches, to
 use uuid::Uuid;
 
 use super::context::{CookieAction, RequestContext, with_context};
+use super::preconditions::PRECONDITIONS;
 use super::problem::{problem_body_response, problem_for, problem_response};
 use super::{API_PREFIX, LOGIN_PATH, SESSION_COOKIE, SPEC_PATH};
 use crate::{AppState, ServiceState};
@@ -167,20 +168,43 @@ async fn api_gate(
         }
     }
 
-    // Command operations require Idempotency-Key up front (plan/07: 428).
-    // Detected here by route so the answer never depends on the generated
-    // validator's rejection wording; step 015 generalizes this from the
-    // contract catalog.
-    if requires_idempotency_key(method, path) && !req.headers().contains_key("Idempotency-Key") {
-        return reject(
-            StatusCode::PRECONDITION_REQUIRED,
-            "precondition_required",
-            "supply the Idempotency-Key header",
-        );
+    // Command operations require their Idempotency-Key / If-Match /
+    // X-Lease-Token headers up front (plan/07: missing -> 428), checked from
+    // the contract-derived table so the answer never depends on the generated
+    // validator's rejection wording (which would be 422).
+    if let Some(entry) = PRECONDITIONS.lookup(method, path) {
+        for (required, header, detail) in [
+            (
+                entry.idempotency_key,
+                "Idempotency-Key",
+                "supply the Idempotency-Key header",
+            ),
+            (entry.if_match, "If-Match", "supply the If-Match header"),
+            (
+                entry.lease,
+                "X-Lease-Token",
+                "supply the X-Lease-Token header",
+            ),
+        ] {
+            if required && !req.headers().contains_key(header) {
+                return reject(
+                    StatusCode::PRECONDITION_REQUIRED,
+                    "precondition_required",
+                    detail,
+                );
+            }
+        }
     }
 
     let ctx = RequestContext::new(request_id, principal, session);
     let mut response = with_context(ctx.clone(), next.run(req)).await;
+
+    if let Some(etag) = ctx.0.etag.lock().unwrap().take() {
+        response.headers_mut().insert(
+            header::ETAG,
+            HeaderValue::from_str(&etag).expect("etag is a valid header value"),
+        );
+    }
 
     if let Some(action) = ctx.0.cookie_action.lock().unwrap().take() {
         let value = match action {
@@ -206,15 +230,6 @@ async fn api_gate(
 fn domain_reject(err: &DomainError, request_id: Uuid) -> Response<Body> {
     let (status, body) = problem_for(err, request_id);
     problem_body_response(status, &body)
-}
-
-// The 007 surface has exactly one replayable command (revokeAgent).
-fn requires_idempotency_key(method: &Method, path: &str) -> bool {
-    *method == Method::POST
-        && path
-            .strip_prefix("/api/v1/agents/")
-            .and_then(|rest| rest.strip_suffix("/revoke"))
-            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
 }
 
 fn bearer_token(value: &str) -> Option<&str> {

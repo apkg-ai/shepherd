@@ -15,6 +15,9 @@ pub struct RequestContextInner {
     /// Present only for cookie-authenticated requests.
     pub session: Option<(SecretString, BrowserSession)>,
     pub cookie_action: Mutex<Option<CookieAction>>,
+    /// Quoted revision the gate copies onto the response ETag (generated
+    /// response enums cannot carry headers).
+    pub etag: Mutex<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -31,6 +34,7 @@ impl RequestContext {
             principal,
             session,
             cookie_action: Mutex::new(None),
+            etag: Mutex::new(None),
         }))
     }
 }

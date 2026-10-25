@@ -25,7 +25,7 @@ pub fn problem(status: StatusCode, code: &str, detail: &str, request_id: Uuid) -
 pub fn problem_for(err: &DomainError, request_id: Uuid) -> (StatusCode, wire::Problem) {
     let status = match err.code() {
         "unauthenticated" => StatusCode::UNAUTHORIZED,
-        "forbidden" => StatusCode::FORBIDDEN,
+        "forbidden" | "reviewer_policy" | "producer_cannot_review" => StatusCode::FORBIDDEN,
         "not_found" => StatusCode::NOT_FOUND,
         // invalid_state joins the workflow-conflict family (see error.rs).
         "idempotency_conflict"
@@ -33,6 +33,9 @@ pub fn problem_for(err: &DomainError, request_id: Uuid) -> (StatusCode, wire::Pr
         | "active_work"
         | "dependency_cycle"
         | "scope_mismatch"
+        | "lease_invalid"
+        | "not_eligible"
+        | "submission_superseded"
         | "invalid_state" => StatusCode::CONFLICT,
         "revision_conflict" => StatusCode::PRECONDITION_FAILED,
         // graph_too_large and context_too_large are 422 per plan/05 (recorded in
@@ -206,6 +209,20 @@ mod tests {
                 DomainError::InvalidState("wrong".into()),
                 StatusCode::CONFLICT,
             ),
+            (DomainError::LeaseInvalid, StatusCode::CONFLICT),
+            (
+                DomainError::NotEligible("claimed".into()),
+                StatusCode::CONFLICT,
+            ),
+            (
+                DomainError::SubmissionSuperseded("decided".into()),
+                StatusCode::CONFLICT,
+            ),
+            (
+                DomainError::ReviewerPolicy("human".into()),
+                StatusCode::FORBIDDEN,
+            ),
+            (DomainError::ProducerCannotReview, StatusCode::FORBIDDEN),
             (
                 DomainError::Storage(StorageError::Corrupt("bad".into())),
                 StatusCode::SERVICE_UNAVAILABLE,
