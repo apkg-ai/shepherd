@@ -366,10 +366,64 @@ fn assemble(
     .iter()
     .map(|path| path.len() + 3)
     .sum();
+    // Sections that would cut if no item fits, with the paths they would emit.
+    let cut_sections: [(bool, &[String]); 6] = [
+        (!sessions.is_empty(), std::slice::from_ref(&sessions_path)),
+        (!reviews.is_empty(), std::slice::from_ref(&submissions_path)),
+        (
+            !submissions.is_empty(),
+            std::slice::from_ref(&submissions_path),
+        ),
+        (!documents.is_empty(), &document_paths),
+        (
+            !sibling_claims.is_empty(),
+            std::slice::from_ref(&claims_path),
+        ),
+        (
+            !dependencies.is_empty(),
+            std::slice::from_ref(&dependencies_path),
+        ),
+    ];
+    let budget_left = CONTEXT_BUDGET_BYTES - mandatory;
+    let remaining = if budget_left >= reserve {
+        budget_left - reserve
+    } else {
+        // The worst-case reserve cannot be satisfied: no item fits, so every
+        // non-empty section cuts. Charge the exact emitted path set instead;
+        // when even that overflows, only the selected plan can have pushed
+        // mandatory into this window (plan/05).
+        let mut emitted: Vec<&str> = Vec::new();
+        for (non_empty, paths) in cut_sections {
+            if non_empty {
+                for path in paths {
+                    let path = path.as_str();
+                    if !emitted.contains(&path) {
+                        emitted.push(path);
+                    }
+                }
+            }
+        }
+        if emitted.is_empty() {
+            budget_left
+        } else {
+            let paths_cost: usize =
+                emitted.iter().map(|path| path.len() + 2).sum::<usize>() + emitted.len() - 1;
+            if paths_cost > budget_left {
+                let continuation = selected_plan_revision_ids
+                    .first()
+                    .map(|id| format!("{prefix}/document-revisions/{id}"))
+                    .ok_or_else(|| {
+                        StorageError::Corrupt(
+                            "context: mandatory fields alone exceed the budget".into(),
+                        )
+                    })?;
+                return Err(DomainError::ContextTooLarge { continuation });
+            }
+            budget_left - paths_cost
+        }
+    };
     let mut fill = BudgetFill {
-        remaining: CONTEXT_BUDGET_BYTES
-            .saturating_sub(mandatory)
-            .saturating_sub(reserve),
+        remaining,
         open: true,
         truncated: false,
         continuation_paths: Vec::new(),
@@ -799,5 +853,167 @@ mod tests {
             }
             other => panic!("expected ContextTooLarge, got {other:?}"),
         }
+    }
+
+    // Selects a plan revision sized to leave roughly `gap` budget bytes after
+    // mandatory content: a baseline bundle pins the exact size because a
+    // four-byte body character grows mandatory by four bytes.
+    async fn resize_selected_plan_to_gap(f: &Fixture, gap: usize) -> Uuid {
+        let plan = create_document(f, DocumentOwner::Task(f.task), DocumentKind::Plan, "p").await;
+        let first = plan.latest_revision_id.as_uuid();
+        f.clock.advance(TimeDelta::milliseconds(2));
+        f.store
+            .select_task_plan(
+                ctx(&f.owner, &f.clock, Some(1)),
+                f.project,
+                f.task,
+                SelectPlanInput {
+                    document_revision_id: first,
+                },
+            )
+            .await
+            .unwrap();
+        let baseline = f.store.get_task_context(&f.project, &f.task).await.unwrap();
+        let mandatory_of = |bundle: &ContextBundle| -> usize {
+            let mut total = measured(&mandatory_json(
+                &bundle.task,
+                &bundle.epic,
+                &bundle.goal,
+                &bundle.project,
+                &bundle.selected_plan_revision_ids,
+                &bundle.accepted_plan_submission_ids,
+            ))
+            .unwrap();
+            for plan_revision in &bundle.selected_plan {
+                total += measured(plan_revision).unwrap() + 1;
+            }
+            total
+        };
+        let baseline_mandatory = mandatory_of(&baseline);
+        let chars = (CONTEXT_BUDGET_BYTES - gap).saturating_sub(baseline_mandatory) / 4;
+        f.clock.advance(TimeDelta::milliseconds(2));
+        let second = f
+            .store
+            .create_document_revision(
+                ctx(&f.owner, &f.clock, Some(1)),
+                f.project,
+                plan.id,
+                crate::model::RevisionCreate {
+                    body: "\u{1F4A5}".repeat(chars),
+                    links: Vec::new(),
+                },
+                "resize-hash",
+            )
+            .await
+            .unwrap()
+            .into_inner();
+        let task_revision: i64 = sqlx::query_scalar("SELECT revision FROM tasks WHERE id = ?1")
+            .bind(f.task.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        f.clock.advance(TimeDelta::milliseconds(2));
+        f.store
+            .select_task_plan(
+                ctx(&f.owner, &f.clock, Some(task_revision)),
+                f.project,
+                f.task,
+                SelectPlanInput {
+                    document_revision_id: second.id.as_uuid(),
+                },
+            )
+            .await
+            .unwrap();
+        second.id.as_uuid()
+    }
+
+    #[tokio::test]
+    async fn context_saturation_window_fails_closed_when_paths_cannot_fit() {
+        let f = fixture().await;
+        // Cut paths for sessions, submissions and both document owners
+        // outsize a ~300-byte gap below the budget.
+        let now_text = format_ts(&f.clock.now());
+        seed_submission(f.store.pool(), f.task, f.owner.id, "accepted", &now_text).await;
+        create_document(&f, DocumentOwner::Epic(f.epic), DocumentKind::Note, "n").await;
+        let revision = resize_selected_plan_to_gap(&f, 300).await;
+
+        let err = f
+            .store
+            .get_task_context(&f.project, &f.task)
+            .await
+            .unwrap_err();
+        match err {
+            DomainError::ContextTooLarge { continuation } => {
+                assert_eq!(
+                    continuation,
+                    format!(
+                        "/api/v1/projects/{}/document-revisions/{revision}",
+                        f.project
+                    )
+                );
+            }
+            other => panic!("expected ContextTooLarge, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn context_saturation_window_without_optional_content_stays_untruncated() {
+        let f = fixture().await;
+        resize_selected_plan_to_gap(&f, 300).await;
+        let bundle = f.store.get_task_context(&f.project, &f.task).await.unwrap();
+        assert!(!bundle.truncated);
+        assert!(bundle.continuation_paths.is_empty());
+    }
+
+    #[tokio::test]
+    async fn context_saturation_window_charges_exact_path_bytes() {
+        let f = fixture().await;
+        let now_text = format_ts(&f.clock.now());
+        seed_submission(f.store.pool(), f.task, f.owner.id, "accepted", &now_text).await;
+        create_document(&f, DocumentOwner::Epic(f.epic), DocumentKind::Note, "n").await;
+        let revision = resize_selected_plan_to_gap(&f, 550).await;
+
+        let bundle = f.store.get_task_context(&f.project, &f.task).await.unwrap();
+        assert_eq!(bundle.selected_plan[0].id.as_uuid(), revision);
+        assert!(bundle.truncated);
+        assert!(bundle.sessions.is_empty());
+        assert!(bundle.submissions.is_empty());
+        assert!(bundle.documents.is_empty());
+        let prefix = format!("/api/v1/projects/{}", f.project);
+        assert_eq!(
+            bundle.continuation_paths,
+            vec![
+                format!("{prefix}/tasks/{}/sessions", f.task),
+                format!("{prefix}/submissions?task_id={}", f.task),
+                format!(
+                    "{prefix}/documents?owner_kind=project&owner_id={}",
+                    f.project
+                ),
+                format!("{prefix}/documents?owner_kind=epic&owner_id={}", f.epic),
+            ]
+        );
+        let mut mandatory = measured(&mandatory_json(
+            &bundle.task,
+            &bundle.epic,
+            &bundle.goal,
+            &bundle.project,
+            &bundle.selected_plan_revision_ids,
+            &bundle.accepted_plan_submission_ids,
+        ))
+        .unwrap();
+        for plan_revision in &bundle.selected_plan {
+            mandatory += measured(plan_revision).unwrap() + 1;
+        }
+        let paths_cost: usize = bundle
+            .continuation_paths
+            .iter()
+            .map(|path| path.len() + 2)
+            .sum::<usize>()
+            + bundle.continuation_paths.len()
+            - 1;
+        assert!(
+            mandatory + paths_cost <= CONTEXT_BUDGET_BYTES,
+            "wire budget invariant"
+        );
     }
 }
