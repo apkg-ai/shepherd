@@ -20,14 +20,14 @@ const REPLAY_KEY_FILE: &str = "replay-key";
 /// before any file I/O to prevent path traversal.
 const ALLOWED_FILES: [&str; 3] = [DB_FILE, OWNER_TOKEN_FILE, REPLAY_KEY_FILE];
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct BackupManifest {
     pub version: String,
     pub created_at: String,
     pub files: Vec<ManifestFile>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ManifestFile {
     pub name: String,
     pub sha256: String,
@@ -196,7 +196,8 @@ fn read_manifest(from: &Path) -> Result<BackupManifest, StorageError> {
     Ok(manifest)
 }
 
-/// Reject manifest entries whose names are not in the allowlist.
+/// Reject manifest entries whose names are not in the allowlist, duplicate
+/// entries, and manifests without the database.
 fn validate_manifest_names(manifest: &BackupManifest) -> Result<(), StorageError> {
     for entry in &manifest.files {
         if !ALLOWED_FILES.contains(&entry.name.as_str()) {
@@ -206,20 +207,43 @@ fn validate_manifest_names(manifest: &BackupManifest) -> Result<(), StorageError
             )));
         }
     }
+    // Without a database entry the live database would move to the recovery
+    // directory and never be replaced: the next boot provisions an empty
+    // database, silently wiping all data.
+    if manifest
+        .files
+        .iter()
+        .filter(|entry| entry.name == DB_FILE)
+        .count()
+        != 1
+    {
+        return Err(StorageError::InvalidManifest(
+            "manifest must contain exactly one shepherd.db entry".into(),
+        ));
+    }
+    if manifest.files.len() > ALLOWED_FILES.len() {
+        return Err(StorageError::InvalidManifest(
+            "manifest contains duplicate file entries".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn verify_file_checksum(path: &Path, entry: &ManifestFile) -> Result<(), StorageError> {
+    let actual = sha256_file(path)?;
+    if actual != entry.sha256 {
+        return Err(StorageError::ChecksumMismatch {
+            file: entry.name.clone(),
+            expected: entry.sha256.clone(),
+            actual,
+        });
+    }
     Ok(())
 }
 
 fn verify_checksums(from: &Path, manifest: &BackupManifest) -> Result<(), StorageError> {
     for entry in &manifest.files {
-        let path = from.join(&entry.name);
-        let actual = sha256_file(&path)?;
-        if actual != entry.sha256 {
-            return Err(StorageError::ChecksumMismatch {
-                file: entry.name.clone(),
-                expected: entry.sha256.clone(),
-                actual,
-            });
-        }
+        verify_file_checksum(&from.join(&entry.name), entry)?;
     }
     Ok(())
 }
@@ -293,6 +317,9 @@ fn stage_and_swap(
                 // Stream the database via fs::copy to avoid loading it all.
                 fs::copy(&src, &dst)?;
                 fs::set_permissions(&dst, Permissions::from_mode(0o600))?;
+                // fs::copy does not flush; without a sync a power loss right
+                // after restore could leave a truncated database behind.
+                File::open(&dst)?.sync_all()?;
             } else {
                 let bytes = fs::read(&src)?;
                 write_secret_file(&dst, &bytes)?;
@@ -306,11 +333,22 @@ fn stage_and_swap(
         return Err(e);
     }
 
+    // Re-verify the staged bytes: files could change in the source between
+    // the pre-swap verification and this copy.
+    let verified = verify_checksums(&staging, manifest);
+    if let Err(e) = verified {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(e);
+    }
+
     // Move current live files into a timestamped recovery directory.
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
     let recovery_name = format!("recovery-{ts}");
     let recovery = data_dir.join(&recovery_name);
-    create_dir_restricted(&recovery)?;
+    if let Err(e) = create_dir_restricted(&recovery) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(e);
+    }
 
     // Track how far we got so a failed rename can attempt rollback.
     let mut moved_to_recovery: Vec<String> = Vec::new();

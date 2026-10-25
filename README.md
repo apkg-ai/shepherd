@@ -14,7 +14,7 @@ scripts/regen-generated.sh                  # Rust wire types (gitignored)
 npm ci && npm ci --prefix ui
 (cd ui && node --run generate:api)          # TS client + MSW mocks (gitignored)
 (cd ui && node --run build)
-cargo run -p shepherd-server --manifest-path core/Cargo.toml
+cargo run -p shepherd-server --manifest-path core/Cargo.toml -- serve
 # → http://127.0.0.1:7437 (override with --port / SHEPHERD_PORT)
 ```
 

@@ -378,6 +378,78 @@ async fn restore_preserves_original_in_recovery_directory() {
 }
 
 #[tokio::test]
+async fn restore_rejects_manifest_without_database() {
+    let f = fixture().await;
+    seed_data(&f).await;
+
+    let backup = f.backup_dir();
+    maintenance::backup(f.data_dir(), &backup).await.unwrap();
+
+    // Strip the database entry: without validation the live database would
+    // move to recovery, never be replaced, and the next boot would provision
+    // an empty database.
+    let manifest_path = backup.join("manifest.json");
+    let mut manifest: BackupManifest =
+        serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    manifest.files.retain(|entry| entry.name != "shepherd.db");
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+    let original_db = std::fs::read(f.data_dir().join("shepherd.db")).unwrap();
+
+    let err = maintenance::restore(f.data_dir(), &backup)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, StorageError::InvalidManifest(ref msg) if msg.contains("shepherd.db")),
+        "expected InvalidManifest, got: {err}"
+    );
+
+    // Live data must be untouched.
+    let current_db = std::fs::read(f.data_dir().join("shepherd.db")).unwrap();
+    assert_eq!(
+        current_db, original_db,
+        "live database must not be modified"
+    );
+}
+
+#[tokio::test]
+async fn restore_rejects_duplicate_manifest_entries() {
+    let f = fixture().await;
+    seed_data(&f).await;
+
+    let backup = f.backup_dir();
+    maintenance::backup(f.data_dir(), &backup).await.unwrap();
+
+    let manifest_path = backup.join("manifest.json");
+    let mut manifest: BackupManifest =
+        serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    let credential = manifest
+        .files
+        .iter()
+        .find(|entry| entry.name == "owner-token")
+        .cloned()
+        .unwrap();
+    manifest.files.push(credential);
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+    let original_db = std::fs::read(f.data_dir().join("shepherd.db")).unwrap();
+
+    let err = maintenance::restore(f.data_dir(), &backup)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, StorageError::InvalidManifest(ref msg) if msg.contains("duplicate")),
+        "expected InvalidManifest, got: {err}"
+    );
+
+    let current_db = std::fs::read(f.data_dir().join("shepherd.db")).unwrap();
+    assert_eq!(
+        current_db, original_db,
+        "live database must not be modified"
+    );
+}
+
+#[tokio::test]
 async fn restore_refuses_when_daemon_lock_held() {
     let f = fixture().await;
     seed_data(&f).await;
