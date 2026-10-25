@@ -97,6 +97,11 @@ pub enum StorageError {
     },
     #[error("invalid backup manifest: {0}")]
     InvalidManifest(String),
+    #[error(
+        "restore already replaced the live files but syncing failed: {0}; \
+            the previous state is preserved in the recovery directory"
+    )]
+    PostSwapSync(String),
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
     #[error(transparent)]

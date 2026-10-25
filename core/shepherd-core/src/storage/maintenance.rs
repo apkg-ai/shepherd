@@ -157,6 +157,12 @@ async fn backup_inner(data_dir: &Path, output: &Path) -> Result<(), StorageError
         .map_err(|e| StorageError::InvalidManifest(e.to_string()))?;
     write_file_restricted(&output.join("manifest.json"), json.as_bytes())?;
 
+    // The directory entries must be durable before backup reports success.
+    sync_dir(output)?;
+    if let Some(parent) = output.parent() {
+        sync_dir(parent)?;
+    }
+
     Ok(())
 }
 
@@ -171,6 +177,7 @@ pub async fn restore(data_dir: &Path, from: &Path) -> Result<String, StorageErro
     let _lock = DaemonLock::acquire(&lock_path)?;
 
     let manifest = read_manifest(from)?;
+    verify_manifest_shape(from, &manifest)?;
     verify_checksums(from, &manifest)?;
     verify_credential_modes(from)?;
     verify_backup_db(from).await?;
@@ -199,6 +206,7 @@ fn read_manifest(from: &Path) -> Result<BackupManifest, StorageError> {
 /// Reject manifest entries whose names are not in the allowlist, duplicate
 /// entries, and manifests without the database.
 fn validate_manifest_names(manifest: &BackupManifest) -> Result<(), StorageError> {
+    let mut seen = std::collections::HashSet::new();
     for entry in &manifest.files {
         if !ALLOWED_FILES.contains(&entry.name.as_str()) {
             return Err(StorageError::InvalidManifest(format!(
@@ -206,24 +214,19 @@ fn validate_manifest_names(manifest: &BackupManifest) -> Result<(), StorageError
                 entry.name
             )));
         }
+        if !seen.insert(entry.name.as_str()) {
+            return Err(StorageError::InvalidManifest(format!(
+                "duplicate manifest entry: {:?}",
+                entry.name
+            )));
+        }
     }
     // Without a database entry the live database would move to the recovery
     // directory and never be replaced: the next boot provisions an empty
     // database, silently wiping all data.
-    if manifest
-        .files
-        .iter()
-        .filter(|entry| entry.name == DB_FILE)
-        .count()
-        != 1
-    {
+    if !seen.contains(DB_FILE) {
         return Err(StorageError::InvalidManifest(
             "manifest must contain exactly one shepherd.db entry".into(),
-        ));
-    }
-    if manifest.files.len() > ALLOWED_FILES.len() {
-        return Err(StorageError::InvalidManifest(
-            "manifest contains duplicate file entries".into(),
         ));
     }
     Ok(())
@@ -244,6 +247,20 @@ fn verify_file_checksum(path: &Path, entry: &ManifestFile) -> Result<(), Storage
 fn verify_checksums(from: &Path, manifest: &BackupManifest) -> Result<(), StorageError> {
     for entry in &manifest.files {
         verify_file_checksum(&from.join(&entry.name), entry)?;
+    }
+    Ok(())
+}
+
+/// A credential entry must exist exactly when the file exists in the backup
+/// directory; otherwise restore could drop or resurrect credentials silently.
+fn verify_manifest_shape(from: &Path, manifest: &BackupManifest) -> Result<(), StorageError> {
+    let listed = |name: &str| manifest.files.iter().any(|entry| entry.name == name);
+    for name in [OWNER_TOKEN_FILE, REPLAY_KEY_FILE] {
+        if from.join(name).exists() != listed(name) {
+            return Err(StorageError::InvalidManifest(format!(
+                "manifest does not match backup contents for {name}"
+            )));
+        }
     }
     Ok(())
 }
@@ -341,9 +358,12 @@ fn stage_and_swap(
         return Err(e);
     }
 
-    // Move current live files into a timestamped recovery directory.
+    // Move current live files into a timestamped recovery directory. The
+    // nonce keeps the name unique beyond the one-second timestamp.
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
-    let recovery_name = format!("recovery-{ts}");
+    let mut nonce = [0u8; 4];
+    getrandom::fill(&mut nonce).expect("system RNG is available");
+    let recovery_name = format!("recovery-{ts}-{:08x}", u32::from_be_bytes(nonce));
     let recovery = data_dir.join(&recovery_name);
     if let Err(e) = create_dir_restricted(&recovery) {
         let _ = fs::remove_dir_all(&staging);
@@ -352,6 +372,7 @@ fn stage_and_swap(
 
     // Track how far we got so a failed rename can attempt rollback.
     let mut moved_to_recovery: Vec<String> = Vec::new();
+    let mut installed: Vec<String> = Vec::new();
 
     let move_result = (|| -> Result<(), StorageError> {
         for name in [DB_FILE, OWNER_TOKEN_FILE, REPLAY_KEY_FILE] {
@@ -373,12 +394,17 @@ fn stage_and_swap(
         // Swap staged files into the data directory.
         for entry in &manifest.files {
             fs::rename(staging.join(&entry.name), data_dir.join(&entry.name))?;
+            installed.push(entry.name.clone());
         }
         Ok(())
     })();
 
     if let Err(e) = move_result {
-        // Best-effort rollback: move recovered files back to data_dir.
+        // Best-effort rollback: remove staged files the swap already
+        // installed, then move the recovered files back into place.
+        for name in &installed {
+            let _ = fs::remove_file(data_dir.join(name));
+        }
         for name in &moved_to_recovery {
             let _ = fs::rename(recovery.join(name), data_dir.join(name));
         }
@@ -388,8 +414,13 @@ fn stage_and_swap(
 
     let _ = fs::remove_dir(&staging);
 
-    // Flush directory entries so the swap survives a power loss.
-    let _ = sync_dir(data_dir);
+    // The live files are already replaced at this point: a sync failure must
+    // not read as a failed restore, but the caller has to know the swap is
+    // not confirmed durable and where the previous state lives.
+    let synced = sync_dir(&recovery).and_then(|()| sync_dir(data_dir));
+    if let Err(e) = synced {
+        return Err(StorageError::PostSwapSync(e.to_string()));
+    }
 
     Ok(recovery_name)
 }

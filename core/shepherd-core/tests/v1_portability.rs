@@ -1,14 +1,25 @@
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
-use shepherd_core::commands::IdentityPaths;
-use shepherd_core::model::{CommandId, ProjectCreate, TestClock};
+use shepherd_core::commands::{CommandContext, IdentityPaths, Replay};
+use shepherd_core::model::{
+    Actor, ClaimInput, ClaimPhase, CommandId, EpicCreate, GoalCreate, ProjectCreate, ProjectId,
+    Task, TaskCreate, TestClock,
+};
 use shepherd_core::storage::maintenance::BackupManifest;
-use shepherd_core::storage::{FileReplayKeyProvider, StorageError, maintenance, open, testing};
+use shepherd_core::storage::{
+    FileReplayKeyProvider, StorageError, Store, maintenance, open, testing,
+};
 
 struct Fixture {
     dir: tempfile::TempDir,
     clock: Arc<TestClock>,
+}
+
+struct Seeded {
+    owner: Actor,
+    project: ProjectId,
+    task: Task,
 }
 
 impl Fixture {
@@ -31,9 +42,20 @@ async fn fixture() -> Fixture {
     Fixture { dir, clock }
 }
 
-/// Open a store, seed an owner and a project, provision credential files,
-/// then close the pool.
-async fn seed_data(f: &Fixture) {
+fn ctx(store: &Store, actor: &Actor) -> CommandContext {
+    let now = store.clock().now();
+    CommandContext {
+        actor: actor.clone(),
+        command_id: CommandId::generate(now),
+        idempotency_key: uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+        expected_revision: None,
+        now,
+    }
+}
+
+/// Open a store, seed an owner, a project and a claimable task, provision
+/// credential files, then close the pool.
+async fn seed_data(f: &Fixture) -> Seeded {
     // Provision a replay-key file so backup can copy it.
     FileReplayKeyProvider::provision(&f.paths().replay_key()).unwrap();
 
@@ -46,17 +68,9 @@ async fn seed_data(f: &Fixture) {
     .unwrap();
 
     let owner = store.ensure_owner(&f.paths()).await.unwrap().actor;
-    let now = store.clock().now();
-    let ctx = shepherd_core::commands::CommandContext {
-        actor: owner,
-        command_id: CommandId::generate(now),
-        idempotency_key: uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
-        expected_revision: None,
-        now,
-    };
-    store
+    let project = store
         .create_project(
-            ctx,
+            ctx(&store, &owner),
             ProjectCreate {
                 name: "backup-test".into(),
                 description: Some("project for portability tests".into()),
@@ -64,9 +78,59 @@ async fn seed_data(f: &Fixture) {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .value;
+
+    f.clock.advance(chrono::TimeDelta::milliseconds(2));
+    let goal = store
+        .create_goal(
+            ctx(&store, &owner),
+            project.id,
+            GoalCreate {
+                title: "portability".into(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    f.clock.advance(chrono::TimeDelta::milliseconds(2));
+    let epic = store
+        .create_epic(
+            ctx(&store, &owner),
+            project.id,
+            goal.id,
+            EpicCreate {
+                title: "seed epic".into(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap()
+        .value;
+    f.clock.advance(chrono::TimeDelta::milliseconds(2));
+    let task = store
+        .create_task(
+            ctx(&store, &owner),
+            project.id,
+            epic.id,
+            TaskCreate {
+                title: "seed task".into(),
+                type_key: "code".to_string(),
+                planning_required: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .value;
 
     store.pool().close().await;
+    Seeded {
+        owner,
+        project: project.id,
+        task,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +253,51 @@ async fn backup_produces_no_wal_sidecars() {
 #[tokio::test]
 async fn restore_preserves_completed_state_and_credentials() {
     let f = fixture().await;
-    seed_data(&f).await;
+    let seeded = seed_data(&f).await;
+
+    // Seed a replayable command: a plan claim with a retained idempotency
+    // key that must still replay after the backup is restored.
+    let store = open(testing::store_options(
+        f.data_dir(),
+        "shepherd.db",
+        f.clock.clone(),
+    ))
+    .await
+    .unwrap();
+    let claim_key = uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    let claim_ctx = |store: &Store, actor: &Actor, key: uuid::Uuid| {
+        let now = store.clock().now();
+        CommandContext {
+            actor: actor.clone(),
+            command_id: CommandId::generate(now),
+            idempotency_key: key,
+            expected_revision: Some(seeded.task.revision.value()),
+            now,
+        }
+    };
+    let grant = store
+        .claim_task(
+            claim_ctx(&store, &seeded.owner, claim_key),
+            seeded.project,
+            seeded.task.id,
+            ClaimInput {
+                phase: ClaimPhase::Plan,
+                submission_id: None,
+                ttl_seconds: Some(600),
+            },
+            "portability-claim-hash",
+        )
+        .await
+        .unwrap();
+    let grant = match grant {
+        Replay::Fresh(grant) => grant,
+        Replay::Replayed(_) => panic!("first claim must be fresh"),
+    };
+    let events_before: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    store.pool().close().await;
 
     let backup = f.backup_dir();
     maintenance::backup(f.data_dir(), &backup).await.unwrap();
@@ -208,7 +316,8 @@ async fn restore_preserves_completed_state_and_credentials() {
     assert_eq!(restored_token, original_token);
     assert_eq!(restored_key, original_key);
 
-    // The store opens and ensure_owner succeeds with the restored data.
+    // The store opens on the restored data; ensure_owner must report the
+    // persisted owner rather than bootstrapping a fresh identity.
     let store = open(testing::store_options(
         f.data_dir(),
         "shepherd.db",
@@ -216,7 +325,52 @@ async fn restore_preserves_completed_state_and_credentials() {
     ))
     .await
     .unwrap();
-    store.ensure_owner(&f.paths()).await.unwrap();
+    let bootstrapped = store.ensure_owner(&f.paths()).await.unwrap();
+    assert_eq!(bootstrapped.actor.id, seeded.owner.id);
+    assert!(
+        !bootstrapped.created,
+        "restore must not bootstrap a new owner over the persisted one"
+    );
+
+    // The seeded project survived the round trip.
+    let project_name: String = sqlx::query_scalar("SELECT name FROM projects WHERE id = ?1")
+        .bind(seeded.project.to_string())
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(project_name, "backup-test");
+
+    // Retrying the claim command replays the original response: no new
+    // claim row and no duplicate event.
+    let retry = store
+        .claim_task(
+            claim_ctx(&store, &seeded.owner, claim_key),
+            seeded.project,
+            seeded.task.id,
+            ClaimInput {
+                phase: ClaimPhase::Plan,
+                submission_id: None,
+                ttl_seconds: Some(600),
+            },
+            "portability-claim-hash",
+        )
+        .await
+        .unwrap();
+    let replayed = match retry {
+        Replay::Replayed(grant) => grant,
+        Replay::Fresh(_) => panic!("retry after restore must replay, not create a new claim"),
+    };
+    assert_eq!(replayed.claim.id, grant.claim.id);
+    let claims: i64 = sqlx::query_scalar("SELECT count(*) FROM claims")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(claims, 1, "replay must not add a duplicate claim");
+    let events_after: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(events_after, events_before, "replay must not add events");
     store.pool().close().await;
 
     // Recovery directory exists with the corrupted file.
@@ -420,9 +574,12 @@ async fn restore_rejects_duplicate_manifest_entries() {
     let backup = f.backup_dir();
     maintenance::backup(f.data_dir(), &backup).await.unwrap();
 
+    // Three entries with a repeated owner-token: a count-based check would
+    // pass this, only name-based duplicate detection rejects it.
     let manifest_path = backup.join("manifest.json");
     let mut manifest: BackupManifest =
         serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    manifest.files.retain(|entry| entry.name != "replay-key");
     let credential = manifest
         .files
         .iter()
@@ -447,6 +604,39 @@ async fn restore_rejects_duplicate_manifest_entries() {
         current_db, original_db,
         "live database must not be modified"
     );
+}
+
+#[tokio::test]
+async fn restore_rejects_manifest_mismatched_with_backup_contents() {
+    let f = fixture().await;
+    seed_data(&f).await;
+
+    let backup = f.backup_dir();
+    maintenance::backup(f.data_dir(), &backup).await.unwrap();
+
+    // Drop the owner-token entry while the file stays in the backup: a
+    // silent credential drop would bootstrap a new owner on next boot.
+    let manifest_path = backup.join("manifest.json");
+    let mut manifest: BackupManifest =
+        serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    manifest.files.retain(|entry| entry.name != "owner-token");
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+    let original_db = std::fs::read(f.data_dir().join("shepherd.db")).unwrap();
+    let original_token = std::fs::read_to_string(f.data_dir().join("owner-token")).unwrap();
+
+    let err = maintenance::restore(f.data_dir(), &backup)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, StorageError::InvalidManifest(ref msg) if msg.contains("owner-token")),
+        "expected InvalidManifest, got: {err}"
+    );
+
+    let current_db = std::fs::read(f.data_dir().join("shepherd.db")).unwrap();
+    assert_eq!(current_db, original_db);
+    let current_token = std::fs::read_to_string(f.data_dir().join("owner-token")).unwrap();
+    assert_eq!(current_token, original_token);
 }
 
 #[tokio::test]

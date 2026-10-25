@@ -15,3 +15,20 @@ Scope: bugs, security, performance. All findings are against code introduced by 
 Considered and accepted (no change): `conn.close().await.ok()` ignores close errors on read-only connections; `sync_dir` after the swap is best-effort; `output.exists()`/`create` race resolves to a plain create error; recovery rollback is best-effort by design; `fs::read` of manifest/credentials has no size cap (local offline tool, owner-controlled input); backup copies a symlinked credential source only if one exists inside the 0700 data dir, which the owner already controls. Performance: `VACUUM INTO` for a single-file snapshot and streaming SHA-256 with an 8 KB buffer are appropriate; hashing the staged copy adds one pass over the DB, negligible next to the copy itself.
 
 Verification: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace` (22 suites, including 14/14 in `v1_portability` and the boot tests) — all green from `core/` after the fixes.
+
+## 2026-10-25 round 2 — CodeRabbit findings on PR #98
+
+CodeRabbit posted 8 inline comments (6 against the pre-fix code, 2 against the first fix commit). Triage and disposition:
+
+| # | Finding | Already fixed by round 1? | Disposition |
+|---|---|---|---|
+| 1 | Backup does not sync the output directory or its parent before reporting success (power loss can lose the reported backup) | No | Fixed: `sync_dir(output)` and `sync_dir(parent)` after the manifest write, errors propagated |
+| 2 | Manifest must require exactly one `shepherd.db` entry and reject duplicates | Yes (round 1) | Kept |
+| 3 | Manifest credential entries must exist exactly when those files exist in the backup dir (silent credential drop/boot otherwise) | No | Fixed: `verify_manifest_shape` before checksums; regression test `restore_rejects_manifest_mismatched_with_backup_contents` |
+| 4 | Staged DB not fsynced; `sync_dir` errors discarded | Partly (fsync done in round 1; sync error propagation not) | Fixed: post-swap syncs of the recovery dir and data dir propagate via new `StorageError::PostSwapSync` with a message stating the live files are already replaced |
+| 5 | Staging dir leaks when recovery-dir creation fails; recovery name collides within one second | Partly (leak fixed in round 1; name resolution not) | Fixed: recovery name now carries a 4-byte random nonce suffix |
+| 6 | Successful-restore test did not prove persisted identity, project survival, or idempotent replay | No | Fixed: `restore_preserves_completed_state_and_credentials` now seeds a plan claim with a retained idempotency key, asserts `ensure_owner` reports `created: false` with the same actor id, the seeded project survives, and the claim retry replays the original response with no duplicate claim or event rows |
+| 7 | Round-1 duplicate detection used entry count, missing `[shepherd.db, owner-token, owner-token]` (duplicate with only three entries) | No (introduced in round 1) | Fixed: name-based `HashSet` detection; regression test reshaped to the three-entry case |
+| 8 | Rollback after a partially failed swap left already-installed staged files in place (mixed old DB + new credentials) | No | Fixed: installed files are tracked and removed before restoring the recovery copies |
+
+Verification round 2: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace` (exit 0; `v1_portability` 15/15) from `core/`.
