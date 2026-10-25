@@ -21,8 +21,9 @@ use shepherd_core::storage::Store;
 use tower_http::services::ServeDir;
 
 use crate::generated::server::router::{
-    dependencies_api_router, epics_api_router, goals_api_router, identity_api_router,
-    projects_api_router, system_api_router, task_types_api_router, tasks_api_router,
+    claims_api_router, dependencies_api_router, epics_api_router, goals_api_router,
+    identity_api_router, projects_api_router, sessions_api_router, system_api_router,
+    task_types_api_router, tasks_api_router, work_api_router,
 };
 pub use crate::middleware::{AuthConfig, REDACTED_HEADERS, redact_header};
 
@@ -83,6 +84,9 @@ pub fn router(state: AppState, ui_dir: impl AsRef<Path>) -> Router {
         .merge(epics_api_router(state.clone()))
         .merge(tasks_api_router(state.clone()))
         .merge(dependencies_api_router(state.clone()))
+        .merge(work_api_router(state.clone()))
+        .merge(claims_api_router(state.clone()))
+        .merge(sessions_api_router(state.clone()))
         .route("/api/v1/openapi.yaml", get(openapi_spec))
         // Unrouted API paths answer problem+json, never the static shell.
         .route("/api/{*rest}", any(handlers::api_not_found))

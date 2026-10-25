@@ -1,5 +1,7 @@
+pub(crate) mod content;
 pub(crate) mod errors;
 pub(crate) mod hierarchy;
+pub(crate) mod work;
 
 use serde::Serialize;
 use shepherd_core::commands::CommandContext;

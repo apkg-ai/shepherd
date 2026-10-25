@@ -134,3 +134,60 @@ impl TestRequest {
         (status, headers, json)
     }
 }
+
+pub struct Hierarchy {
+    pub project: String,
+    pub goal: String,
+    pub epic: String,
+    pub task: String,
+}
+
+/// Owner-created project -> goal -> epic -> one executable task.
+pub async fn seed_hierarchy(w: &World) -> Hierarchy {
+    let post = |path: String, body: Value| {
+        let req = w.owner(Method::POST, &path).idempotency().json(body);
+        async move {
+            let (status, _, body) = req.send(&w.app).await;
+            assert_eq!(status, StatusCode::CREATED, "{body}");
+            body
+        }
+    };
+    let project = post(
+        "/api/v1/projects".into(),
+        serde_json::json!({ "name": "P" }),
+    )
+    .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let goal = post(
+        format!("/api/v1/projects/{project}/goals"),
+        serde_json::json!({ "title": "G" }),
+    )
+    .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let epic = post(
+        format!("/api/v1/projects/{project}/epics"),
+        serde_json::json!({ "goal_id": goal, "title": "E" }),
+    )
+    .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let task = post(
+        format!("/api/v1/projects/{project}/tasks"),
+        serde_json::json!({ "epic_id": epic, "title": "T", "type_key": "code" }),
+    )
+    .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    Hierarchy {
+        project,
+        goal,
+        epic,
+        task,
+    }
+}

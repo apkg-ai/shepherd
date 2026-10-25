@@ -59,6 +59,14 @@ operations = [
     "listDependencies",
     "createDependency",
     "deleteDependency",
+    "listWork",
+    "getTaskContext",
+    "claimTask",
+    "listClaims",
+    "renewClaim",
+    "releaseClaim",
+    "reportClaim",
+    "listTaskSessions",
 ]
 prune_models = true
 
