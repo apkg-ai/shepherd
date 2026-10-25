@@ -43,20 +43,22 @@ impl ClaimsApi for AppState {
         let outcome = async {
             // A replayed claim returns the original lease even if expired
             // (plan/07); the context is assembled fresh either way.
-            let grant = store
+            let replay = store
                 .claim_task(ctx, project, task, work::core_claim_input(body), &hash)
-                .await?
-                .into_inner();
+                .await?;
+            let fresh = !replay.is_replay();
+            let grant = replay.into_inner();
             match context_body(store, project, task, &principal).await {
                 Ok(context) => Ok(wire::ClaimGrant {
                     claim: work::claim(grant.claim),
                     lease_token: grant.lease_token,
                     context,
                 }),
-                // A grant whose context cannot be assembled must not keep the
-                // lease: release it so the task stays claimable, then report
-                // the context failure truthfully.
-                Err(err) => {
+                // A fresh grant whose context cannot be assembled must not
+                // keep the lease: release it so the task stays claimable, then
+                // report the context failure truthfully. A replayed grant's
+                // lease belongs to its original holder and is never touched.
+                Err(err) if fresh => {
                     let release = command_context(
                         &principal,
                         uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
@@ -82,6 +84,7 @@ impl ClaimsApi for AppState {
                         .await;
                     Err(err)
                 }
+                Err(err) => Err(err),
             }
         }
         .await;

@@ -477,3 +477,113 @@ async fn corrupt_session_phase_is_integrity_failure_not_panic() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_eq!(body["code"], "integrity_failure");
 }
+
+#[tokio::test]
+async fn replayed_claim_with_failing_context_keeps_the_original_lease() {
+    let w = world().await;
+    let h = seed_hierarchy(&w).await;
+    // A planning task with a small plan: the first claim succeeds normally.
+    let (_, _, planned) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/tasks", h.project),
+        )
+        .idempotency()
+        .json(json!({
+            "epic_id": h.epic,
+            "title": "Planned",
+            "type_key": "code",
+            "planning_required": true,
+        }))
+        .send(&w.app)
+        .await;
+    let task = planned["id"].as_str().unwrap().to_string();
+    let (_, _, document) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/documents", h.project),
+        )
+        .idempotency()
+        .json(json!({
+            "owner_kind": "task",
+            "owner_id": task,
+            "kind": "plan",
+            "title": "Plan",
+            "body": "small plan",
+            "links": [],
+        }))
+        .send(&w.app)
+        .await;
+    let document_id = document["id"].as_str().unwrap().to_string();
+
+    let key = fresh_key();
+    let (status, _, grant) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/tasks/{task}/claims", h.project),
+        )
+        .header("idempotency-key", &key)
+        .if_match(planned["revision"].as_i64().unwrap())
+        .json(json!({ "phase": "plan" }))
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{grant}");
+
+    // Selecting an oversized plan afterwards makes context assembly fail.
+    let (_, _, big) = w
+        .owner(
+            Method::POST,
+            &format!(
+                "/api/v1/projects/{}/documents/{document_id}/revisions",
+                h.project
+            ),
+        )
+        .idempotency()
+        .if_match(1)
+        .json(json!({ "body": "\u{1F980}".repeat(65_536), "links": [] }))
+        .send(&w.app)
+        .await;
+    let (_, _, current) = w
+        .owner(
+            Method::GET,
+            &format!("/api/v1/projects/{}/tasks/{task}", h.project),
+        )
+        .send(&w.app)
+        .await;
+    let (status, _, selected) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/tasks/{task}/plan", h.project),
+        )
+        .idempotency()
+        .if_match(current["revision"].as_i64().unwrap())
+        .json(json!({ "document_revision_id": big["id"] }))
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{selected}");
+
+    // The replay now fails context assembly, but the original lease must
+    // survive: it belongs to the holder, not to this retry.
+    let (status, _, body) = w
+        .owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/tasks/{task}/claims", h.project),
+        )
+        .header("idempotency-key", &key)
+        .if_match(planned["revision"].as_i64().unwrap())
+        .json(json!({ "phase": "plan" }))
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "context_too_large");
+
+    let (_, _, active) = w
+        .owner(
+            Method::GET,
+            &format!("/api/v1/projects/{}/claims?active=true", h.project),
+        )
+        .send(&w.app)
+        .await;
+    assert_eq!(active["items"][0]["id"], grant["claim"]["id"], "{active}");
+    assert_eq!(active["items"][0]["status"], "active");
+}
