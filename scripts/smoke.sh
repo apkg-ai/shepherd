@@ -23,7 +23,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"$ROOT/core/target/debug/shepherd-server" --port "$PORT" --ui-dir "$ROOT/ui/dist" --data-dir "$DATA_DIR" &
+"$ROOT/core/target/debug/shepherd-server" --data-dir "$DATA_DIR" serve --port "$PORT" --ui-dir "$ROOT/ui/dist" &
 SERVER_PID=$!
 
 booted=false

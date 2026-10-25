@@ -1,4 +1,5 @@
 mod connect;
+pub mod maintenance;
 #[cfg(any(test, feature = "test-support"))]
 pub mod rows;
 #[cfg(not(any(test, feature = "test-support")))]
@@ -88,6 +89,14 @@ pub enum StorageError {
     CredentialFile(String),
     #[error("another daemon holds the lock at {path}")]
     DaemonLocked { path: PathBuf },
+    #[error("checksum mismatch for {file}: expected {expected}, got {actual}")]
+    ChecksumMismatch {
+        file: String,
+        expected: String,
+        actual: String,
+    },
+    #[error("invalid backup manifest: {0}")]
+    InvalidManifest(String),
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
     #[error(transparent)]

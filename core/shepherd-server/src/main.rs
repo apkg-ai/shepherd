@@ -3,35 +3,58 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use shepherd_core::commands::IdentityPaths;
 use shepherd_core::model::SystemClock;
-use shepherd_core::storage::{AesGcmCodec, DaemonLock, FileReplayKeyProvider, StoreOptions, open};
+use shepherd_core::storage::{
+    AesGcmCodec, DaemonLock, FileReplayKeyProvider, StoreOptions, maintenance, open,
+};
 use shepherd_server::{AppState, AuthConfig};
 
 /// Local-first hub for agent-driven work.
 #[derive(Parser, Debug)]
 #[command(name = "shepherd-server", version)]
-struct Config {
-    /// Port to bind on 127.0.0.1.
-    #[arg(long, env = "SHEPHERD_PORT", default_value_t = 7437)]
-    port: u16,
-
-    /// Directory of built UI assets served at `/`.
-    #[arg(long, env = "SHEPHERD_UI_DIR", default_value = "ui/dist")]
-    ui_dir: PathBuf,
-
+struct Cli {
     /// Data directory for the database and credential files (plan/13).
-    #[arg(long, env = "SHEPHERD_DATA_DIR")]
+    #[arg(long, env = "SHEPHERD_DATA_DIR", global = true)]
     data_dir: Option<PathBuf>,
 
-    /// Allow the Vite dev origin http://localhost:5173.
-    #[arg(long)]
-    dev: bool,
+    #[command(subcommand)]
+    command: Command,
+}
 
-    /// Rotate the owner credential and rewrite <data-dir>/owner-token.
-    #[arg(long)]
-    reissue_owner_token: bool,
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Start the HTTP daemon.
+    Serve {
+        /// Port to bind on 127.0.0.1.
+        #[arg(long, env = "SHEPHERD_PORT", default_value_t = 7437)]
+        port: u16,
+
+        /// Directory of built UI assets served at `/`.
+        #[arg(long, env = "SHEPHERD_UI_DIR", default_value = "ui/dist")]
+        ui_dir: PathBuf,
+
+        /// Allow the Vite dev origin http://localhost:5173.
+        #[arg(long)]
+        dev: bool,
+
+        /// Rotate the owner credential and rewrite <data-dir>/owner-token.
+        #[arg(long)]
+        reissue_owner_token: bool,
+    },
+    /// Create an offline backup of the data directory.
+    Backup {
+        /// Directory to write the backup into (must not already exist).
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Restore from an offline backup.
+    Restore {
+        /// Directory containing the backup to restore from.
+        #[arg(long)]
+        from: PathBuf,
+    },
 }
 
 fn default_data_dir() -> anyhow::Result<PathBuf> {
@@ -47,11 +70,8 @@ fn default_data_dir() -> anyhow::Result<PathBuf> {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let config = Config::parse();
-
-    let data_dir = match &config.data_dir {
+fn resolve_data_dir(explicit: &Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    let data_dir = match explicit {
         Some(dir) => dir.clone(),
         None => default_data_dir()?,
     };
@@ -62,6 +82,33 @@ async fn main() -> anyhow::Result<()> {
         std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700))
             .with_context(|| format!("failed to restrict data dir {}", data_dir.display()))?;
     }
+    Ok(data_dir)
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let data_dir = resolve_data_dir(&cli.data_dir)?;
+
+    match cli.command {
+        Command::Serve {
+            port,
+            ui_dir,
+            dev,
+            reissue_owner_token,
+        } => run_serve(data_dir, port, ui_dir, dev, reissue_owner_token).await,
+        Command::Backup { output } => run_backup(data_dir, output).await,
+        Command::Restore { from } => run_restore(data_dir, from).await,
+    }
+}
+
+async fn run_serve(
+    data_dir: PathBuf,
+    port: u16,
+    ui_dir: PathBuf,
+    dev: bool,
+    reissue_owner_token: bool,
+) -> anyhow::Result<()> {
     let paths = IdentityPaths::new(&data_dir);
 
     // One daemon per data directory (plan/05 advisory lock).
@@ -87,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
     let bootstrapped = match provider {
         // Rotation needs the codec's key; silently ignoring the flag here would
         // let the owner believe a compromised credential was replaced (plan/12).
-        None if config.reissue_owner_token => {
+        None if reissue_owner_token => {
             return Err(anyhow::anyhow!(
                 "cannot reissue the owner token: the replay key {} is missing; \
                  restore it from backup first",
@@ -109,7 +156,7 @@ async fn main() -> anyhow::Result<()> {
             .await
             .with_context(|| format!("failed to open {}", db_path.display()))?;
             let store = Arc::new(store);
-            if config.reissue_owner_token {
+            if reissue_owner_token {
                 store
                     .reissue_owner_token(&paths)
                     .await
@@ -126,13 +173,12 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, config.port));
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {addr}"))?;
     let local_addr = listener.local_addr().context("failed to read bound addr")?;
-    // The Host/Origin allowlist uses the actual bound port (`--port 0` picks one).
-    let auth = AuthConfig::new(local_addr.port(), config.dev);
+    let auth = AuthConfig::new(local_addr.port(), dev);
     let state = match bootstrapped {
         Bootstrapped::Normal(store) => AppState::new(store, auth),
         Bootstrapped::Diagnostic(reason) => AppState::diagnostic(reason, auth),
@@ -141,9 +187,28 @@ async fn main() -> anyhow::Result<()> {
     println!("shepherd-server listening on http://{local_addr}");
     println!("data dir: {}", data_dir.display());
     println!("database: {}", db_path.display());
-    println!("ui dir: {}", config.ui_dir.display());
-    axum::serve(listener, shepherd_server::router(state, &config.ui_dir))
+    println!("ui dir: {}", ui_dir.display());
+    axum::serve(listener, shepherd_server::router(state, &ui_dir))
         .await
         .context("server error")?;
+    Ok(())
+}
+
+async fn run_backup(data_dir: PathBuf, output: PathBuf) -> anyhow::Result<()> {
+    maintenance::backup(&data_dir, &output)
+        .await
+        .with_context(|| format!("backup to {} failed", output.display()))?;
+    println!("backup created at {}", output.display());
+    Ok(())
+}
+
+async fn run_restore(data_dir: PathBuf, from: PathBuf) -> anyhow::Result<()> {
+    let recovery = maintenance::restore(&data_dir, &from)
+        .await
+        .with_context(|| format!("restore from {} failed", from.display()))?;
+    println!(
+        "restore complete; previous data preserved at {}",
+        data_dir.join(&recovery).display()
+    );
     Ok(())
 }

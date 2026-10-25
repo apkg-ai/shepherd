@@ -32,9 +32,10 @@ echo "playwright-e2e: building server..."
 (cd "$ROOT/core" && cargo build -q -p shepherd-server)
 
 "$ROOT/core/target/debug/shepherd-server" \
+  --data-dir "$DATA_DIR" \
+  serve \
   --port "$PORT" \
-  --ui-dir "$ROOT/ui/dist" \
-  --data-dir "$DATA_DIR" &
+  --ui-dir "$ROOT/ui/dist" &
 SERVER_PID=$!
 
 booted=false
