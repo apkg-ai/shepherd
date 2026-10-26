@@ -325,3 +325,57 @@ async fn epic_lifecycle_transitions_round_trip() {
     assert_eq!(body["status"], "cancelled");
     assert_eq!(body["eligibility"]["can_execute"], false);
 }
+
+// Task-family replays serve the fresh eligibility view over the sealed id
+// (the wire Task body carries caller-dependent fields the sealed core value
+// cannot), so a retry after state moved on still names the same row.
+#[tokio::test]
+async fn create_task_retry_replays_the_same_row_across_state_changes() {
+    let s = seeded().await;
+    let key = uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+    let path = format!("/api/v1/projects/{}/tasks", s.project);
+    let body = json!({ "epic_id": s.epic, "title": "C", "type_key": "code" });
+
+    let (status, _, first) =
+        s.w.owner(Method::POST, &path)
+            .header("idempotency-key", &key)
+            .json(body.clone())
+            .send(&s.w.app)
+            .await;
+    assert_eq!(status, StatusCode::CREATED, "{first}");
+    let task = first["id"].as_str().unwrap().to_string();
+
+    // State moves on: the task is blocked before the caller retries.
+    let (status, _, blocked) =
+        s.w.owner(
+            Method::POST,
+            &format!("/api/v1/projects/{}/tasks/{task}/block", s.project),
+        )
+        .idempotency()
+        .if_match(first["revision"].as_i64().unwrap())
+        .json(json!({ "reason": "paused" }))
+        .send(&s.w.app)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{blocked}");
+
+    let (status, _, retry) =
+        s.w.owner(Method::POST, &path)
+            .header("idempotency-key", &key)
+            .json(body)
+            .send(&s.w.app)
+            .await;
+    assert_eq!(status, StatusCode::CREATED, "{retry}");
+    assert_eq!(retry["id"], json!(task), "the retry names the same row");
+    assert_eq!(retry["blocks"].as_array().unwrap().len(), 1, "fresh view");
+    assert_eq!(retry["eligibility"]["can_execute"], false);
+
+    let (status, _, listed) =
+        s.w.owner(
+            Method::GET,
+            &format!("/api/v1/projects/{}/tasks?limit=100", s.project),
+        )
+        .send(&s.w.app)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["items"].as_array().unwrap().len(), 3, "no duplicate");
+}
