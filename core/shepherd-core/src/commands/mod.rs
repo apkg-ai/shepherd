@@ -15,6 +15,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, SqliteConnection, Transaction};
 use uuid::Uuid;
 
@@ -28,11 +29,15 @@ use crate::queries::history::high_water;
 use crate::storage::rows::format_ts;
 use crate::storage::{IdempotencyAad, StorageError, Store, rows};
 
+#[derive(Debug, Clone)]
 pub struct CommandContext {
     pub actor: Actor,
     pub command_id: CommandId,
     /// Honored by idempotent_transaction; plain domain_transaction commands are not replayable.
     pub idempotency_key: Uuid,
+    /// Canonical replay hash of the wire request (plan/05 step 2); required by
+    /// idempotent commands, absent on non-replayable ones.
+    pub request_hash: Option<String>,
     pub expected_revision: Option<i64>,
     pub now: DateTime<Utc>,
 }
@@ -45,13 +50,14 @@ impl CommandContext {
             actor,
             command_id,
             idempotency_key: Uuid::nil(),
+            request_hash: None,
             expected_revision: None,
             now,
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CommandResult<T> {
     pub value: T,
     pub events: Vec<EventId>,
@@ -88,9 +94,7 @@ impl Store {
         let mut tx = self.begin_command().await?;
         match command(&mut tx).await {
             Ok(value) => {
-                // Subscribers re-read persisted history, so a failed high-water
-                // read must still notify (plan/05 step 7).
-                let high = high_water(&mut tx).await.unwrap_or(0);
+                let high = high_water(&mut tx).await?;
                 tx.commit().await.map_err(StorageError::from)?;
                 self.notify_events(high);
                 Ok(value)
@@ -121,7 +125,7 @@ impl Store {
             .await
         {
             Ok(value) => {
-                let high = high_water(&mut tx).await.unwrap_or(0);
+                let high = high_water(&mut tx).await?;
                 tx.commit().await.map_err(StorageError::from)?;
                 self.notify_events(high);
                 Ok(value)
@@ -131,6 +135,33 @@ impl Store {
                 Err(err)
             }
         }
+    }
+
+    /// Same transactional semantics as idempotent_transaction, for commands
+    /// whose replayable payload is the full CommandResult (the hierarchy
+    /// family, plan/07: the Idempotency-Key they already require is honored).
+    /// Replays return the original response sealed at first commit.
+    pub(crate) async fn idempotent_command<T, F>(
+        &self,
+        ctx: &CommandContext,
+        response_status: i64,
+        command: F,
+    ) -> Result<CommandResult<T>, DomainError>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+        F: for<'t> FnOnce(
+            &'t mut Transaction<'static, Sqlite>,
+        ) -> DomainTxFuture<'t, CommandResult<T>>,
+    {
+        let request_hash = ctx.request_hash.as_deref().ok_or_else(|| {
+            DomainError::Storage(StorageError::Corrupt(
+                "idempotent command requires a request hash".into(),
+            ))
+        })?;
+        Ok(self
+            .idempotent_transaction(ctx, request_hash, response_status, command)
+            .await?
+            .into_inner())
     }
 
     async fn idempotent_body<T, F>(
@@ -762,7 +793,8 @@ mod db_tests {
         CommandContext {
             actor: actor.clone(),
             command_id: CommandId::generate(clock.now()),
-            idempotency_key: Uuid::nil(),
+            idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            request_hash: Some("test-request".into()),
             expected_revision: None,
             now: clock.now(),
         }

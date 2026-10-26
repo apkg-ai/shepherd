@@ -5,7 +5,7 @@ use crate::convert::errors::{
     command_problem, domain_problem, parse_idempotency_key, parse_path_uuid, parse_revision,
     require_principal, require_store, revision_problem,
 };
-use crate::convert::{command_context, hierarchy, list_params, page};
+use crate::convert::{command_context, hierarchy, list_params, page, request_hash};
 use crate::generated::server::api::ProjectsApi;
 use crate::generated::server::errors::{
     ArchiveProjectResponse, CreateProjectResponse, GetProjectResponse, ListProjectsResponse,
@@ -45,7 +45,8 @@ impl ProjectsApi for AppState {
         let store = require_store!(self, CreateProjectResponse);
         let principal = require_principal!(CreateProjectResponse);
         let key = parse_idempotency_key!(CreateProjectResponse, idempotency_key);
-        let ctx = command_context(&principal, key, None, store);
+        let hash = request_hash("POST", "/api/v1/projects", &body);
+        let ctx = command_context(&principal, key, None, Some(hash), store);
         match store
             .create_project(ctx, hierarchy::core_project_create(body))
             .await
@@ -81,7 +82,8 @@ impl ProjectsApi for AppState {
         let id = parse_path_uuid!(UpdateProjectResponse, project_id, "project_id");
         let revision = parse_revision!(UpdateProjectResponse, if_match);
         let key = parse_idempotency_key!(UpdateProjectResponse, idempotency_key);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash("PATCH", &format!("/api/v1/projects/{id}"), &body);
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         match store
             .update_project(
                 ctx,
@@ -108,7 +110,8 @@ impl ProjectsApi for AppState {
         let id = parse_path_uuid!(ArchiveProjectResponse, project_id, "project_id");
         let revision = parse_revision!(ArchiveProjectResponse, if_match);
         let key = parse_idempotency_key!(ArchiveProjectResponse, idempotency_key);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash("POST", &format!("/api/v1/projects/{id}/archive"), &body);
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         match store
             .archive_project(ctx, ProjectId::from_uuid(id), body.reason)
             .await

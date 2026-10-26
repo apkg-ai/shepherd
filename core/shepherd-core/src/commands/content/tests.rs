@@ -26,6 +26,7 @@ fn ctx(actor: &Actor, clock: &TestClock, revision: Option<i64>) -> CommandContex
         actor: actor.clone(),
         command_id: CommandId::generate(clock.now()),
         idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+        request_hash: Some("test-request".into()),
         expected_revision: revision,
         now: clock.now(),
     }

@@ -5,7 +5,7 @@ use crate::convert::errors::{
     command_problem, domain_problem, parse_idempotency_key, parse_path_uuid, parse_revision,
     require_principal, require_store, revision_problem,
 };
-use crate::convert::{command_context, hierarchy, list_params, page};
+use crate::convert::{command_context, hierarchy, list_params, page, request_hash};
 use crate::generated::server::api::TaskTypesApi;
 use crate::generated::server::errors::{
     CreateTaskTypeResponse, ListTaskTypesResponse, UpdateTaskTypeResponse,
@@ -50,7 +50,12 @@ impl TaskTypesApi for AppState {
         let principal = require_principal!(CreateTaskTypeResponse);
         let project = parse_path_uuid!(CreateTaskTypeResponse, project_id, "project_id");
         let key = parse_idempotency_key!(CreateTaskTypeResponse, idempotency_key);
-        let ctx = command_context(&principal, key, None, store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/task-types"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, None, Some(hash), store);
         match store
             .create_task_type(
                 ctx,
@@ -79,7 +84,12 @@ impl TaskTypesApi for AppState {
         let task_type = parse_path_uuid!(UpdateTaskTypeResponse, type_id, "type_id");
         let revision = parse_revision!(UpdateTaskTypeResponse, if_match);
         let key = parse_idempotency_key!(UpdateTaskTypeResponse, idempotency_key);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "PATCH",
+            &format!("/api/v1/projects/{project}/task-types/{task_type}"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         match store
             .update_task_type(
                 ctx,

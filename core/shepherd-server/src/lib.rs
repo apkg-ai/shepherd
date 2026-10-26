@@ -61,11 +61,7 @@ impl AppState {
     fn store(&self) -> Result<&Store, DomainError> {
         match self.service.as_ref() {
             ServiceState::Normal(store) => Ok(store),
-            ServiceState::Diagnostic { .. } => Err(DomainError::Storage(
-                shepherd_core::storage::StorageError::Corrupt(
-                    "service is in diagnostic-only mode".into(),
-                ),
-            )),
+            ServiceState::Diagnostic { .. } => Err(diagnostic_unavailable()),
         }
     }
 
@@ -73,9 +69,15 @@ impl AppState {
     fn store_owned(&self) -> Result<Arc<Store>, DomainError> {
         match self.service.as_ref() {
             ServiceState::Normal(store) => Ok(Arc::clone(store)),
-            ServiceState::Diagnostic { .. } => self.store().map(|_| unreachable!()),
+            ServiceState::Diagnostic { .. } => Err(diagnostic_unavailable()),
         }
     }
+}
+
+fn diagnostic_unavailable() -> DomainError {
+    DomainError::Storage(shepherd_core::storage::StorageError::Corrupt(
+        "service is in diagnostic-only mode".into(),
+    ))
 }
 
 pub(crate) const OPENAPI_SPEC: &str = include_str!("../../../openapi/shepherd.yaml");

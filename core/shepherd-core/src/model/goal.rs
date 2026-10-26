@@ -2,18 +2,25 @@ use std::fmt;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Counts, LifecycleRecord, ProjectId, Revision, typed_uuid};
+use super::{Counts, LifecycleRecord, ProjectId, Revision, typed_id_serde, typed_uuid};
 
 typed_uuid!(GoalId);
+typed_id_serde!(pub(super) serde_goal_id, GoalId);
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Goal {
+    #[serde(with = "serde_goal_id")]
     pub id: GoalId,
+    #[serde(with = "super::content::serde_revision")]
     pub revision: Revision,
+    #[serde(with = "super::claim::serde_datetime")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "super::claim::serde_datetime")]
     pub updated_at: DateTime<Utc>,
+    #[serde(with = "super::content::serde_project_id")]
     pub project_id: ProjectId,
     pub title: String,
     pub description: String,

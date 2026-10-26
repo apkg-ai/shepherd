@@ -968,7 +968,8 @@ mod integration_tests {
         CommandContext {
             actor: f.owner.clone(),
             command_id: CommandId::generate(f.clock.now()),
-            idempotency_key: Uuid::nil(),
+            idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            request_hash: Some("test-request".into()),
             expected_revision: None,
             now: f.clock.now(),
         }

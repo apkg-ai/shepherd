@@ -39,7 +39,7 @@ impl ClaimsApi for AppState {
             &format!("/api/v1/projects/{project}/tasks/{task}/claims"),
             &body,
         );
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let ctx = command_context(&principal, key, Some(revision), None, store);
         let outcome = async {
             // A replayed claim returns the original lease even if expired
             // (plan/07); the context is assembled fresh either way.
@@ -62,6 +62,7 @@ impl ClaimsApi for AppState {
                     let release = command_context(
                         &principal,
                         uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+                        None,
                         None,
                         store,
                     );
@@ -155,7 +156,7 @@ impl ClaimsApi for AppState {
             &format!("/api/v1/projects/{project}/claims/{claim}/renew"),
             &body,
         );
-        let ctx = command_context(&principal, key, None, store);
+        let ctx = command_context(&principal, key, None, None, store);
         match store
             .renew_claim(
                 ctx,
@@ -192,7 +193,7 @@ impl ClaimsApi for AppState {
             &format!("/api/v1/projects/{project}/claims/{claim}/release"),
             &serde_json::json!({}),
         );
-        let ctx = command_context(&principal, key, None, store);
+        let ctx = command_context(&principal, key, None, None, store);
         match store
             .release_claim(ctx, project, claim, &x_lease_token, &hash)
             .await

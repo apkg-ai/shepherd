@@ -8,7 +8,7 @@ use crate::convert::errors::{
     command_problem, domain_problem, parse_idempotency_key, parse_path_uuid, parse_revision,
     require_principal, require_store, revision_problem,
 };
-use crate::convert::{command_context, hierarchy, list_params};
+use crate::convert::{command_context, hierarchy, list_params, request_hash};
 use crate::generated::server::api::TasksApi;
 use crate::generated::server::errors::{
     AcceptTaskResponse, ArchiveTaskResponse, BlockTaskResponse, CancelTaskResponse,
@@ -96,7 +96,8 @@ impl TasksApi for AppState {
         let project = parse_path_uuid!(CreateTaskResponse, project_id, "project_id");
         let project = ProjectId::from_uuid(project);
         let key = parse_idempotency_key!(CreateTaskResponse, idempotency_key);
-        let ctx = command_context(&principal, key, None, store);
+        let hash = request_hash("POST", &format!("/api/v1/projects/{project}/tasks"), &body);
+        let ctx = command_context(&principal, key, None, Some(hash), store);
         let (epic, input) = hierarchy::core_task_create(body);
         let outcome = async {
             let result = store.create_task(ctx, project, epic, input).await?;
@@ -146,7 +147,12 @@ impl TasksApi for AppState {
         let revision = parse_revision!(UpdateTaskResponse, if_match);
         let key = parse_idempotency_key!(UpdateTaskResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "PATCH",
+            &format!("/api/v1/projects/{project}/tasks/{task}"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .update_task(
@@ -181,7 +187,12 @@ impl TasksApi for AppState {
         let revision = parse_revision!(ArchiveTaskResponse, if_match);
         let key = parse_idempotency_key!(ArchiveTaskResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/tasks/{task}/archive"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .archive_task(ctx, project, TaskId::from_uuid(task), body.reason)
@@ -211,7 +222,12 @@ impl TasksApi for AppState {
         let revision = parse_revision!(AcceptTaskResponse, if_match);
         let key = parse_idempotency_key!(AcceptTaskResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/tasks/{task}/accept"),
+            &serde_json::json!({}),
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .accept_task(ctx, project, TaskId::from_uuid(task))
@@ -241,7 +257,12 @@ impl TasksApi for AppState {
         let revision = parse_revision!(BlockTaskResponse, if_match);
         let key = parse_idempotency_key!(BlockTaskResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/tasks/{task}/block"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .block_task(ctx, project, TaskId::from_uuid(task), body.reason)
@@ -271,7 +292,12 @@ impl TasksApi for AppState {
         let revision = parse_revision!(UnblockTaskResponse, if_match);
         let key = parse_idempotency_key!(UnblockTaskResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/tasks/{task}/unblock"),
+            &serde_json::json!({}),
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .unblock_task(ctx, project, TaskId::from_uuid(task))
@@ -301,7 +327,12 @@ impl TasksApi for AppState {
         let revision = parse_revision!(CancelTaskResponse, if_match);
         let key = parse_idempotency_key!(CancelTaskResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/tasks/{task}/cancel"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .cancel_task(ctx, project, TaskId::from_uuid(task), body.reason)
@@ -331,7 +362,12 @@ impl TasksApi for AppState {
         let revision = parse_revision!(WaiveTaskResponse, if_match);
         let key = parse_idempotency_key!(WaiveTaskResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/tasks/{task}/waive"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .waive_task(ctx, project, TaskId::from_uuid(task), body.reason)

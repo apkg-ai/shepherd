@@ -219,9 +219,8 @@ async fn emit_replay(
     loop {
         match store.replay_events(project, *cursor).await {
             Ok(ReplayOutcome::Events(events)) => {
-                if events.is_empty() {
-                    return true;
-                }
+                // A short page is the final one; no empty second query.
+                let exhausted = events.len() < shepherd_core::queries::REPLAY_MAX_EVENTS as usize;
                 for event in events {
                     *cursor = event.id;
                     let body = work::event(event);
@@ -232,6 +231,9 @@ async fn emit_replay(
                     if tx.send(Ok(frame)).await.is_err() {
                         return false;
                     }
+                }
+                if exhausted {
+                    return true;
                 }
             }
             Ok(ReplayOutcome::ResyncRequired {

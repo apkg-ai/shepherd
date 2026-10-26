@@ -86,7 +86,7 @@ impl DocumentsApi for AppState {
             &format!("/api/v1/projects/{project}/documents"),
             &body,
         );
-        let ctx = command_context(&principal, key, None, store);
+        let ctx = command_context(&principal, key, None, None, store);
         match store
             .create_document(ctx, project, content::core_document_create(body), &hash)
             .await
@@ -164,7 +164,7 @@ impl DocumentsApi for AppState {
             &format!("/api/v1/projects/{project}/documents/{document}/revisions"),
             &body,
         );
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let ctx = command_context(&principal, key, Some(revision), None, store);
         match store
             .create_document_revision(
                 ctx,
@@ -223,7 +223,12 @@ impl DocumentsApi for AppState {
         let revision = parse_revision!(SelectTaskPlanResponse, if_match);
         let key = parse_idempotency_key!(SelectTaskPlanResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/tasks/{task}/plan"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .select_task_plan(

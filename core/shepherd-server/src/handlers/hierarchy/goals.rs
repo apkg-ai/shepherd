@@ -5,7 +5,7 @@ use crate::convert::errors::{
     command_problem, domain_problem, parse_idempotency_key, parse_path_uuid, parse_revision,
     require_principal, require_store, revision_problem,
 };
-use crate::convert::{command_context, hierarchy, list_params, page};
+use crate::convert::{command_context, hierarchy, list_params, page, request_hash};
 use crate::generated::server::api::GoalsApi;
 use crate::generated::server::errors::{
     ArchiveGoalResponse, CreateGoalResponse, GetGoalGraphResponse, GetGoalResponse,
@@ -52,7 +52,8 @@ impl GoalsApi for AppState {
         let principal = require_principal!(CreateGoalResponse);
         let project = parse_path_uuid!(CreateGoalResponse, project_id, "project_id");
         let key = parse_idempotency_key!(CreateGoalResponse, idempotency_key);
-        let ctx = command_context(&principal, key, None, store);
+        let hash = request_hash("POST", &format!("/api/v1/projects/{project}/goals"), &body);
+        let ctx = command_context(&principal, key, None, Some(hash), store);
         match store
             .create_goal(
                 ctx,
@@ -98,7 +99,12 @@ impl GoalsApi for AppState {
         let goal = parse_path_uuid!(UpdateGoalResponse, goal_id, "goal_id");
         let revision = parse_revision!(UpdateGoalResponse, if_match);
         let key = parse_idempotency_key!(UpdateGoalResponse, idempotency_key);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "PATCH",
+            &format!("/api/v1/projects/{project}/goals/{goal}"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         match store
             .update_goal(
                 ctx,
@@ -128,7 +134,12 @@ impl GoalsApi for AppState {
         let goal = parse_path_uuid!(ArchiveGoalResponse, goal_id, "goal_id");
         let revision = parse_revision!(ArchiveGoalResponse, if_match);
         let key = parse_idempotency_key!(ArchiveGoalResponse, idempotency_key);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/goals/{goal}/archive"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         match store
             .archive_goal(
                 ctx,

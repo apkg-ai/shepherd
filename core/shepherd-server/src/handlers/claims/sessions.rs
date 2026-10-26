@@ -32,7 +32,7 @@ impl SessionsApi for AppState {
             &format!("/api/v1/projects/{project}/claims/{claim}/report"),
             &body,
         );
-        let ctx = command_context(&principal, key, None, store);
+        let ctx = command_context(&principal, key, None, None, store);
         let outcome = async {
             let input = work::core_report_input(body)?;
             let session = store

@@ -9,15 +9,16 @@ impl Store {
         task_id: TaskId,
         input: SelectPlanInput,
     ) -> Result<CommandResult<Task>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let now_text = format_ts(&ctx.now);
+                let now_text = format_ts(&closure_ctx.now);
 
                 // Authenticate before route membership (plan/04 precedence).
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope = task_scope(tx, &project, &task_id).await?;
                 require_capability(&actor, Capability::AuthorDocuments)?;
-                require_revision(ctx.expected_revision, scope.task.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.task.status.is_terminal() || scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
@@ -65,7 +66,7 @@ impl Store {
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "selectTaskPlan",
                     "",
                     vec![PendingEvent::task(task_id, updated.revision, scope.epic.id)],

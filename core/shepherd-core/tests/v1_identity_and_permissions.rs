@@ -31,6 +31,7 @@ impl Fixture {
             actor: actor.clone(),
             command_id: CommandId::generate(now),
             idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            request_hash: Some("test-request".into()),
             expected_revision: None,
             now,
         }

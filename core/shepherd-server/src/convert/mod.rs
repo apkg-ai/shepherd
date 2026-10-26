@@ -33,6 +33,7 @@ pub(crate) fn command_context(
     actor: &CoreActor,
     idempotency_key: Uuid,
     expected_revision: Option<i64>,
+    request_hash: Option<String>,
     store: &Store,
 ) -> CommandContext {
     let now = store.clock().now();
@@ -40,6 +41,7 @@ pub(crate) fn command_context(
         actor: actor.clone(),
         command_id: CommandId::generate(now),
         idempotency_key,
+        request_hash,
         expected_revision,
         now,
     }

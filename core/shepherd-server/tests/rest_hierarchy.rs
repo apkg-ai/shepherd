@@ -347,3 +347,47 @@ async fn oversized_and_wrong_content_type_bodies_are_413_and_415() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["code"], "malformed_request");
 }
+
+// The hierarchy family honors the Idempotency-Key the gate requires (plan/07):
+// a retry replays the sealed 201 body, a reused key with a different body is a
+// 409 idempotency_conflict, and no duplicate row is ever written.
+#[tokio::test]
+async fn create_goal_retries_replay_and_reused_keys_conflict() {
+    let w = world().await;
+    let project = create_project(&w, "P").await;
+    let key = uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+    let path = format!("/api/v1/projects/{project}/goals");
+
+    let first = w
+        .owner(Method::POST, &path)
+        .header("idempotency-key", &key)
+        .json(json!({ "title": "G" }))
+        .send(&w.app)
+        .await;
+    assert_eq!(first.0, StatusCode::CREATED, "{}", first.2);
+
+    let retry = w
+        .owner(Method::POST, &path)
+        .header("idempotency-key", &key)
+        .json(json!({ "title": "G" }))
+        .send(&w.app)
+        .await;
+    assert_eq!(retry.0, StatusCode::CREATED, "{}", retry.2);
+    assert_eq!(retry.2, first.2, "the retry replays the sealed response");
+
+    let conflict = w
+        .owner(Method::POST, &path)
+        .header("idempotency-key", &key)
+        .json(json!({ "title": "Other" }))
+        .send(&w.app)
+        .await;
+    assert_eq!(conflict.0, StatusCode::CONFLICT, "{}", conflict.2);
+    assert_eq!(conflict.2["code"], "idempotency_conflict");
+
+    let (status, _, listed) = w
+        .owner(Method::GET, &format!("/api/v1/projects/{project}/goals"))
+        .send(&w.app)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["items"].as_array().unwrap().len(), 1);
+}

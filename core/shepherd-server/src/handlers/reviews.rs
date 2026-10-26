@@ -115,7 +115,7 @@ impl ReviewsApi for AppState {
             &format!("/api/v1/projects/{project}/submissions/{submission}/withdraw"),
             &body,
         );
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let ctx = command_context(&principal, key, Some(revision), None, store);
         match store
             .withdraw_submission(ctx, project, submission, body.reason, &hash)
             .await
@@ -149,7 +149,7 @@ impl ReviewsApi for AppState {
             &format!("/api/v1/projects/{project}/submissions/{submission}/reviews"),
             &body,
         );
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let ctx = command_context(&principal, key, Some(revision), None, store);
         match store
             .review_submission(
                 ctx,

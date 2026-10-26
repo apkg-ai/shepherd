@@ -100,6 +100,7 @@ impl IdentityApi for AppState {
             &principal,
             Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
             None,
+            None,
             store,
         );
         match store
@@ -130,7 +131,7 @@ impl IdentityApi for AppState {
             &format!("/api/v1/agents/{agent}/revoke"),
             &serde_json::json!({ "reason": body.reason }),
         );
-        let ctx = command_context(&principal, key, None, store);
+        let ctx = command_context(&principal, key, None, None, store);
         match store
             .revoke_agent(ctx, ActorId::from_uuid(agent), body.reason, &hash)
             .await

@@ -8,7 +8,7 @@ use crate::convert::errors::{
     command_problem, domain_problem, parse_idempotency_key, parse_path_uuid, parse_revision,
     require_principal, require_store, revision_problem,
 };
-use crate::convert::{command_context, hierarchy, list_params};
+use crate::convert::{command_context, hierarchy, list_params, request_hash};
 use crate::generated::server::api::EpicsApi;
 use crate::generated::server::errors::{
     AcceptEpicResponse, ArchiveEpicResponse, BlockEpicResponse, CancelEpicResponse,
@@ -91,7 +91,8 @@ impl EpicsApi for AppState {
         let project = parse_path_uuid!(CreateEpicResponse, project_id, "project_id");
         let project = ProjectId::from_uuid(project);
         let key = parse_idempotency_key!(CreateEpicResponse, idempotency_key);
-        let ctx = command_context(&principal, key, None, store);
+        let hash = request_hash("POST", &format!("/api/v1/projects/{project}/epics"), &body);
+        let ctx = command_context(&principal, key, None, Some(hash), store);
         let (goal, input) = hierarchy::core_epic_create(body);
         let outcome = async {
             let result = store.create_epic(ctx, project, goal, input).await?;
@@ -141,7 +142,12 @@ impl EpicsApi for AppState {
         let revision = parse_revision!(UpdateEpicResponse, if_match);
         let key = parse_idempotency_key!(UpdateEpicResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "PATCH",
+            &format!("/api/v1/projects/{project}/epics/{epic}"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .update_epic(
@@ -176,7 +182,12 @@ impl EpicsApi for AppState {
         let revision = parse_revision!(ArchiveEpicResponse, if_match);
         let key = parse_idempotency_key!(ArchiveEpicResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/epics/{epic}/archive"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .archive_epic(ctx, project, EpicId::from_uuid(epic), body.reason)
@@ -206,7 +217,12 @@ impl EpicsApi for AppState {
         let revision = parse_revision!(AcceptEpicResponse, if_match);
         let key = parse_idempotency_key!(AcceptEpicResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/epics/{epic}/accept"),
+            &serde_json::json!({}),
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .accept_epic(ctx, project, EpicId::from_uuid(epic))
@@ -236,7 +252,12 @@ impl EpicsApi for AppState {
         let revision = parse_revision!(BlockEpicResponse, if_match);
         let key = parse_idempotency_key!(BlockEpicResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/epics/{epic}/block"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .block_epic(ctx, project, EpicId::from_uuid(epic), body.reason)
@@ -266,7 +287,12 @@ impl EpicsApi for AppState {
         let revision = parse_revision!(UnblockEpicResponse, if_match);
         let key = parse_idempotency_key!(UnblockEpicResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/epics/{epic}/unblock"),
+            &serde_json::json!({}),
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .unblock_epic(ctx, project, EpicId::from_uuid(epic))
@@ -296,7 +322,12 @@ impl EpicsApi for AppState {
         let revision = parse_revision!(CancelEpicResponse, if_match);
         let key = parse_idempotency_key!(CancelEpicResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/epics/{epic}/cancel"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .cancel_epic(ctx, project, EpicId::from_uuid(epic), body.reason)
@@ -326,7 +357,12 @@ impl EpicsApi for AppState {
         let revision = parse_revision!(CompleteEpicResponse, if_match);
         let key = parse_idempotency_key!(CompleteEpicResponse, idempotency_key);
         let project = ProjectId::from_uuid(project);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/epics/{epic}/complete"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         let outcome = async {
             let result = store
                 .complete_epic(ctx, project, EpicId::from_uuid(epic), body.reason)

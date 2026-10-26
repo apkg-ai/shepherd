@@ -5,11 +5,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Counts, LifecycleRecord, Revision, typed_uuid, validate_required_text};
+use super::{
+    Counts, LifecycleRecord, Revision, typed_id_serde, typed_uuid, validate_required_text,
+};
 use crate::error::DomainError;
 
 typed_uuid!(ProjectId);
 typed_uuid!(TaskTypeId);
+typed_id_serde!(serde_task_type_id, TaskTypeId);
 
 pub(crate) const NAME_MAX_CHARS: usize = 200;
 pub(crate) const DESCRIPTION_MAX_CHARS: usize = 10_000;
@@ -56,11 +59,15 @@ impl Default for ProjectSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
+    #[serde(with = "super::content::serde_project_id")]
     pub id: ProjectId,
+    #[serde(with = "super::content::serde_revision")]
     pub revision: Revision,
+    #[serde(with = "super::claim::serde_datetime")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "super::claim::serde_datetime")]
     pub updated_at: DateTime<Utc>,
     pub name: String,
     pub description: String,
@@ -70,12 +77,17 @@ pub struct Project {
     pub archive: Option<LifecycleRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskType {
+    #[serde(with = "serde_task_type_id")]
     pub id: TaskTypeId,
+    #[serde(with = "super::content::serde_revision")]
     pub revision: Revision,
+    #[serde(with = "super::claim::serde_datetime")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "super::claim::serde_datetime")]
     pub updated_at: DateTime<Utc>,
+    #[serde(with = "super::content::serde_project_id")]
     pub project_id: ProjectId,
     pub key: String,
     pub label: String,

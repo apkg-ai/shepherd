@@ -1,11 +1,7 @@
-use std::collections::HashMap;
-
-use sqlx::{QueryBuilder, Row, Sqlite};
 use uuid::Uuid;
 
 use crate::error::DomainError;
 use crate::model::{Actor, Epic, EpicId, ProjectId, Task, TaskId};
-use crate::storage::rows::parse_uuid;
 use crate::storage::{StorageError, Store};
 use crate::workflow::eligibility::{
     Eligibility, evaluate_epic, evaluate_task, load_epic_snapshots, load_task_snapshots,
@@ -52,55 +48,23 @@ impl Store {
         let now = self.clock().now();
         let mut tx = self.pool().begin().await.map_err(StorageError::from)?;
         let mut snapshots = load_task_snapshots(&mut tx, project, ids).await?;
-
-        let mut builder = QueryBuilder::<Sqlite>::new(
-            "SELECT id, selected_plan_revision_id, accepted_plan_submission_id \
-             FROM tasks WHERE id IN (",
-        );
-        let mut list = builder.separated(", ");
-        for id in ids {
-            list.push_bind(id.to_string());
-        }
-        builder.push(")");
-        let rows = builder.build().fetch_all(&mut *tx).await?;
         tx.commit().await.map_err(StorageError::from)?;
-
-        let mut plan_ids: HashMap<Uuid, (Vec<Uuid>, Vec<Uuid>)> = HashMap::new();
-        for row in &rows {
-            let id: String = row.try_get("id")?;
-            let selected: Option<String> = row.try_get("selected_plan_revision_id")?;
-            let accepted: Option<String> = row.try_get("accepted_plan_submission_id")?;
-            plan_ids.insert(
-                parse_uuid("tasks.id", &id)?,
-                (
-                    selected
-                        .map(|id| {
-                            parse_uuid("tasks.selected_plan_revision_id", &id).map(|u| vec![u])
-                        })
-                        .transpose()?
-                        .unwrap_or_default(),
-                    accepted
-                        .map(|id| {
-                            parse_uuid("tasks.accepted_plan_submission_id", &id).map(|u| vec![u])
-                        })
-                        .transpose()?
-                        .unwrap_or_default(),
-                ),
-            );
-        }
 
         ids.iter()
             .map(|id| {
                 let snapshot = snapshots.remove(id).ok_or(DomainError::NotFound)?;
                 let eligibility = evaluate_task(&snapshot, actor, now);
-                let (selected_plan_revision_ids, accepted_plan_submission_ids) = plan_ids
-                    .remove(&id.as_uuid())
-                    .ok_or(DomainError::NotFound)?;
                 Ok(TaskView {
                     task: snapshot.task,
                     eligibility,
-                    selected_plan_revision_ids,
-                    accepted_plan_submission_ids,
+                    selected_plan_revision_ids: snapshot
+                        .selected_plan_revision_id
+                        .into_iter()
+                        .collect(),
+                    accepted_plan_submission_ids: snapshot
+                        .accepted_plan_submission_id
+                        .into_iter()
+                        .collect(),
                 })
             })
             .collect()
@@ -178,6 +142,7 @@ mod tests {
             actor: actor.clone(),
             command_id: CommandId::generate(clock.now()),
             idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            request_hash: Some("test-request".into()),
             expected_revision,
             now: clock.now(),
         }

@@ -34,6 +34,7 @@ impl Fixture {
             actor: actor.clone(),
             command_id: CommandId::generate(now),
             idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            request_hash: None,
             expected_revision: None,
             now,
         }
@@ -335,6 +336,7 @@ async fn revoke_agent_atomically_closes_everything_and_replays() {
         actor: owner.clone(),
         command_id,
         idempotency_key: key,
+        request_hash: None,
         expected_revision: None,
         now: f.clock.now(),
     };
@@ -351,6 +353,7 @@ async fn revoke_agent_atomically_closes_everything_and_replays() {
         actor: owner.clone(),
         command_id,
         idempotency_key: key,
+        request_hash: None,
         expected_revision: None,
         now: f.clock.now(),
     };
@@ -412,6 +415,7 @@ async fn revoked_actor_fails_before_replay_lookup() {
         actor: grant.actor.clone(),
         command_id: CommandId::generate(f.clock.now()),
         idempotency_key: key,
+        request_hash: None,
         expected_revision: None,
         now: f.clock.now(),
     };
@@ -444,6 +448,7 @@ async fn same_key_different_actor_does_not_replay_foreign_response() {
         actor: first.clone(),
         command_id: CommandId::generate(f.clock.now()),
         idempotency_key: key,
+        request_hash: None,
         expected_revision: None,
         now: f.clock.now(),
     };
@@ -457,6 +462,7 @@ async fn same_key_different_actor_does_not_replay_foreign_response() {
         actor: second.clone(),
         command_id: CommandId::generate(f.clock.now()),
         idempotency_key: key,
+        request_hash: None,
         expected_revision: None,
         now: f.clock.now(),
     };

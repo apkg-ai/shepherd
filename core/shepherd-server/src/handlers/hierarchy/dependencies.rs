@@ -6,7 +6,7 @@ use crate::convert::errors::{
     command_problem, domain_problem, parse_idempotency_key, parse_path_uuid, parse_revision,
     require_principal, require_store, revision_problem,
 };
-use crate::convert::{command_context, hierarchy, list_params, page};
+use crate::convert::{command_context, hierarchy, list_params, page, request_hash};
 use crate::generated::server::api::{DependenciesApi, ListDependenciesLevel};
 use crate::generated::server::errors::{
     CreateDependencyResponse, DeleteDependencyResponse, ListDependenciesResponse,
@@ -65,7 +65,12 @@ impl DependenciesApi for AppState {
         let principal = require_principal!(CreateDependencyResponse);
         let project = parse_path_uuid!(CreateDependencyResponse, project_id, "project_id");
         let key = parse_idempotency_key!(CreateDependencyResponse, idempotency_key);
-        let ctx = command_context(&principal, key, None, store);
+        let hash = request_hash(
+            "POST",
+            &format!("/api/v1/projects/{project}/dependencies"),
+            &body,
+        );
+        let ctx = command_context(&principal, key, None, Some(hash), store);
         match store
             .create_dependency(
                 ctx,
@@ -93,7 +98,12 @@ impl DependenciesApi for AppState {
         let dependency = parse_path_uuid!(DeleteDependencyResponse, dependency_id, "dependency_id");
         let revision = parse_revision!(DeleteDependencyResponse, if_match);
         let key = parse_idempotency_key!(DeleteDependencyResponse, idempotency_key);
-        let ctx = command_context(&principal, key, Some(revision), store);
+        let hash = request_hash(
+            "DELETE",
+            &format!("/api/v1/projects/{project}/dependencies/{dependency}"),
+            &serde_json::json!({}),
+        );
+        let ctx = command_context(&principal, key, Some(revision), Some(hash), store);
         match store
             .delete_dependency(
                 ctx,

@@ -127,6 +127,8 @@ pub struct TaskSnapshot {
     pub active_claim: Option<ClaimSnapshot>,
     pub pending_submission: Option<SubmissionSnapshot>,
     pub selected_plan_revision_id: Option<Uuid>,
+    /// The accepted plan submission itself, if any (a wire Task field).
+    pub accepted_plan_submission_id: Option<Uuid>,
     /// document_revision_ids of the accepted plan submission, if any.
     pub accepted_plan_revision_ids: Vec<Uuid>,
     /// Sorted by prerequisite id for deterministic reason output.
@@ -830,8 +832,8 @@ pub(crate) async fn load_task_snapshots(
             .get(&epic.goal_id)
             .copied()
             .ok_or_else(|| StorageError::Corrupt(format!("epics.goal_id: {}", epic.goal_id)))?;
-        let accepted_plan_revision_ids = row
-            .accepted_plan_submission_id
+        let accepted_plan_submission_id = row.accepted_plan_submission_id;
+        let accepted_plan_revision_ids = accepted_plan_submission_id
             .and_then(|id| accepted_revisions.get(&id).cloned())
             .unwrap_or_default();
         let mut own_task_prereqs = task_prereqs.remove(&task.id.as_uuid()).unwrap_or_default();
@@ -848,6 +850,7 @@ pub(crate) async fn load_task_snapshots(
                 active_claim: claims.remove(&task.id.as_uuid()),
                 pending_submission: submissions.remove(&task.id.as_uuid()),
                 selected_plan_revision_id: row.selected_plan_revision_id,
+                accepted_plan_submission_id,
                 accepted_plan_revision_ids,
                 task_prereqs: own_task_prereqs,
                 epic_prereqs: own_epic_prereqs,
@@ -1053,6 +1056,7 @@ mod tests {
             active_claim: None,
             pending_submission: None,
             selected_plan_revision_id: None,
+            accepted_plan_submission_id: None,
             accepted_plan_revision_ids: Vec::new(),
             task_prereqs: Vec::new(),
             epic_prereqs: Vec::new(),

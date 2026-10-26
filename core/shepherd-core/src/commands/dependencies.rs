@@ -210,9 +210,10 @@ impl Store {
         project: ProjectId,
         input: DependencyCreate,
     ) -> Result<CommandResult<Dependency>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 201, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let level = input.level();
                 let (dependent_id, prerequisite_id) = match input {
                     DependencyCreate::Epic {
@@ -227,7 +228,7 @@ impl Store {
                 // Membership first: missing or foreign endpoints are 404 (plan/04).
                 let dependent = load_endpoint(tx, &project, level, dependent_id).await?;
                 let prerequisite = load_endpoint(tx, &project, level, prerequisite_id).await?;
-                let now_text = format_ts(&ctx.now);
+                let now_text = format_ts(&closure_ctx.now);
                 guard_mutation(
                     tx,
                     &project,
@@ -298,7 +299,7 @@ impl Store {
                     return Err(DomainError::DependencyCycle);
                 }
 
-                let id = DependencyId::generate(ctx.now);
+                let id = DependencyId::generate(closure_ctx.now);
                 let insert = AssertSqlSafe(format!(
                     "INSERT INTO {table} (id, revision, project_id, dependent_id, \
                      prerequisite_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)"
@@ -315,7 +316,8 @@ impl Store {
                 // Both endpoints' structural picture changed: bump to invalidate
                 // stale edits (plan/03); descendants stay untouched.
                 let (dependent_next, prerequisite_next) =
-                    bump_endpoints(tx, level, &ctx, &dependent, Some(&prerequisite)).await?;
+                    bump_endpoints(tx, level, &closure_ctx, &dependent, Some(&prerequisite))
+                        .await?;
                 let mut pending = vec![PendingEvent::dependency(
                     id,
                     Revision::INITIAL,
@@ -329,7 +331,8 @@ impl Store {
                     prerequisite_next,
                 ));
                 let events =
-                    append_events(tx, &project, &ctx, "createDependency", "", pending).await?;
+                    append_events(tx, &project, &closure_ctx, "createDependency", "", pending)
+                        .await?;
                 let created = find_dependency(tx, &project, &id)
                     .await?
                     .ok_or_else(|| missing_after_write("dependency"))?;
@@ -349,20 +352,21 @@ impl Store {
         project: ProjectId,
         dependency: DependencyId,
     ) -> Result<CommandResult<()>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 // Membership precedes capability (plan/04): a foreign link is 404.
                 let current = find_dependency(tx, &project, &dependency)
                     .await?
                     .ok_or(DomainError::NotFound)?;
                 require_capability(&actor, Capability::RemoveDependencyOrUnblock)?;
-                require_revision(ctx.expected_revision, current.revision)?;
+                require_revision(closure_ctx.expected_revision, current.revision)?;
                 let level = current.level;
                 let dependent = load_endpoint(tx, &project, level, current.dependent_id).await?;
                 let prerequisite =
                     load_endpoint(tx, &project, level, current.prerequisite_id).await?;
-                let now_text = format_ts(&ctx.now);
+                let now_text = format_ts(&closure_ctx.now);
                 // None: an archived prerequisite must not trap the live dependent.
                 guard_mutation(tx, &project, level, &dependent, None, &now_text).await?;
 
@@ -380,7 +384,7 @@ impl Store {
                 let (dependent_next, prerequisite_next) = bump_endpoints(
                     tx,
                     level,
-                    &ctx,
+                    &closure_ctx,
                     &dependent,
                     (!prerequisite.archived).then_some(&prerequisite),
                 )
@@ -407,12 +411,13 @@ impl Store {
                             epics: vec![EpicId::from_uuid(dependent.id)],
                         },
                         &mut pending,
-                        ctx.now,
+                        closure_ctx.now,
                     )
                     .await?;
                 }
                 let events =
-                    append_events(tx, &project, &ctx, "deleteDependency", "", pending).await?;
+                    append_events(tx, &project, &closure_ctx, "deleteDependency", "", pending)
+                        .await?;
                 Ok(CommandResult { value: (), events })
             })
         })
@@ -479,7 +484,8 @@ mod tests {
         CommandContext {
             actor: actor.clone(),
             command_id: crate::model::CommandId::generate(clock.now()),
-            idempotency_key: Uuid::nil(),
+            idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            request_hash: Some("test-request".into()),
             expected_revision,
             now: clock.now(),
         }

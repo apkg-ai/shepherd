@@ -84,9 +84,9 @@ Delivered:
 Limitations and temporary interfaces:
 
 - Acceptance sentences about staged import (408 `import_timeout`, staging cleanup) are not dischargeable in this PR: no core export/import exists (see #97). The step stays incomplete until that PR lands and this record is finalized.
-- Hierarchy-family mutations accept the required Idempotency-Key but do not replay (prior-step deferral, tracked in #99); the replayable family (claims/report/reviews/documents/revokeAgent) has full replay semantics covered by `rest_claims`.
+- Hierarchy-family mutations replay like the rest of the command surface (review follow-up closing the #99 deferral): commands seal their `CommandResult` through `idempotent_command` with the wire request hash carried in `CommandContext`; same key + hash replays the sealed response, a reused key with a different request is 409 `idempotency_conflict` (covered by `hierarchy_commands_replay_and_conflict_on_hash_change` and `create_goal_retries_replay_and_reused_keys_conflict`).
 - `tokio-stream` 0.1 added to shepherd-server (already in Cargo.lock transitively) for the SSE channel adapter; owner-approved addition in the fs2→`std::fs::File::try_lock` precedent's spirit, to be reflected in plan/dependencies.md if kept.
 - Replayed `claimTask` returns the original lease with a freshly assembled context bundle (the contract only guarantees the lease).
 - The non-v1 refusal applies once the install is provisioned: with the replay key missing the daemon enters the plan/12 diagnostic-only mode before ever opening the database, so a foreign file plus missing key serves 503s instead of exiting (`boot.rs` covers the provisioned path).
 
-Next eligible steps: #97 (portability completion, finalizes 014/015), #99 (hierarchy idempotent replay), then 016 (UI shell and hierarchy).
+Next eligible steps: #97 (portability completion, finalizes 014/015), then 016 (UI shell and hierarchy).

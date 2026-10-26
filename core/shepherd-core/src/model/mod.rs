@@ -119,7 +119,8 @@ pub(crate) use typed_id_serde;
 
 macro_rules! resource_status {
     ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(rename_all = "snake_case")]
         pub enum $name {
             Proposed,
             Open,
@@ -325,7 +326,7 @@ pub struct Actor {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Counts {
     pub total: i64,
     pub done: i64,
@@ -342,10 +343,12 @@ impl Counts {
     };
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LifecycleRecord {
+    #[serde(with = "claim::serde_actor_id")]
     pub actor_id: ActorId,
     pub reason: String,
+    #[serde(with = "claim::serde_datetime")]
     pub created_at: DateTime<Utc>,
 }
 

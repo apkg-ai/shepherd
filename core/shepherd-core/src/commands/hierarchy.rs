@@ -29,16 +29,17 @@ impl Store {
         ctx: CommandContext,
         input: ProjectCreate,
     ) -> Result<CommandResult<Project>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 201, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 require_capability(&actor, Capability::AdministerProject)?;
                 let name = validate_required_text("name", &input.name, NAME_MAX_CHARS)?;
                 let description = input.description.unwrap_or_default();
                 validate_long_text("description", &description, DESCRIPTION_MAX_CHARS)?;
                 let settings = input.settings.unwrap_or_default();
-                let id = ProjectId::generate(ctx.now);
-                let now_text = format_ts(&ctx.now);
+                let id = ProjectId::generate(closure_ctx.now);
+                let now_text = format_ts(&closure_ctx.now);
                 sqlx::query(
                     "INSERT INTO projects (id, revision, created_at, updated_at, name, \
                      description, settings, archived) VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, 0)",
@@ -55,7 +56,7 @@ impl Store {
                 // Every project starts with the six built-in registry entries (plan/00).
                 let mut pending = vec![PendingEvent::project(id, Revision::INITIAL)];
                 for (key, label) in BUILTIN_TASK_TYPES {
-                    let type_id = TaskTypeId::generate(ctx.now);
+                    let type_id = TaskTypeId::generate(closure_ctx.now);
                     sqlx::query(
                         "INSERT INTO task_types (id, revision, created_at, updated_at, \
                          project_id, key, label, archived, builtin) \
@@ -72,7 +73,8 @@ impl Store {
                     pending.push(PendingEvent::task_type(type_id, Revision::INITIAL));
                 }
 
-                let events = append_events(tx, &id, &ctx, "createProject", "", pending).await?;
+                let events =
+                    append_events(tx, &id, &closure_ctx, "createProject", "", pending).await?;
                 let project = find_project(tx, &id)
                     .await?
                     .ok_or_else(|| missing_after_write("project"))?;
@@ -91,14 +93,15 @@ impl Store {
         project: ProjectId,
         patch: ProjectPatch,
     ) -> Result<CommandResult<Project>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let current = project_row(tx, &project)
                     .await?
                     .ok_or(DomainError::NotFound)?;
                 require_capability(&actor, Capability::AdministerProject)?;
-                require_revision(ctx.expected_revision, current.revision)?;
+                require_revision(closure_ctx.expected_revision, current.revision)?;
                 if current.archived {
                     return Err(DomainError::ArchivedScope);
                 }
@@ -126,7 +129,7 @@ impl Store {
                      description = ?4, settings = ?5 WHERE id = ?6",
                 )
                 .bind(next.value())
-                .bind(format_ts(&ctx.now))
+                .bind(format_ts(&closure_ctx.now))
                 .bind(&name)
                 .bind(&description)
                 .bind(settings_json(&settings)?)
@@ -136,7 +139,7 @@ impl Store {
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "updateProject",
                     "",
                     vec![PendingEvent::project(project, next)],
@@ -160,9 +163,10 @@ impl Store {
         project: ProjectId,
         input: GoalCreate,
     ) -> Result<CommandResult<Goal>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 201, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope_archived = project_archived(tx, &project).await?;
                 require_capability(&actor, Capability::AdministerProject)?;
                 if scope_archived {
@@ -171,14 +175,14 @@ impl Store {
                 let title = validate_required_text("title", &input.title, NAME_MAX_CHARS)?;
                 let description = input.description.unwrap_or_default();
                 validate_long_text("description", &description, DESCRIPTION_MAX_CHARS)?;
-                let id = GoalId::generate(ctx.now);
+                let id = GoalId::generate(closure_ctx.now);
                 sqlx::query(
                     "INSERT INTO goals (id, revision, created_at, updated_at, project_id, \
                      title, description, archived) VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, 0)",
                 )
                 .bind(id.to_string())
                 .bind(Revision::INITIAL.value())
-                .bind(format_ts(&ctx.now))
+                .bind(format_ts(&closure_ctx.now))
                 .bind(project.to_string())
                 .bind(&title)
                 .bind(&description)
@@ -187,7 +191,7 @@ impl Store {
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "createGoal",
                     "",
                     vec![PendingEvent::goal(id, Revision::INITIAL)],
@@ -212,15 +216,16 @@ impl Store {
         goal: GoalId,
         patch: TextPatch,
     ) -> Result<CommandResult<Goal>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 // Membership precedes the revision check: a foreign goal is 404, never 412.
                 let current = goal_row(tx, &project, &goal)
                     .await?
                     .ok_or(DomainError::NotFound)?;
                 require_capability(&actor, Capability::AdministerProject)?;
-                require_revision(ctx.expected_revision, current.revision)?;
+                require_revision(closure_ctx.expected_revision, current.revision)?;
                 if current.archived || project_archived(tx, &project).await? {
                     return Err(DomainError::ArchivedScope);
                 }
@@ -247,7 +252,7 @@ impl Store {
                      description = ?4 WHERE id = ?5",
                 )
                 .bind(next.value())
-                .bind(format_ts(&ctx.now))
+                .bind(format_ts(&closure_ctx.now))
                 .bind(&title)
                 .bind(&description)
                 .bind(goal.to_string())
@@ -256,7 +261,7 @@ impl Store {
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "updateGoal",
                     "",
                     vec![PendingEvent::goal(goal, next)],
@@ -280,9 +285,10 @@ impl Store {
         project: ProjectId,
         input: TaskTypeCreate,
     ) -> Result<CommandResult<TaskType>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 201, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope_archived = project_archived(tx, &project).await?;
                 require_capability(&actor, Capability::AdministerProject)?;
                 if scope_archived {
@@ -300,14 +306,14 @@ impl Store {
                 if duplicate.is_some() {
                     return Err(DomainError::DuplicateTaskTypeKey { key });
                 }
-                let id = TaskTypeId::generate(ctx.now);
+                let id = TaskTypeId::generate(closure_ctx.now);
                 sqlx::query(
                     "INSERT INTO task_types (id, revision, created_at, updated_at, project_id, \
                      key, label, archived, builtin) VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, 0, 0)",
                 )
                 .bind(id.to_string())
                 .bind(Revision::INITIAL.value())
-                .bind(format_ts(&ctx.now))
+                .bind(format_ts(&closure_ctx.now))
                 .bind(project.to_string())
                 .bind(&key)
                 .bind(&label)
@@ -316,7 +322,7 @@ impl Store {
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "createTaskType",
                     "",
                     vec![PendingEvent::task_type(id, Revision::INITIAL)],
@@ -342,9 +348,10 @@ impl Store {
         goal: GoalId,
         input: EpicCreate,
     ) -> Result<CommandResult<Epic>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 201, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let proj = project_row(tx, &project)
                     .await?
                     .ok_or(DomainError::NotFound)?;
@@ -363,8 +370,8 @@ impl Store {
                 // Agents get Proposed when proposal_gate is true; humans always get Open.
                 let status = policy::initial_epic_status(actor.kind, proj.settings.proposal_gate);
 
-                let id = EpicId::generate(ctx.now);
-                let now_text = format_ts(&ctx.now);
+                let id = EpicId::generate(closure_ctx.now);
+                let now_text = format_ts(&closure_ctx.now);
                 sqlx::query(
                     "INSERT INTO epics (id, revision, created_at, updated_at, project_id, \
                      goal_id, title, description, status, archived) \
@@ -383,7 +390,7 @@ impl Store {
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "createEpic",
                     "",
                     vec![PendingEvent::epic(id, Revision::INITIAL, goal)],
@@ -409,13 +416,14 @@ impl Store {
         epic: EpicId,
         patch: TextPatch,
     ) -> Result<CommandResult<Epic>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                live_actor(tx, &ctx.actor.id).await?;
+                live_actor(tx, &closure_ctx.actor.id).await?;
                 let current = epic_row(tx, &project, &epic)
                     .await?
                     .ok_or(DomainError::NotFound)?;
-                require_revision(ctx.expected_revision, current.revision)?;
+                require_revision(closure_ctx.expected_revision, current.revision)?;
                 let goal_current = goal_row(tx, &project, &current.goal_id)
                     .await?
                     .ok_or(DomainError::NotFound)?;
@@ -451,7 +459,7 @@ impl Store {
                      description = ?4 WHERE id = ?5",
                 )
                 .bind(next.value())
-                .bind(format_ts(&ctx.now))
+                .bind(format_ts(&closure_ctx.now))
                 .bind(&title)
                 .bind(&description)
                 .bind(epic.to_string())
@@ -460,7 +468,7 @@ impl Store {
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "updateEpic",
                     "",
                     vec![PendingEvent::epic(epic, next, current.goal_id)],
@@ -484,13 +492,14 @@ impl Store {
         project: ProjectId,
         epic: EpicId,
     ) -> Result<CommandResult<Epic>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 // Membership precedes capability (plan/04): a missing or foreign epic is 404.
                 let scope = epic_scope(tx, &project, &epic).await?;
                 require_capability(&actor, Capability::ResolveWork)?;
-                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.epic.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.epic.status != EpicStatus::Proposed {
                     return Err(DomainError::InvalidState(format!(
@@ -504,7 +513,7 @@ impl Store {
                      WHERE id = ?4",
                 )
                 .bind(next.value())
-                .bind(format_ts(&ctx.now))
+                .bind(format_ts(&closure_ctx.now))
                 .bind(EpicStatus::Open.as_str())
                 .bind(epic.to_string())
                 .execute(&mut **tx)
@@ -518,10 +527,11 @@ impl Store {
                         epics: vec![epic],
                     },
                     &mut pending,
-                    ctx.now,
+                    closure_ctx.now,
                 )
                 .await?;
-                let events = append_events(tx, &project, &ctx, "acceptEpic", "", pending).await?;
+                let events =
+                    append_events(tx, &project, &closure_ctx, "acceptEpic", "", pending).await?;
                 let updated = find_epic(tx, &project, &epic)
                     .await?
                     .ok_or_else(|| missing_after_write("epic"))?;
@@ -542,9 +552,10 @@ impl Store {
         epic: EpicId,
         input: TaskCreate,
     ) -> Result<CommandResult<Task>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 201, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let proj = project_row(tx, &project)
                     .await?
                     .ok_or(DomainError::NotFound)?;
@@ -600,8 +611,8 @@ impl Store {
                 let phase = policy::initial_phase(resolved.planning_required);
                 let status = policy::initial_status(actor.kind, proj.settings.proposal_gate);
 
-                let id = TaskId::generate(ctx.now);
-                let now_text = format_ts(&ctx.now);
+                let id = TaskId::generate(closure_ctx.now);
+                let now_text = format_ts(&closure_ctx.now);
                 sqlx::query(
                     "INSERT INTO tasks (id, revision, created_at, updated_at, project_id, \
                      epic_id, title, description, type_key, status, phase, \
@@ -626,7 +637,7 @@ impl Store {
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "createTask",
                     "",
                     vec![PendingEvent::task(id, Revision::INITIAL, epic)],
@@ -651,9 +662,10 @@ impl Store {
         task: TaskId,
         patch: TaskPatch,
     ) -> Result<CommandResult<Task>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let current = task_row(tx, &project, &task)
                     .await?
                     .ok_or(DomainError::NotFound)?;
@@ -664,7 +676,7 @@ impl Store {
                 if has_policy_change {
                     require_capability(&actor, Capability::LowerRequirements)?;
                 }
-                require_revision(ctx.expected_revision, current.revision)?;
+                require_revision(closure_ctx.expected_revision, current.revision)?;
                 let proj = project_row(tx, &project)
                     .await?
                     .ok_or(DomainError::NotFound)?;
@@ -685,7 +697,7 @@ impl Store {
                     return Err(DomainError::TerminalScope);
                 }
                 // No edit while a claim is held or a review is pending (plan/03).
-                let now_text = format_ts(&ctx.now);
+                let now_text = format_ts(&closure_ctx.now);
                 if task_has_active_work(tx, task, &now_text).await? {
                     return Err(DomainError::ActiveWork(
                         "task has an active claim or pending submission".into(),
@@ -778,7 +790,7 @@ impl Store {
                      WHERE id = ?11",
                 )
                 .bind(next.value())
-                .bind(format_ts(&ctx.now))
+                .bind(format_ts(&closure_ctx.now))
                 .bind(&title)
                 .bind(&description)
                 .bind(&type_key)
@@ -793,7 +805,7 @@ impl Store {
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "updateTask",
                     "",
                     vec![PendingEvent::task(task, next, current.epic_id)],
@@ -817,13 +829,14 @@ impl Store {
         project: ProjectId,
         task: TaskId,
     ) -> Result<CommandResult<Task>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 // Membership precedes capability (plan/04): a missing or foreign task is 404.
                 let scope = task_scope(tx, &project, &task).await?;
                 require_capability(&actor, Capability::ResolveWork)?;
-                require_revision(ctx.expected_revision, scope.task.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
@@ -840,7 +853,7 @@ impl Store {
                      WHERE id = ?4",
                 )
                 .bind(next.value())
-                .bind(format_ts(&ctx.now))
+                .bind(format_ts(&closure_ctx.now))
                 .bind(TaskStatus::Open.as_str())
                 .bind(task.to_string())
                 .execute(&mut **tx)
@@ -849,7 +862,8 @@ impl Store {
                 // include proposed tasks and task blocks never gate epic
                 // completion, so accepting a task cannot flip any epic state.
                 let pending = vec![PendingEvent::task(task, next, scope.task.epic_id)];
-                let events = append_events(tx, &project, &ctx, "acceptTask", "", pending).await?;
+                let events =
+                    append_events(tx, &project, &closure_ctx, "acceptTask", "", pending).await?;
                 let updated = find_task(tx, &project, &task)
                     .await?
                     .ok_or_else(|| missing_after_write("task"))?;
@@ -870,11 +884,12 @@ impl Store {
         task: TaskId,
         reason: String,
     ) -> Result<CommandResult<Task>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                live_actor(tx, &ctx.actor.id).await?;
+                live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope = task_scope(tx, &project, &task).await?;
-                require_revision(ctx.expected_revision, scope.task.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.task.status.is_terminal() || scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
@@ -884,9 +899,10 @@ impl Store {
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::task::block(tx, &ctx, &scope.task, &reason, &mut pending).await?;
+                workflow::task::block(tx, &closure_ctx, &scope.task, &reason, &mut pending).await?;
                 let events =
-                    append_events(tx, &project, &ctx, "blockTask", &reason, pending).await?;
+                    append_events(tx, &project, &closure_ctx, "blockTask", &reason, pending)
+                        .await?;
                 let updated = find_task(tx, &project, &task)
                     .await?
                     .ok_or_else(|| missing_after_write("task"))?;
@@ -905,12 +921,13 @@ impl Store {
         project: ProjectId,
         task: TaskId,
     ) -> Result<CommandResult<Task>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope = task_scope(tx, &project, &task).await?;
                 require_capability(&actor, Capability::RemoveDependencyOrUnblock)?;
-                require_revision(ctx.expected_revision, scope.task.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 let Some(block) = &scope.task.block else {
                     return Err(DomainError::InvalidState("task is not blocked".into()));
@@ -921,9 +938,10 @@ impl Store {
                 // never gates epic completion, so clearing it cannot flip any
                 // epic state.
                 let mut pending = Vec::new();
-                workflow::task::unblock(tx, &ctx, &scope.task, &mut pending).await?;
+                workflow::task::unblock(tx, &closure_ctx, &scope.task, &mut pending).await?;
                 let events =
-                    append_events(tx, &project, &ctx, "unblockTask", &cleared, pending).await?;
+                    append_events(tx, &project, &closure_ctx, "unblockTask", &cleared, pending)
+                        .await?;
                 let updated = find_task(tx, &project, &task)
                     .await?
                     .ok_or_else(|| missing_after_write("task"))?;
@@ -943,21 +961,24 @@ impl Store {
         task: TaskId,
         reason: String,
     ) -> Result<CommandResult<Task>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope = task_scope(tx, &project, &task).await?;
                 require_capability(&actor, Capability::ResolveWork)?;
-                require_revision(ctx.expected_revision, scope.task.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.task.status.is_terminal() || scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::task::cancel(tx, &ctx, &scope.task, &reason, &mut pending).await?;
+                workflow::task::cancel(tx, &closure_ctx, &scope.task, &reason, &mut pending)
+                    .await?;
                 let events =
-                    append_events(tx, &project, &ctx, "cancelTask", &reason, pending).await?;
+                    append_events(tx, &project, &closure_ctx, "cancelTask", &reason, pending)
+                        .await?;
                 let updated = find_task(tx, &project, &task)
                     .await?
                     .ok_or_else(|| missing_after_write("task"))?;
@@ -977,12 +998,13 @@ impl Store {
         task: TaskId,
         reason: String,
     ) -> Result<CommandResult<Task>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope = task_scope(tx, &project, &task).await?;
                 require_capability(&actor, Capability::ResolveWork)?;
-                require_revision(ctx.expected_revision, scope.task.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
@@ -998,13 +1020,13 @@ impl Store {
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::task::waive(tx, &ctx, &scope.task, &reason, &mut pending).await?;
+                workflow::task::waive(tx, &closure_ctx, &scope.task, &reason, &mut pending).await?;
                 // The waiver changes the epic's completion denominator: bump it
                 // once here; the cascade reuses this revision if it completes.
                 let epic_next = scope.epic.revision.next();
                 sqlx::query("UPDATE epics SET revision = ?1, updated_at = ?2 WHERE id = ?3")
                     .bind(epic_next.value())
-                    .bind(format_ts(&ctx.now))
+                    .bind(format_ts(&closure_ctx.now))
                     .bind(scope.task.epic_id.to_string())
                     .execute(&mut **tx)
                     .await?;
@@ -1020,11 +1042,12 @@ impl Store {
                         epics: vec![scope.task.epic_id],
                     },
                     &mut pending,
-                    ctx.now,
+                    closure_ctx.now,
                 )
                 .await?;
                 let events =
-                    append_events(tx, &project, &ctx, "waiveTask", &reason, pending).await?;
+                    append_events(tx, &project, &closure_ctx, "waiveTask", &reason, pending)
+                        .await?;
                 let updated = find_task(tx, &project, &task)
                     .await?
                     .ok_or_else(|| missing_after_write("task"))?;
@@ -1045,11 +1068,12 @@ impl Store {
         epic: EpicId,
         reason: String,
     ) -> Result<CommandResult<Epic>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                live_actor(tx, &ctx.actor.id).await?;
+                live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope = epic_scope(tx, &project, &epic).await?;
-                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.epic.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
@@ -1059,9 +1083,10 @@ impl Store {
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::epic::block(tx, &ctx, &scope.epic, &reason, &mut pending).await?;
+                workflow::epic::block(tx, &closure_ctx, &scope.epic, &reason, &mut pending).await?;
                 let events =
-                    append_events(tx, &project, &ctx, "blockEpic", &reason, pending).await?;
+                    append_events(tx, &project, &closure_ctx, "blockEpic", &reason, pending)
+                        .await?;
                 let updated = find_epic(tx, &project, &epic)
                     .await?
                     .ok_or_else(|| missing_after_write("epic"))?;
@@ -1080,19 +1105,20 @@ impl Store {
         project: ProjectId,
         epic: EpicId,
     ) -> Result<CommandResult<Epic>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope = epic_scope(tx, &project, &epic).await?;
                 require_capability(&actor, Capability::RemoveDependencyOrUnblock)?;
-                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.epic.revision)?;
                 scope.ensure_unarchived()?;
                 let Some(block) = &scope.epic.block else {
                     return Err(DomainError::InvalidState("epic is not blocked".into()));
                 };
                 let cleared = block.reason.clone();
                 let mut pending = Vec::new();
-                workflow::epic::unblock(tx, &ctx, &scope.epic, &mut pending).await?;
+                workflow::epic::unblock(tx, &closure_ctx, &scope.epic, &mut pending).await?;
                 // Unblocking re-evaluates children finished before the block.
                 workflow::recompute(
                     tx,
@@ -1101,11 +1127,12 @@ impl Store {
                         epics: vec![epic],
                     },
                     &mut pending,
-                    ctx.now,
+                    closure_ctx.now,
                 )
                 .await?;
                 let events =
-                    append_events(tx, &project, &ctx, "unblockEpic", &cleared, pending).await?;
+                    append_events(tx, &project, &closure_ctx, "unblockEpic", &cleared, pending)
+                        .await?;
                 let updated = find_epic(tx, &project, &epic)
                     .await?
                     .ok_or_else(|| missing_after_write("epic"))?;
@@ -1125,21 +1152,24 @@ impl Store {
         epic: EpicId,
         reason: String,
     ) -> Result<CommandResult<Epic>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope = epic_scope(tx, &project, &epic).await?;
                 require_capability(&actor, Capability::ResolveWork)?;
-                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.epic.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::epic::cancel(tx, &ctx, &scope.epic, &reason, &mut pending).await?;
+                workflow::epic::cancel(tx, &closure_ctx, &scope.epic, &reason, &mut pending)
+                    .await?;
                 let events =
-                    append_events(tx, &project, &ctx, "cancelEpic", &reason, pending).await?;
+                    append_events(tx, &project, &closure_ctx, "cancelEpic", &reason, pending)
+                        .await?;
                 let updated = find_epic(tx, &project, &epic)
                     .await?
                     .ok_or_else(|| missing_after_write("epic"))?;
@@ -1161,12 +1191,13 @@ impl Store {
         epic: EpicId,
         reason: String,
     ) -> Result<CommandResult<Epic>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope = epic_scope(tx, &project, &epic).await?;
                 require_capability(&actor, Capability::ResolveWork)?;
-                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.epic.revision)?;
                 scope.ensure_unarchived()?;
                 if scope.epic.status.is_terminal() {
                     return Err(DomainError::TerminalScope);
@@ -1179,15 +1210,19 @@ impl Store {
                 if scope.epic.block.is_some() {
                     return Err(DomainError::InvalidState("epic is blocked".into()));
                 }
-                let snapshot =
-                    workflow::eligibility::load_epic_snapshots(tx, &project, &[epic], ctx.now)
-                        .await?
-                        .remove(&epic)
-                        .ok_or_else(|| {
-                            DomainError::from(StorageError::Corrupt(
-                                "epic snapshot missing during completion checks".into(),
-                            ))
-                        })?;
+                let snapshot = workflow::eligibility::load_epic_snapshots(
+                    tx,
+                    &project,
+                    &[epic],
+                    closure_ctx.now,
+                )
+                .await?
+                .remove(&epic)
+                .ok_or_else(|| {
+                    DomainError::from(StorageError::Corrupt(
+                        "epic snapshot missing during completion checks".into(),
+                    ))
+                })?;
                 if !snapshot
                     .epic_prereqs
                     .iter()
@@ -1204,7 +1239,7 @@ impl Store {
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let mut pending = Vec::new();
-                workflow::epic::complete(tx, &ctx, &scope.epic, &mut pending).await?;
+                workflow::epic::complete(tx, &closure_ctx, &scope.epic, &mut pending).await?;
                 let dependents = workflow::dependents_of(tx, &[epic]).await?;
                 workflow::recompute(
                     tx,
@@ -1213,11 +1248,12 @@ impl Store {
                         epics: dependents,
                     },
                     &mut pending,
-                    ctx.now,
+                    closure_ctx.now,
                 )
                 .await?;
                 let events =
-                    append_events(tx, &project, &ctx, "completeEpic", &reason, pending).await?;
+                    append_events(tx, &project, &closure_ctx, "completeEpic", &reason, pending)
+                        .await?;
                 let updated = find_epic(tx, &project, &epic)
                     .await?
                     .ok_or_else(|| missing_after_write("epic"))?;
@@ -1289,14 +1325,15 @@ impl Store {
         task_type: TaskTypeId,
         patch: TaskTypePatch,
     ) -> Result<CommandResult<TaskType>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let current = find_task_type(tx, &project, &task_type)
                     .await?
                     .ok_or(DomainError::NotFound)?;
                 require_capability(&actor, Capability::AdministerProject)?;
-                require_revision(ctx.expected_revision, current.revision)?;
+                require_revision(closure_ctx.expected_revision, current.revision)?;
                 if current.archived || project_archived(tx, &project).await? {
                     return Err(DomainError::ArchivedScope);
                 }
@@ -1322,7 +1359,7 @@ impl Store {
                      archived = ?4 WHERE id = ?5",
                 )
                 .bind(next.value())
-                .bind(format_ts(&ctx.now))
+                .bind(format_ts(&closure_ctx.now))
                 .bind(&label)
                 .bind(i64::from(patch.archived.unwrap_or(false)))
                 .bind(task_type.to_string())
@@ -1331,7 +1368,7 @@ impl Store {
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "updateTaskType",
                     "",
                     vec![PendingEvent::task_type(task_type, next)],
@@ -1407,7 +1444,8 @@ mod tests {
         CommandContext {
             actor: actor.clone(),
             command_id: crate::model::CommandId::generate(clock.now()),
-            idempotency_key: Uuid::nil(),
+            idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            request_hash: Some("test-request".into()),
             expected_revision,
             now: clock.now(),
         }
@@ -3706,5 +3744,63 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    // The hierarchy family honors the Idempotency-Key it already required
+    // (plan/07): same key + hash replays the sealed response, a key reused
+    // with a different request is a conflict, no second row is ever written.
+    #[tokio::test]
+    async fn hierarchy_commands_replay_and_conflict_on_hash_change() {
+        let f = fixture().await;
+        let project = project(&f, "P").await;
+        let key = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+        let mut ctx = ctx(&f.owner, &f.clock, None);
+        ctx.idempotency_key = key;
+        ctx.request_hash = Some("goal-hash-a".into());
+        let input = GoalCreate {
+            title: "G".to_string(),
+            description: None,
+        };
+        let first = f
+            .store
+            .create_goal(ctx.clone(), project.id, input.clone())
+            .await
+            .unwrap();
+        assert_eq!(first.events.len(), 1);
+
+        let replay = f
+            .store
+            .create_goal(ctx.clone(), project.id, input)
+            .await
+            .unwrap();
+        assert_eq!(
+            replay.value.id, first.value.id,
+            "replay is the sealed original"
+        );
+        assert_eq!(replay.value.revision, first.value.revision);
+        assert_eq!(replay.events, first.events);
+
+        // Same key, different request: rejected before any write.
+        ctx.request_hash = Some("goal-hash-b".into());
+        assert!(matches!(
+            f.store
+                .create_goal(
+                    ctx,
+                    project.id,
+                    GoalCreate {
+                        title: "G2".to_string(),
+                        description: None,
+                    }
+                )
+                .await,
+            Err(DomainError::IdempotencyConflict)
+        ));
+
+        let listed = f
+            .store
+            .list_goals(&project.id, &crate::queries::ListParams::default())
+            .await
+            .unwrap();
+        assert_eq!(listed.items.len(), 1, "no duplicate row was created");
     }
 }
