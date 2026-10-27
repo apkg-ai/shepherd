@@ -44,9 +44,7 @@ export function AuthBoundary() {
     if (isShepherdError(session.error) && session.error.status === 401) {
       return <Navigate to="/login" replace />;
     }
-    return (
-      <ErrorState error={session.error} onRetry={() => void session.refetch()} />
-    );
+    return <ErrorState error={session.error} onRetry={() => void session.refetch()} />;
   }
 
   if (!value) return null;

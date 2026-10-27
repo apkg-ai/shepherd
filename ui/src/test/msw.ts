@@ -29,9 +29,7 @@ export function problemResponse(
 }
 
 export function sessionHandler(overrides?: Partial<BrowserSession>) {
-  return http.get("/api/v1/session", () =>
-    HttpResponse.json(makeBrowserSession(overrides)),
-  );
+  return http.get("/api/v1/session", () => HttpResponse.json(makeBrowserSession(overrides)));
 }
 
 export function expiredSessionHandler() {
@@ -39,31 +37,21 @@ export function expiredSessionHandler() {
 }
 
 export function projectListHandler(projects: Project[]) {
-  return http.get("/api/v1/projects", () =>
-    HttpResponse.json(makePage(projects)),
-  );
+  return http.get("/api/v1/projects", () => HttpResponse.json(makePage(projects)));
 }
 
 export function projectHandler(project: Project) {
-  return http.get(`/api/v1/projects/${project.id}`, () =>
-    HttpResponse.json(project),
-  );
+  return http.get(`/api/v1/projects/${project.id}`, () => HttpResponse.json(project));
 }
 
 export function goalListHandler(goals: Goal[]) {
-  return http.get("/api/v1/projects/:projectId/goals", () =>
-    HttpResponse.json(makePage(goals)),
-  );
+  return http.get("/api/v1/projects/:projectId/goals", () => HttpResponse.json(makePage(goals)));
 }
 
 export function goalHandler(goal: Goal) {
-  return http.get(`/api/v1/projects/:projectId/goals/${goal.id}`, () =>
-    HttpResponse.json(goal),
-  );
+  return http.get(`/api/v1/projects/:projectId/goals/${goal.id}`, () => HttpResponse.json(goal));
 }
 
 export function epicListHandler(epics: Epic[]) {
-  return http.get("/api/v1/projects/:projectId/epics", () =>
-    HttpResponse.json(makePage(epics)),
-  );
+  return http.get("/api/v1/projects/:projectId/epics", () => HttpResponse.json(makePage(epics)));
 }

@@ -9,10 +9,7 @@ import { renderRoute } from "../../test/test-utils";
 
 const project = makeProject({ id: "p1", name: "Space Game" });
 
-const baseHandlers = [
-  sessionHandler(),
-  projectHandler(project),
-];
+const baseHandlers = [sessionHandler(), projectHandler(project)];
 
 describe("GoalFormScreen — create mode", () => {
   it("renders create form with title and description fields", async () => {
@@ -47,9 +44,7 @@ describe("GoalFormScreen — create mode", () => {
     await user.type(screen.getByLabelText("Title"), "New goal");
     await user.click(screen.getByRole("button", { name: "Create goal" }));
 
-    await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/projects/p1/goals/new-g"),
-    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1/goals/new-g"));
   });
 
   it("shows field errors on 422", async () => {
@@ -101,9 +96,7 @@ describe("GoalFormScreen — edit mode", () => {
   it("loads existing goal data into form", async () => {
     renderRoute("/projects/p1/goals/g1/edit", { handlers: editHandlers });
 
-    await waitFor(() =>
-      expect(screen.getByLabelText("Title")).toHaveValue("Original title"),
-    );
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original title"));
     expect(screen.getByLabelText("Description")).toHaveValue("Original desc");
   });
 
@@ -131,9 +124,7 @@ describe("GoalFormScreen — edit mode", () => {
 
     renderRoute("/projects/p1/goals/g1/edit", { handlers: conflictHandlers });
 
-    await waitFor(() =>
-      expect(screen.getByLabelText("Title")).toHaveValue("Original title"),
-    );
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original title"));
     await user.clear(screen.getByLabelText("Title"));
     await user.type(screen.getByLabelText("Title"), "My edit");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
@@ -149,23 +140,17 @@ describe("GoalFormScreen — edit mode", () => {
   it("cancel navigates back without changes if form is clean", async () => {
     const { router } = renderRoute("/projects/p1/goals/g1/edit", { handlers: editHandlers });
 
-    await waitFor(() =>
-      expect(screen.getByLabelText("Title")).toHaveValue("Original title"),
-    );
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original title"));
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/projects/p1/goals/g1"),
-    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1/goals/g1"));
   });
 
   it("shows discard confirmation when form is dirty", async () => {
     const user = userEvent.setup();
     renderRoute("/projects/p1/goals/g1/edit", { handlers: editHandlers });
 
-    await waitFor(() =>
-      expect(screen.getByLabelText("Title")).toHaveValue("Original title"),
-    );
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original title"));
     await user.type(screen.getByLabelText("Title"), " changed");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 

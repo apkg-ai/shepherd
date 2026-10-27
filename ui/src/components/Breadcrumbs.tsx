@@ -21,9 +21,7 @@ export function Breadcrumbs({ items }: BreadcrumbsProps) {
           return (
             <li key={item.to ?? i} className={styles.item}>
               {isLast || !item.to ? (
-                <span aria-current={isLast ? "page" : undefined}>
-                  {item.label}
-                </span>
+                <span aria-current={isLast ? "page" : undefined}>{item.label}</span>
               ) : (
                 <Link to={item.to} className={styles.link}>
                   {item.label}

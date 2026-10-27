@@ -78,7 +78,6 @@ export function GoalDetailScreen() {
             ))}
           </ul>
         )}
-
       </section>
     </>
   );

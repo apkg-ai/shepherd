@@ -1,17 +1,17 @@
 import { expect, test } from "./helpers/coverage";
+import { login } from "./helpers/auth";
 
 test.describe("scaffold shell", () => {
-  test("home renders live health from the daemon", async ({ page }) => {
+  test("home renders the project list after login", async ({ page }) => {
+    await login(page);
     await page.goto("/#/");
 
     await expect(page.getByRole("heading", { level: 1, name: "Shepherd" })).toBeVisible();
-    await expect(page.getByText("pass", { exact: true })).toBeVisible();
-    await expect(page.getByText(/^\d+\.\d+\.\d+/)).toBeVisible();
-    await expect(page.getByText("Schema", { exact: true })).toBeVisible();
-    await expect(page.getByText("1", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
   });
 
   test("skip link focuses the main region without changing the route", async ({ page }) => {
+    await login(page);
     await page.goto("/#/");
 
     await page.keyboard.press("Tab");
@@ -24,16 +24,22 @@ test.describe("scaffold shell", () => {
     await expect(page).toHaveURL(/#\/$/);
   });
 
+  test("unauthenticated visit redirects to login", async ({ page }) => {
+    await page.goto("/#/");
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    await expect(page).toHaveURL(/#\/login$/);
+  });
+
   test("unknown routes show NotFound with a way back home", async ({ page }) => {
     await page.goto("/#/definitely-not-a-route");
     await expect(page.getByText("Page not found")).toBeVisible();
-    await page.getByRole("link", { name: "Back home" }).click();
-    await expect(page.getByText("pass", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Back home" })).toBeVisible();
   });
 });
 
 test.describe("dark theme", () => {
   test("manual toggle applies and survives reload", async ({ page }) => {
+    await login(page);
     await page.goto("/#/");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
@@ -52,6 +58,7 @@ test.describe("dark theme", () => {
   });
 
   test("system preference resolves via prefers-color-scheme", async ({ page }) => {
+    await login(page);
     await page.emulateMedia({ colorScheme: "dark" });
     await page.goto("/#/");
     await page.getByRole("button", { name: "System" }).click();

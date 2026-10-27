@@ -27,10 +27,7 @@ export function ProjectOverviewScreen() {
   return (
     <>
       <Breadcrumbs
-        items={[
-          { label: t("common.nav.projects"), to: "/" },
-          { label: project.data.name },
-        ]}
+        items={[{ label: t("common.nav.projects"), to: "/" }, { label: project.data.name }]}
       />
       <PageHeader
         title={project.data.name}
@@ -52,10 +49,7 @@ export function ProjectOverviewScreen() {
         <ul className={styles.grid}>
           {allGoals.map((goal) => (
             <li key={goal.id} className={styles.card}>
-              <Link
-                to={`/projects/${projectId}/goals/${goal.id}`}
-                className={styles.cardLink}
-              >
+              <Link to={`/projects/${projectId}/goals/${goal.id}`} className={styles.cardLink}>
                 <span className={styles.cardTitle}>{goal.title}</span>
                 {goal.description ? (
                   <span className={styles.cardDescription}>{goal.description}</span>
@@ -68,7 +62,6 @@ export function ProjectOverviewScreen() {
           ))}
         </ul>
       )}
-
     </>
   );
 }

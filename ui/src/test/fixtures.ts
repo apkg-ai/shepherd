@@ -37,9 +37,7 @@ export function makeActor(overrides?: Partial<Actor>): Actor {
   };
 }
 
-export function makeBrowserSession(
-  overrides?: Partial<BrowserSession>,
-): BrowserSession {
+export function makeBrowserSession(overrides?: Partial<BrowserSession>): BrowserSession {
   return {
     actor: makeActor(),
     csrf_token: "test-csrf-token",
@@ -83,9 +81,7 @@ export function makeGoal(overrides?: Partial<Goal>): Goal {
   };
 }
 
-export function makeEpic(
-  overrides?: Partial<Epic> & { status?: EntityStatus },
-): Epic {
+export function makeEpic(overrides?: Partial<Epic> & { status?: EntityStatus }): Epic {
   const ts = now();
   return {
     id: crypto.randomUUID(),

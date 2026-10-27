@@ -42,10 +42,7 @@ export function LoginScreen() {
 
   return (
     <div className={styles.container}>
-      <PageHeader
-        title={t("auth.login.title")}
-        description={t("auth.login.description")}
-      />
+      <PageHeader title={t("auth.login.title")} description={t("auth.login.description")} />
       <form className={styles.form} onSubmit={handleSubmit} noValidate>
         <FormField
           label={t("auth.login.tokenLabel")}
@@ -65,12 +62,7 @@ export function LoginScreen() {
             />
           )}
         </FormField>
-        <Button
-          type="submit"
-          variant="primary"
-          busy={login.isPending}
-          disabled={!token.trim()}
-        >
+        <Button type="submit" variant="primary" busy={login.isPending} disabled={!token.trim()}>
           {t("auth.login.submit")}
         </Button>
       </form>

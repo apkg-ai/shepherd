@@ -68,8 +68,7 @@ export async function shepherdFetch<T>(url: string, init: RequestInit): Promise<
 
   const requestInit: RequestInit = { ...init, headers, credentials: "same-origin" };
 
-  const canRetry =
-    !isMutationMethod(method) || headers.has("Idempotency-Key");
+  const canRetry = !isMutationMethod(method) || headers.has("Idempotency-Key");
 
   let lastError: unknown;
   for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {

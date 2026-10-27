@@ -36,9 +36,7 @@ describe("LoginScreen", () => {
     await user.type(screen.getByLabelText("Owner token"), "valid-token");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
-    await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/"),
-    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
   });
 
   it("shows an invalid token error on 401", async () => {
@@ -78,11 +76,7 @@ describe("LoginScreen", () => {
   it("clears the token field after a failed attempt", async () => {
     const user = userEvent.setup();
     renderRoute("/login", {
-      handlers: [
-        http.post("/api/v1/session", () =>
-          problemResponse(401, "unauthenticated"),
-        ),
-      ],
+      handlers: [http.post("/api/v1/session", () => problemResponse(401, "unauthenticated"))],
     });
 
     const input = screen.getByLabelText("Owner token") as HTMLInputElement;

@@ -123,12 +123,17 @@ function GoalForm({
 
   const update = useMutation<Goal, unknown, { title: string; description: string; rev: number }>({
     mutationFn: (vars) =>
-      updateGoal(projectId, goalId!, { title: vars.title, description: vars.description }, {
-        headers: {
-          "If-Match": `"${vars.rev}"`,
-          "Idempotency-Key": idempotencyKey,
+      updateGoal(
+        projectId,
+        goalId!,
+        { title: vars.title, description: vars.description },
+        {
+          headers: {
+            "If-Match": `"${vars.rev}"`,
+            "Idempotency-Key": idempotencyKey,
+          },
         },
-      }),
+      ),
     meta: { silent: true },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: getGetGoalQueryKey(projectId, goalId!) });
@@ -200,10 +205,7 @@ function GoalForm({
     return (
       <>
         <Breadcrumbs items={breadcrumbItems} />
-        <PageHeader
-          title={t("goal.conflict.title")}
-          description={t("goal.conflict.description")}
-        />
+        <PageHeader title={t("goal.conflict.title")} description={t("goal.conflict.description")} />
         <div className={styles.conflictGrid}>
           <div className={styles.conflictPane}>
             <h3 className={styles.conflictLabel}>{t("goal.conflict.yours")}</h3>
@@ -237,9 +239,7 @@ function GoalForm({
   return (
     <>
       <Breadcrumbs items={breadcrumbItems} />
-      <PageHeader
-        title={isEdit ? t("goal.form.editTitle") : t("goal.form.newTitle")}
-      />
+      <PageHeader title={isEdit ? t("goal.form.editTitle") : t("goal.form.newTitle")} />
 
       <form className={styles.form} onSubmit={handleSubmit} noValidate>
         <FormField label={t("goal.form.titleLabel")} error={errors.title}>
@@ -276,12 +276,7 @@ function GoalForm({
           <Button type="button" onClick={handleCancel}>
             {t("common.action.cancel")}
           </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            busy={isPending}
-            disabled={!title.trim()}
-          >
+          <Button type="submit" variant="primary" busy={isPending} disabled={!title.trim()}>
             {isEdit ? t("goal.form.updateSubmit") : t("goal.form.createSubmit")}
           </Button>
         </div>

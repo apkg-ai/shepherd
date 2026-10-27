@@ -155,12 +155,7 @@ function CreateProjectDialog({
         {errors._form ? <p className={styles.formError}>{errors._form}</p> : null}
         <div className={styles.dialogActions}>
           <Button onClick={handleClose}>{t("common.action.cancel")}</Button>
-          <Button
-            type="submit"
-            variant="primary"
-            busy={create.isPending}
-            disabled={!name.trim()}
-          >
+          <Button type="submit" variant="primary" busy={create.isPending} disabled={!name.trim()}>
             {t("project.form.createSubmit")}
           </Button>
         </div>

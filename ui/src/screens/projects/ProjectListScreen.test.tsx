@@ -46,15 +46,9 @@ describe("ProjectListScreen", () => {
       handlers: [
         sessionHandler(),
         projectListHandler([]),
-        http.post("/api/v1/projects", () =>
-          HttpResponse.json(created, { status: 201 }),
-        ),
-        http.get(`/api/v1/projects/${created.id}`, () =>
-          HttpResponse.json(created),
-        ),
-        http.get("/api/v1/projects/:projectId/goals", () =>
-          HttpResponse.json(makePage([])),
-        ),
+        http.post("/api/v1/projects", () => HttpResponse.json(created, { status: 201 })),
+        http.get(`/api/v1/projects/${created.id}`, () => HttpResponse.json(created)),
+        http.get("/api/v1/projects/:projectId/goals", () => HttpResponse.json(makePage([]))),
       ],
     });
 
@@ -68,9 +62,7 @@ describe("ProjectListScreen", () => {
     await user.type(within(dialog).getByLabelText("Name"), "New Project");
     await user.click(within(dialog).getByRole("button", { name: "Create project" }));
 
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("shows validation errors in the create dialog on 422", async () => {

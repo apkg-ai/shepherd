@@ -1,18 +1,25 @@
 import { http } from "msw";
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { sessionHandler, projectHandler, goalHandler, epicListHandler, problemResponse } from "../../test/msw";
+import {
+  sessionHandler,
+  projectHandler,
+  goalHandler,
+  epicListHandler,
+  problemResponse,
+} from "../../test/msw";
 import { makeProject, makeGoal, makeEpic } from "../../test/fixtures";
 import { renderRoute } from "../../test/test-utils";
 
 const project = makeProject({ id: "p1", name: "Space Game" });
-const goal = makeGoal({ id: "g1", project_id: "p1", title: "Combat system", epic_counts: { total: 2, done: 1, cancelled: 0, waived: 0 } });
+const goal = makeGoal({
+  id: "g1",
+  project_id: "p1",
+  title: "Combat system",
+  epic_counts: { total: 2, done: 1, cancelled: 0, waived: 0 },
+});
 
-const baseHandlers = [
-  sessionHandler(),
-  projectHandler(project),
-  goalHandler(goal),
-];
+const baseHandlers = [sessionHandler(), projectHandler(project), goalHandler(goal)];
 
 describe("GoalDetailScreen", () => {
   it("shows goal title, breadcrumbs, and epic count", async () => {
@@ -22,7 +29,10 @@ describe("GoalDetailScreen", () => {
 
     expect(await screen.findByRole("heading", { name: "Combat system" })).toBeInTheDocument();
     expect(screen.getByText("2 epics")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Space Game" })).toHaveAttribute("href", "/projects/p1");
+    expect(screen.getByRole("link", { name: "Space Game" })).toHaveAttribute(
+      "href",
+      "/projects/p1",
+    );
     expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/");
   });
 
@@ -37,8 +47,22 @@ describe("GoalDetailScreen", () => {
 
   it("shows epic cards with status and task count", async () => {
     const epics = [
-      makeEpic({ id: "e1", project_id: "p1", goal_id: "g1", title: "Damage model", status: "active", task_counts: { total: 3, done: 1, cancelled: 0, waived: 0 } }),
-      makeEpic({ id: "e2", project_id: "p1", goal_id: "g1", title: "Targeting", status: "open", task_counts: { total: 1, done: 0, cancelled: 0, waived: 0 } }),
+      makeEpic({
+        id: "e1",
+        project_id: "p1",
+        goal_id: "g1",
+        title: "Damage model",
+        status: "active",
+        task_counts: { total: 3, done: 1, cancelled: 0, waived: 0 },
+      }),
+      makeEpic({
+        id: "e2",
+        project_id: "p1",
+        goal_id: "g1",
+        title: "Targeting",
+        status: "open",
+        task_counts: { total: 1, done: 0, cancelled: 0, waived: 0 },
+      }),
     ];
     renderRoute("/projects/p1/goals/g1", {
       handlers: [...baseHandlers, epicListHandler(epics)],

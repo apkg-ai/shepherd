@@ -27,10 +27,7 @@ describe("Breadcrumbs", () => {
   });
 
   it("marks the last item with aria-current=page", () => {
-    renderBreadcrumbs([
-      { label: "Projects", to: "/" },
-      { label: "Current page" },
-    ]);
+    renderBreadcrumbs([{ label: "Projects", to: "/" }, { label: "Current page" }]);
 
     expect(screen.getByText("Current page")).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("Projects")).not.toHaveAttribute("aria-current");

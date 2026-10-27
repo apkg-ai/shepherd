@@ -2,7 +2,12 @@ import { http } from "msw";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { sessionHandler, expiredSessionHandler, projectListHandler, problemResponse } from "../../test/msw";
+import {
+  sessionHandler,
+  expiredSessionHandler,
+  projectListHandler,
+  problemResponse,
+} from "../../test/msw";
 import { renderRoute } from "../../test/test-utils";
 
 describe("AuthBoundary", () => {
@@ -19,16 +24,12 @@ describe("AuthBoundary", () => {
       handlers: [expiredSessionHandler()],
     });
 
-    await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/login"),
-    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
   });
 
   it("shows loading state while the session is pending", () => {
     renderRoute("/", {
-      handlers: [
-        http.get("/api/v1/session", () => new Promise(() => {})),
-      ],
+      handlers: [http.get("/api/v1/session", () => new Promise(() => {}))],
     });
 
     expect(screen.getByText("Loading…")).toBeInTheDocument();
@@ -40,7 +41,8 @@ describe("AuthBoundary", () => {
     renderRoute("/", {
       handlers: [
         http.get("/api/v1/session", () => {
-          if (failing) return problemResponse(500, "internal-error", { title: "Internal Server Error" });
+          if (failing)
+            return problemResponse(500, "internal-error", { title: "Internal Server Error" });
           return undefined;
         }),
         sessionHandler(),
@@ -53,8 +55,6 @@ describe("AuthBoundary", () => {
 
     failing = false;
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() =>
-      expect(screen.getByText("No projects yet")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText("No projects yet")).toBeInTheDocument());
   });
 });
