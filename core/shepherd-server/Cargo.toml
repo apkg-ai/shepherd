@@ -21,7 +21,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.151"
 serde_urlencoded = "0.7"
 shepherd-core = { path = "../shepherd-core" }
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+# ReceiverStream adapts the SSE producer channel; version already resolved in Cargo.lock.
+tokio-stream = "0.1.19"
 tower = "0.5.3"
 tower-http = { version = "0.7.1", features = ["cors", "fs"] }
 url = "2"
@@ -30,6 +32,9 @@ uuid = { version = "1.26.1", features = ["serde", "v7"] }
 [dev-dependencies]
 # Alias so tests use the newer jsonschema API alongside the pinned 0.49 runtime layer.
 jsonschema_056 = { package = "jsonschema", version = "0.56" }
+# Direct event-row seeding and paused-clock SSE tests mirror the core suites.
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite-bundled"] }
+tokio = { version = "1.53.1", features = ["test-util"] }
 serde_yaml = "0.9"
 # test-support exposes the TestClock/StoreOptions fixtures; never in release builds.
 shepherd-core = { path = "../shepherd-core", features = ["test-support"] }

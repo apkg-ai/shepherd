@@ -1,3 +1,5 @@
+mod common;
+
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -64,15 +66,15 @@ async fn health_reports_pass_and_core_version() {
     let response = get_response(&f.app, "/health").await;
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response.headers()[header::CONTENT_TYPE],
-        "application/health+json"
-    );
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["status"], "pass");
     assert_eq!(json["version"], shepherd_core::version());
-    assert_eq!(json["description"], "shepherd local daemon");
+    assert_eq!(
+        json["schema_version"],
+        shepherd_core::storage::SCHEMA_VERSION
+    );
 }
 
 #[tokio::test]
@@ -83,7 +85,8 @@ async fn openapi_spec_is_served_as_yaml() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()[header::CONTENT_TYPE], "application/yaml");
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    assert!(body.starts_with(b"openapi:"));
+    // The stable contract is JSON-syntax YAML (plan/contracts/README.md).
+    assert!(body.starts_with(b"{"));
 }
 
 #[tokio::test]
@@ -244,55 +247,7 @@ async fn unknown_api_route_requires_authentication() {
 
 mod contract {
     use super::*;
-    use jsonschema_056::Validator;
-
-    fn load_spec() -> Value {
-        let yaml_str = include_str!("../../../openapi/shepherd.yaml");
-        serde_yaml::from_str(yaml_str).expect("failed to parse OpenAPI spec")
-    }
-
-    fn resolve_ref<'a>(spec: &'a Value, ref_path: &str) -> &'a Value {
-        let path = ref_path.strip_prefix("#/").unwrap_or(ref_path);
-        let mut current = spec;
-        for segment in path.split('/') {
-            current = &current[segment];
-        }
-        current
-    }
-
-    fn resolve_schema(spec: &Value, schema: &Value) -> Value {
-        match schema {
-            Value::Object(map) => {
-                if let Some(ref_val) = map.get("$ref") {
-                    let ref_path = ref_val.as_str().unwrap();
-                    let resolved = resolve_ref(spec, ref_path);
-                    return resolve_schema(spec, resolved);
-                }
-
-                let mut result = serde_json::Map::new();
-                for (key, val) in map {
-                    result.insert(key.clone(), resolve_schema(spec, val));
-                }
-                Value::Object(result)
-            }
-            Value::Array(arr) => {
-                Value::Array(arr.iter().map(|v| resolve_schema(spec, v)).collect())
-            }
-            other => other.clone(),
-        }
-    }
-
-    fn validate(spec: &Value, schema_ref: &str, value: &Value) {
-        let raw = resolve_ref(spec, schema_ref);
-        let resolved = resolve_schema(spec, raw);
-        let validator = Validator::new(&resolved).expect("failed to compile schema");
-        if let Err(err) = validator.validate(value) {
-            panic!(
-                "Schema validation failed for {schema_ref}:\n  {err}\nValue: {}",
-                serde_json::to_string_pretty(value).unwrap()
-            );
-        }
-    }
+    use crate::common::{load_spec, validate_against as validate};
 
     #[tokio::test]
     async fn health_response_conforms_to_spec() {
@@ -372,8 +327,11 @@ mod contract {
         }
     }
 
+    // Step 015 serves the full v1 contract except the two portability
+    // operations deferred to the follow-up step; that follow-up restores
+    // verbatim equality with plan/contracts/openapi.yaml.
     #[tokio::test]
-    async fn served_spec_is_the_embedded_scaffold_and_identity_contract() {
+    async fn served_spec_is_the_v1_contract_minus_deferred_portability() {
         let f = test_app().await;
         let response = get_response(&f.app, "/api/v1/openapi.yaml").await;
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
@@ -381,27 +339,32 @@ mod contract {
 
         assert_eq!(served, load_spec(), "served spec must be the embedded one");
 
-        let paths = served["paths"].as_object().unwrap();
-        // serde_yaml sorts map keys, so this expected list must stay in
-        // alphabetical order.
+        let mut plan: Value =
+            serde_json::from_str(include_str!("../../../plan/contracts/openapi.yaml"))
+                .expect("plan contract parses");
+        let plan_paths = plan["paths"].as_object_mut().unwrap();
+        for deferred in ["/api/v1/projects/{project_id}/export", "/api/v1/imports"] {
+            assert!(
+                plan_paths.remove(deferred).is_some(),
+                "{deferred} must exist in the plan contract"
+            );
+            assert!(
+                served["paths"].get(deferred).is_none(),
+                "{deferred} is deferred and must not be served"
+            );
+        }
         assert_eq!(
-            paths.keys().collect::<Vec<_>>(),
-            [
-                "/api/v1/agents",
-                "/api/v1/agents/{agent_id}/revoke",
-                "/api/v1/principal",
-                "/api/v1/session",
-                "/health",
-            ]
+            served, plan,
+            "served spec must be the trimmed plan contract"
         );
-        assert_eq!(
-            served["paths"]["/health"]["get"]["operationId"],
-            "getHealth"
-        );
-        assert_eq!(
-            served["paths"]["/api/v1/principal"]["get"]["operationId"],
-            "getPrincipal"
-        );
+
+        let operations: usize = served["paths"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|path| path.as_object().unwrap().len())
+            .sum();
+        assert_eq!(operations, 68, "70 frozen operations minus 2 deferred");
     }
 
     // Step 007 serves exactly the auth-owned operations from the contract

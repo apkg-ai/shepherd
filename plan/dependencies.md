@@ -15,6 +15,7 @@ Retain current package manifests and lockfiles for existing functionality. New a
 | serde | =1.0.229, features=[derive] | ProjectSettings snapshot and cursor payload (de)serialization | version already in lockfile; core/Cargo.lock inspected |
 | serde_json | =1.0.151 | Settings/affected_ids JSON text and cursor payloads | version already in lockfile; core/Cargo.lock inspected |
 | base64 | =0.23.1 | base64url no-pad cursor codec | version already in lockfile; core/Cargo.lock inspected |
+| tokio-stream | 0.1.19 | `ReceiverStream` adapts the SSE producer channel for axum's stream body | version already in lockfile; core/Cargo.lock inspected |
 
 The daemon file lock uses `std::fs::File::try_lock` (stable since Rust 1.89; the pinned toolchain is newer): identical flock semantics to the originally selected fs2 0.4.3, which is unmaintained (last release 2018) — owner-approved substitution recorded in the step 007 handoff.
 

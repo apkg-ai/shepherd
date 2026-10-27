@@ -2,20 +2,31 @@ use std::fmt;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Counts, GoalId, LifecycleRecord, ProjectId, Revision, resource_status, typed_uuid};
+use super::{
+    Counts, GoalId, LifecycleRecord, ProjectId, Revision, resource_status, typed_id_serde,
+    typed_uuid,
+};
 
 typed_uuid!(EpicId);
+typed_id_serde!(pub(super) serde_epic_id, EpicId);
 resource_status!(EpicStatus);
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Epic {
+    #[serde(with = "serde_epic_id")]
     pub id: EpicId,
+    #[serde(with = "super::content::serde_revision")]
     pub revision: Revision,
+    #[serde(with = "super::claim::serde_datetime")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "super::claim::serde_datetime")]
     pub updated_at: DateTime<Utc>,
+    #[serde(with = "super::content::serde_project_id")]
     pub project_id: ProjectId,
+    #[serde(with = "super::goal::serde_goal_id")]
     pub goal_id: GoalId,
     pub title: String,
     pub description: String,

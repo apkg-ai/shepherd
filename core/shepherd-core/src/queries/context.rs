@@ -49,7 +49,7 @@ pub struct ContextBundle {
     pub continuation_paths: Vec<String>,
 }
 
-fn session_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Session, DomainError> {
+pub(crate) fn session_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Session, DomainError> {
     let id: String = row.try_get("id")?;
     let task_id: String = row.try_get("task_id")?;
     let claim_id: String = row.try_get("claim_id")?;
@@ -67,8 +67,12 @@ fn session_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Session, DomainErro
         task_id: TaskId::from_uuid(parse_uuid("sessions.task_id", &task_id)?),
         claim_id: parse_uuid("sessions.claim_id", &claim_id)?,
         actor_id: ActorId::from_uuid(parse_uuid("sessions.actor_id", &actor_id)?),
-        phase: ClaimPhase::parse(&phase)
-            .ok_or_else(|| StorageError::Corrupt(format!("sessions.phase: {phase}")))?,
+        // The sessions CHECK allows plan/execute only; anything else is corrupt.
+        phase: match ClaimPhase::parse(&phase) {
+            Some(ClaimPhase::Plan) => ClaimPhase::Plan,
+            Some(ClaimPhase::Execute) => ClaimPhase::Execute,
+            _ => return Err(StorageError::Corrupt(format!("sessions.phase: {phase}")).into()),
+        },
         started_at: parse_ts("sessions.started_at", &started_at)?,
         ended_at: parse_ts("sessions.ended_at", &ended_at)?,
         outcome: SessionOutcome::parse(&outcome)
@@ -516,6 +520,7 @@ mod tests {
             actor: actor.clone(),
             command_id: crate::model::CommandId::generate(clock.now()),
             idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            request_hash: Some("test-request".into()),
             expected_revision,
             now: clock.now(),
         }

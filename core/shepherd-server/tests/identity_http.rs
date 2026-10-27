@@ -588,8 +588,7 @@ async fn missing_replay_key_enters_diagnostic_only_mode() {
 
     let (status, _, body) = req(Method::GET, "/health").send(&app).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["status"], "warn");
-    assert!(body["output"].as_str().unwrap().contains("replay key"));
+    assert_eq!(body["status"], "fail");
 
     let (status, _, body) = req(Method::GET, "/api/v1/principal").send(&app).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
@@ -656,4 +655,73 @@ async fn browser_session_expiry_is_fixed_at_the_http_boundary() {
         .send(&f.app)
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+// ── Step 015 gate plumbing ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn authenticated_unknown_api_route_is_problem_404() {
+    let f = fixture().await;
+    // Unrouted API paths — the deferred portability operations included —
+    // answer problem+json, never the static shell.
+    for path in [
+        "/api/v1/imports",
+        "/api/v1/projects/00000000-0000-7000-8000-000000000000/export",
+        "/api/v1/not-a-resource",
+    ] {
+        let (status, headers, body) = req(Method::GET, path)
+            .header(
+                header::AUTHORIZATION.as_str(),
+                &format!("Bearer {}", f.owner_token),
+            )
+            .send(&f.app)
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}: {body}");
+        assert_eq!(
+            headers[header::CONTENT_TYPE],
+            "application/problem+json",
+            "{path}"
+        );
+        assert_eq!(body["code"], "not_found", "{path}");
+        assert!(body["request_id"].is_string(), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn missing_command_headers_are_428_before_routing() {
+    let f = fixture().await;
+    let bearer = format!("Bearer {}", f.owner_token);
+    // (method, path, present header, expected detail fragment)
+    let project = "/api/v1/projects/00000000-0000-7000-8000-000000000000";
+    let renew = "/api/v1/projects/00000000-0000-7000-8000-000000000000/claims/00000000-0000-7000-8000-000000000001/renew";
+    let key = "00000000-0000-7000-8000-00000000000f";
+    let cases = [
+        (
+            Method::PATCH,
+            project,
+            ("if-match", "\"1\""),
+            "Idempotency-Key",
+        ),
+        (Method::PATCH, project, ("idempotency-key", key), "If-Match"),
+        (
+            Method::POST,
+            renew,
+            ("idempotency-key", key),
+            "X-Lease-Token",
+        ),
+    ];
+    for (method, path, (name, value), missing) in cases {
+        let request = req(method.clone(), path)
+            .header(header::AUTHORIZATION.as_str(), &bearer)
+            .json(serde_json::json!({}))
+            .header(name, value);
+        let (status, _, body) = request.send(&f.app).await;
+        assert_eq!(
+            status,
+            StatusCode::PRECONDITION_REQUIRED,
+            "{method} {path} without {missing}: {body}"
+        );
+        assert_eq!(body["code"], "precondition_required");
+        assert!(body["detail"].as_str().unwrap().contains(missing), "{body}");
+    }
 }

@@ -273,8 +273,8 @@ fn missing_replay_key_enters_diagnostic_only_mode() {
     let daemon = spawn_daemon(data_dir.path(), ui_dist.path(), fake_home.path(), &[]);
     let health = http(&daemon.addr, "GET /health HTTP/1.1\r\n", "");
     assert!(
-        health.contains("\"status\":\"warn\""),
-        "health must warn in diagnostic mode: {health}"
+        health.contains("\"status\":\"fail\""),
+        "health must fail in diagnostic mode: {health}"
     );
     let api = http(&daemon.addr, "GET /api/v1/principal HTTP/1.1\r\n", "");
     assert!(
@@ -321,4 +321,73 @@ fn reissue_flag_fails_loudly_without_a_replay_key() {
     );
     // The owner token must be untouched: no rotation happened.
     assert!(data_dir.path().join("owner-token").exists());
+}
+
+#[tokio::test]
+async fn non_v1_database_refuses_startup() {
+    let fake_home = tempfile::tempdir().unwrap();
+    let data_dir = tempfile::tempdir().unwrap();
+    let ui_dist = ui_dir();
+
+    // Provision a real install first: without a replay key the daemon would
+    // enter diagnostic-only mode before ever opening the database.
+    drop(spawn_daemon(
+        data_dir.path(),
+        ui_dist.path(),
+        fake_home.path(),
+        &[],
+    ));
+
+    // Swap in a real SQLite database that is not shepherd's (application_id 0).
+    let db = data_dir.path().join("shepherd.db");
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(data_dir.path().join(format!("shepherd.db{suffix}")));
+    }
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&db)
+        .create_if_missing(true);
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect_with(options)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let before = std::fs::read(&db).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_shepherd-server"))
+        .args([
+            "--data-dir",
+            data_dir.path().to_str().unwrap(),
+            "serve",
+            "--port",
+            "0",
+            "--ui-dir",
+            ui_dist.path().to_str().unwrap(),
+        ])
+        .env("HOME", fake_home.path())
+        .output()
+        .expect("failed to run shepherd-server");
+
+    assert!(
+        !output.status.success(),
+        "a non-v1 database must refuse startup"
+    );
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !printed.contains("listening on"),
+        "the daemon must not bind: {printed}"
+    );
+    assert!(
+        printed.contains("refusing to open"),
+        "the refusal is diagnosed: {printed}"
+    );
+    // Never reset or delete the user's database (plan rule): bytes untouched.
+    assert_eq!(std::fs::read(&db).unwrap(), before);
 }

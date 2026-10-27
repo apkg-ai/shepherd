@@ -100,14 +100,15 @@ impl Store {
         project: ProjectId,
         reason: String,
     ) -> Result<CommandResult<Project>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let current = project_row(tx, &project)
                     .await?
                     .ok_or(DomainError::NotFound)?;
                 require_capability(&actor, Capability::AdministerProject)?;
-                require_revision(ctx.expected_revision, current.revision)?;
+                require_revision(closure_ctx.expected_revision, current.revision)?;
                 if current.archived {
                     return Err(DomainError::ArchivedScope);
                 }
@@ -120,7 +121,7 @@ impl Store {
                     tx,
                     "project_id",
                     &project.to_string(),
-                    &format_ts(&ctx.now),
+                    &format_ts(&closure_ctx.now),
                 )
                 .await?
                 {
@@ -130,11 +131,19 @@ impl Store {
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let next = current.revision.next();
-                set_archived(tx, "projects", &project.to_string(), next, &ctx, &reason).await?;
+                set_archived(
+                    tx,
+                    "projects",
+                    &project.to_string(),
+                    next,
+                    &closure_ctx,
+                    &reason,
+                )
+                .await?;
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "archiveProject",
                     &reason,
                     vec![PendingEvent::project(project, next)],
@@ -159,14 +168,15 @@ impl Store {
         goal: GoalId,
         reason: String,
     ) -> Result<CommandResult<Goal>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let current = goal_row(tx, &project, &goal)
                     .await?
                     .ok_or(DomainError::NotFound)?;
                 require_capability(&actor, Capability::AdministerProject)?;
-                require_revision(ctx.expected_revision, current.revision)?;
+                require_revision(closure_ctx.expected_revision, current.revision)?;
                 if current.archived || project_archived(tx, &project).await? {
                     return Err(DomainError::ArchivedScope);
                 }
@@ -175,8 +185,13 @@ impl Store {
                         "goal contains nonterminal work".into(),
                     ));
                 }
-                if scope_has_active_work(tx, "goal_id", &goal.to_string(), &format_ts(&ctx.now))
-                    .await?
+                if scope_has_active_work(
+                    tx,
+                    "goal_id",
+                    &goal.to_string(),
+                    &format_ts(&closure_ctx.now),
+                )
+                .await?
                 {
                     return Err(DomainError::ActiveWork(
                         "a task in the goal has an active claim or pending submission".into(),
@@ -184,11 +199,11 @@ impl Store {
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let next = current.revision.next();
-                set_archived(tx, "goals", &goal.to_string(), next, &ctx, &reason).await?;
+                set_archived(tx, "goals", &goal.to_string(), next, &closure_ctx, &reason).await?;
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "archiveGoal",
                     &reason,
                     vec![PendingEvent::goal(goal, next)],
@@ -213,12 +228,13 @@ impl Store {
         epic: EpicId,
         reason: String,
     ) -> Result<CommandResult<Epic>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope = epic_scope(tx, &project, &epic).await?;
                 require_capability(&actor, Capability::AdministerProject)?;
-                require_revision(ctx.expected_revision, scope.epic.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.epic.revision)?;
                 scope.ensure_unarchived()?;
                 if !scope.epic.status.is_terminal() {
                     return Err(DomainError::InvalidState(
@@ -240,18 +256,18 @@ impl Store {
                         "epic contains nonterminal work".into(),
                     ));
                 }
-                if epic_has_active_work(tx, epic, &format_ts(&ctx.now)).await? {
+                if epic_has_active_work(tx, epic, &format_ts(&closure_ctx.now)).await? {
                     return Err(DomainError::ActiveWork(
                         "a descendant task has an active claim or pending submission".into(),
                     ));
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let next = scope.epic.revision.next();
-                set_archived(tx, "epics", &epic.to_string(), next, &ctx, &reason).await?;
+                set_archived(tx, "epics", &epic.to_string(), next, &closure_ctx, &reason).await?;
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "archiveEpic",
                     &reason,
                     vec![PendingEvent::epic(epic, next, scope.epic.goal_id)],
@@ -276,30 +292,31 @@ impl Store {
         task: TaskId,
         reason: String,
     ) -> Result<CommandResult<Task>, DomainError> {
-        self.domain_transaction(move |tx| {
+        let closure_ctx = ctx.clone();
+        self.idempotent_command(&ctx, 200, move |tx| {
             Box::pin(async move {
-                let actor = live_actor(tx, &ctx.actor.id).await?;
+                let actor = live_actor(tx, &closure_ctx.actor.id).await?;
                 let scope = task_scope(tx, &project, &task).await?;
                 require_capability(&actor, Capability::AdministerProject)?;
-                require_revision(ctx.expected_revision, scope.task.revision)?;
+                require_revision(closure_ctx.expected_revision, scope.task.revision)?;
                 scope.ensure_unarchived()?;
                 if !scope.task.status.is_terminal() {
                     return Err(DomainError::InvalidState(
                         "task must be terminal before archive".into(),
                     ));
                 }
-                if task_has_active_work(tx, task, &format_ts(&ctx.now)).await? {
+                if task_has_active_work(tx, task, &format_ts(&closure_ctx.now)).await? {
                     return Err(DomainError::ActiveWork(
                         "task has an active claim or pending submission".into(),
                     ));
                 }
                 let reason = validate_required_text("reason", &reason, REASON_MAX_CHARS)?;
                 let next = scope.task.revision.next();
-                set_archived(tx, "tasks", &task.to_string(), next, &ctx, &reason).await?;
+                set_archived(tx, "tasks", &task.to_string(), next, &closure_ctx, &reason).await?;
                 let events = append_events(
                     tx,
                     &project,
-                    &ctx,
+                    &closure_ctx,
                     "archiveTask",
                     &reason,
                     vec![PendingEvent::task(task, next, scope.task.epic_id)],
@@ -344,7 +361,8 @@ mod tests {
         CommandContext {
             actor: actor.clone(),
             command_id: crate::model::CommandId::generate(clock.now()),
-            idempotency_key: Uuid::nil(),
+            idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            request_hash: Some("test-request".into()),
             expected_revision,
             now: clock.now(),
         }

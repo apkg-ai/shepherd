@@ -42,6 +42,7 @@ fn ctx(actor: &Actor, now: DateTime<Utc>, expected_revision: Option<i64>) -> Com
         actor: actor.clone(),
         command_id: CommandId::generate(now),
         idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+        request_hash: Some("test-request".into()),
         expected_revision,
         now,
     }
@@ -57,6 +58,7 @@ fn ctx_with_key(
         actor: actor.clone(),
         command_id: CommandId::generate(now),
         idempotency_key: key,
+        request_hash: Some("test-request".into()),
         expected_revision,
         now,
     }

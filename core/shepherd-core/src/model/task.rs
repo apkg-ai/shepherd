@@ -2,6 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::project::ReviewPolicy;
@@ -10,7 +11,8 @@ use super::{EpicId, LifecycleRecord, ProjectId, Revision, resource_status, typed
 typed_uuid!(TaskId);
 resource_status!(TaskStatus);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskPhase {
     Planning,
     PlanReview,
@@ -42,13 +44,19 @@ impl TaskPhase {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Task {
+    #[serde(with = "super::claim::serde_task_id")]
     pub id: TaskId,
+    #[serde(with = "super::content::serde_revision")]
     pub revision: Revision,
+    #[serde(with = "super::claim::serde_datetime")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "super::claim::serde_datetime")]
     pub updated_at: DateTime<Utc>,
+    #[serde(with = "super::content::serde_project_id")]
     pub project_id: ProjectId,
+    #[serde(with = "super::epic::serde_epic_id")]
     pub epic_id: EpicId,
     pub title: String,
     pub description: String,

@@ -15,6 +15,9 @@ pub struct RequestContextInner {
     /// Present only for cookie-authenticated requests.
     pub session: Option<(SecretString, BrowserSession)>,
     pub cookie_action: Mutex<Option<CookieAction>>,
+    /// Quoted revision the gate copies onto the response ETag (generated
+    /// response enums cannot carry headers).
+    pub etag: Mutex<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -31,6 +34,7 @@ impl RequestContext {
             principal,
             session,
             cookie_action: Mutex::new(None),
+            etag: Mutex::new(None),
         }))
     }
 }
@@ -53,4 +57,10 @@ pub fn current_context() -> RequestContext {
 pub fn set_cookie_action(action: CookieAction) {
     let ctx = current_context();
     *ctx.0.cookie_action.lock().unwrap() = Some(action);
+}
+
+/// GET resource responses carry ETag with the quoted decimal revision (plan/07).
+pub fn set_etag(revision: i64) {
+    let ctx = current_context();
+    *ctx.0.etag.lock().unwrap() = Some(format!("\"{revision}\""));
 }

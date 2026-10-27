@@ -48,6 +48,7 @@ fn ctx(store: &Store, actor: &Actor) -> CommandContext {
         actor: actor.clone(),
         command_id: CommandId::generate(now),
         idempotency_key: uuid::Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+        request_hash: Some("test-request".into()),
         expected_revision: None,
         now,
     }
@@ -271,6 +272,7 @@ async fn restore_preserves_completed_state_and_credentials() {
             actor: actor.clone(),
             command_id: CommandId::generate(now),
             idempotency_key: key,
+            request_hash: Some("test-request".into()),
             expected_revision: Some(seeded.task.revision.value()),
             now,
         }

@@ -9,7 +9,7 @@ import { renderRoute } from "../test/test-utils";
 const healthy = getGetHealthMockHandler({
   status: "pass",
   version: "0.1.0",
-  description: "shepherd local daemon",
+  schema_version: 1,
 });
 
 describe("AppShell", () => {
@@ -40,7 +40,8 @@ describe("HomeScreen", () => {
 
     expect(await screen.findByText("pass")).toBeInTheDocument();
     expect(screen.getByText("0.1.0")).toBeInTheDocument();
-    expect(screen.getByText("shepherd local daemon")).toBeInTheDocument();
+    expect(screen.getByText("Schema")).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
   });
 
   it("shows an error state with retry when health fails, and recovers", async () => {

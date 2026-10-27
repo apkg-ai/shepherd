@@ -56,6 +56,7 @@ fn ctx(actor: &Actor, now: DateTime<Utc>, expected_revision: Option<i64>) -> Com
         actor: actor.clone(),
         command_id: CommandId::generate(now),
         idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+        request_hash: Some("test-request".into()),
         expected_revision,
         now,
     }
@@ -231,6 +232,7 @@ async fn ten_simultaneous_claims_yield_one_active_winner() {
                         actor: agent,
                         command_id: CommandId::generate(now),
                         idempotency_key: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+                        request_hash: Some("test-request".into()),
                         expected_revision: Some(rev),
                         now,
                     },
@@ -515,6 +517,7 @@ async fn lost_claim_response_replay_returns_same_lease_release_does_not_erase_sa
         actor: s.owner.clone(),
         command_id: CommandId::generate(s.clock.now()),
         idempotency_key,
+        request_hash: None,
         expected_revision: Some(task.revision.value()),
         now: s.clock.now(),
     };
@@ -543,6 +546,7 @@ async fn lost_claim_response_replay_returns_same_lease_release_does_not_erase_sa
         actor: s.owner.clone(),
         command_id: CommandId::generate(s.clock.now()),
         idempotency_key,
+        request_hash: None,
         expected_revision: Some(task.revision.value()),
         now: s.clock.now(),
     };
@@ -586,6 +590,7 @@ async fn lost_claim_response_replay_returns_same_lease_release_does_not_erase_sa
         actor: s.owner.clone(),
         command_id: CommandId::generate(s.clock.now()),
         idempotency_key,
+        request_hash: None,
         expected_revision: Some(task.revision.value()),
         now: s.clock.now(),
     };

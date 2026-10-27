@@ -18,3 +18,14 @@ id = "RUSTSEC-2024-0449"
 # Revisit: remove when the server tests migrate off serde_yaml (e.g. to a
 # safe-Rust parser such as serde-saphyr, with step 015).
 
+
+[[IgnoredVulns]]
+id = "GHSA-qwgh-2vcv-g2f7"
+# block-buffer 0.10.4 (panic corrupts inline buffer position; fixed only in
+# the 0.12 line, which digest 0.10 cannot reach). Pulled solely through
+# sqlx 0.9.0's sha2 0.10: sqlx-core hashes the crate's own static migration
+# SQL at boot (migrate feature), and sqlx-macros-core uses it at compile time
+# only. Inputs are well-formed, so the panic path is unreachable. Shepherd's
+# own credential/cursor hashing runs on sha2 =0.11.0 -> block-buffer 0.12.1,
+# the fixed line. No sqlx release bumps digest past 0.10 (0.9.0 is latest).
+# Revisit: remove when sqlx moves to sha2 0.11/digest 0.11.

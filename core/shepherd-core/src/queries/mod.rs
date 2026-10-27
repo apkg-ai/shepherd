@@ -3,7 +3,9 @@ pub(crate) mod context;
 pub(crate) mod graph;
 pub(crate) mod hierarchy;
 pub(crate) mod history;
+pub(crate) mod sessions;
 pub(crate) mod submissions;
+pub(crate) mod views;
 pub(crate) mod work;
 
 pub use claims::ClaimListFilters;
@@ -12,6 +14,7 @@ pub use graph::{DependencyListFilters, GRAPH_MAX_DEPENDENCIES, GRAPH_MAX_NODES, 
 pub use hierarchy::{EpicListFilters, TaskListFilters};
 pub use history::{REPLAY_MAX_EVENTS, REPLAY_WINDOW_DAYS, ReplayOutcome, ResyncReason};
 pub use submissions::SubmissionListFilters;
+pub use views::{EpicView, TaskView};
 pub use work::{WorkFilters, WorkItem, WorkPhase};
 
 use std::sync::OnceLock;
