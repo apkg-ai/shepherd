@@ -68,6 +68,24 @@ describe("GoalFormScreen — create mode", () => {
     expect(await screen.findByText("Title is required")).toBeInTheDocument();
   });
 
+  it("shows generic form error on non-422 create failure", async () => {
+    const user = userEvent.setup();
+
+    server.use(
+      http.post("/api/v1/projects/p1/goals", () =>
+        problemResponse(500, "internal-error", { title: "Server Error" }),
+      ),
+    );
+
+    renderRoute("/projects/p1/goals/new", { handlers: baseHandlers });
+
+    await screen.findByLabelText("Title");
+    await user.type(screen.getByLabelText("Title"), "Test");
+    await user.click(screen.getByRole("button", { name: "Create goal" }));
+
+    expect(await screen.findByText("Server Error")).toBeInTheDocument();
+  });
+
   it("shows error when project fails to load", async () => {
     renderRoute("/projects/p1/goals/new", {
       handlers: [
