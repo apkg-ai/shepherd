@@ -42,7 +42,7 @@ describe("ProjectOverviewScreen", () => {
     expect(await screen.findByText("Combat system")).toBeInTheDocument();
     expect(screen.getByText("Economy")).toBeInTheDocument();
     expect(screen.getByText("3 epics")).toBeInTheDocument();
-    expect(screen.getByText("1 epics")).toBeInTheDocument();
+    expect(screen.getByText("1 epic")).toBeInTheDocument();
   });
 
   it("shows empty state with CTA when no goals", async () => {

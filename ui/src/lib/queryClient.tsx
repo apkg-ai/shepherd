@@ -1,6 +1,7 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { isShepherdError } from "../api/problem";
+import { setCsrfToken } from "../api/client";
 import { useToast } from "../components/Toast";
 
 interface QueryClientOptions {
@@ -46,6 +47,10 @@ export function AppQueryProvider({ children }: { children: ReactNode }) {
   const [client] = useState(() =>
     createQueryClient({
       onMutationError: (message) => toast(message, "error"),
+      onAuthExpired: () => {
+        setCsrfToken(undefined);
+        window.location.hash = "#/login";
+      },
     }),
   );
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;

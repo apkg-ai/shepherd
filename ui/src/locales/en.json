@@ -58,9 +58,11 @@
       "edit": "Edit",
       "emptyEpicsCta": "Epics will appear here once created.",
       "emptyEpicsTitle": "No epics yet",
-      "epicCount": "{{count}} epics",
+      "epicCount_one": "{{count}} epic",
+      "epicCount_other": "{{count}} epics",
       "epicsTitle": "Epics",
-      "taskCount": "{{count}} tasks"
+      "taskCount_one": "{{count}} task",
+      "taskCount_other": "{{count}} tasks"
     },
     "form": {
       "createSubmit": "Create goal",
@@ -96,7 +98,8 @@
     "overview": {
       "emptyGoalsCta": "Create your first goal",
       "emptyGoalsTitle": "No goals yet",
-      "epicCount": "{{count}} epics",
+      "epicCount_one": "{{count}} epic",
+      "epicCount_other": "{{count}} epics",
       "newGoal": "New goal"
     }
   },

@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useGetProject } from "../../api/generated/projects/projects";
 import {
   useGetGoal,
+  getGoal,
   createGoal,
   updateGoal,
   getGetGoalQueryKey,
@@ -143,17 +144,22 @@ function GoalForm({
     onError: async (error) => {
       setIdempotencyKey(newIdempotencyKey());
       if (isShepherdError(error) && error.status === 412) {
-        const fresh = await queryClient.fetchQuery<Goal>({
-          queryKey: getGetGoalQueryKey(projectId, goalId!),
-          staleTime: 0,
-        });
-        setConflict({
-          localTitle: title,
-          localDescription: description,
-          remoteTitle: fresh.title,
-          remoteDescription: fresh.description,
-          remoteRevision: fresh.revision,
-        });
+        try {
+          const fresh = await queryClient.fetchQuery<Goal>({
+            queryKey: getGetGoalQueryKey(projectId, goalId!),
+            queryFn: () => getGoal(projectId, goalId!),
+            staleTime: 0,
+          });
+          setConflict({
+            localTitle: title,
+            localDescription: description,
+            remoteTitle: fresh.title,
+            remoteDescription: fresh.description,
+            remoteRevision: fresh.revision,
+          });
+        } catch {
+          setErrors({ _form: t("common.error.unexpected") });
+        }
       } else if (isShepherdError(error) && error.status === 422) {
         setErrors(fieldErrors(error));
       } else {

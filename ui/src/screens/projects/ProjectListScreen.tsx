@@ -1,8 +1,12 @@
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { useMutation } from "@tanstack/react-query";
-import { useListProjects, createProject } from "../../api/generated/projects/projects";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useListProjects,
+  createProject,
+  getListProjectsQueryKey,
+} from "../../api/generated/projects/projects";
 import type { Project } from "../../api/generated/model/project";
 import { isShepherdError, fieldErrors } from "../../api/problem";
 import { newIdempotencyKey } from "../../lib/idempotency";
@@ -82,6 +86,7 @@ function CreateProjectDialog({
   onCreated: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -94,6 +99,7 @@ function CreateProjectDialog({
       }),
     meta: { silent: true },
     onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
       resetForm();
       onClose();
       onCreated(data.id);

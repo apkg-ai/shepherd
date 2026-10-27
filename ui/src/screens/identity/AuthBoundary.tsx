@@ -36,7 +36,9 @@ export function AuthBoundary() {
         });
       },
     };
-  }, [session.data, logoutMutation, queryClient]);
+    // logoutMutation.mutate is referentially stable; omit the mutation object itself
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.data, queryClient]);
 
   if (session.isPending) return <LoadingState />;
 
