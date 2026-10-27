@@ -83,6 +83,36 @@ describe("GoalDetailScreen", () => {
     expect(editButton).toHaveAttribute("href", "/projects/p1/goals/g1/edit");
   });
 
+  it("shows error state when project fetch fails", async () => {
+    renderRoute("/projects/p1/goals/g1", {
+      handlers: [
+        sessionHandler(),
+        http.get("/api/v1/projects/p1", () =>
+          problemResponse(500, "internal-error", { title: "Project Error" }),
+        ),
+        goalHandler(goal),
+        epicListHandler([]),
+      ],
+    });
+
+    expect(await screen.findByText("Project Error")).toBeInTheDocument();
+  });
+
+  it("shows error state when epic list fails", async () => {
+    renderRoute("/projects/p1/goals/g1", {
+      handlers: [
+        sessionHandler(),
+        projectHandler(project),
+        goalHandler(goal),
+        http.get("/api/v1/projects/:projectId/epics", () =>
+          problemResponse(500, "internal-error", { title: "Epic Error" }),
+        ),
+      ],
+    });
+
+    expect(await screen.findByText("Epic Error")).toBeInTheDocument();
+  });
+
   it("shows error state when goal fetch fails", async () => {
     renderRoute("/projects/p1/goals/g1", {
       handlers: [
