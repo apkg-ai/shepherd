@@ -68,6 +68,32 @@ describe("GoalFormScreen — create mode", () => {
     expect(await screen.findByText("Title is required")).toBeInTheDocument();
   });
 
+  it("shows error when project fails to load", async () => {
+    renderRoute("/projects/p1/goals/new", {
+      handlers: [
+        sessionHandler(),
+        http.get("/api/v1/projects/p1", () =>
+          problemResponse(500, "internal-error", { title: "Project Error" }),
+        ),
+      ],
+    });
+
+    expect(await screen.findByText("Project Error")).toBeInTheDocument();
+  });
+
+  it("shows error when goal fails to load in edit mode", async () => {
+    renderRoute("/projects/p1/goals/g1/edit", {
+      handlers: [
+        ...baseHandlers,
+        http.get("/api/v1/projects/:projectId/goals/g1", () =>
+          problemResponse(500, "internal-error", { title: "Goal Error" }),
+        ),
+      ],
+    });
+
+    expect(await screen.findByText("Goal Error")).toBeInTheDocument();
+  });
+
   it("shows breadcrumbs back to project", async () => {
     renderRoute("/projects/p1/goals/new", { handlers: baseHandlers });
 
@@ -244,6 +270,29 @@ describe("GoalFormScreen — edit mode", () => {
     await user.click(screen.getByRole("button", { name: "Discard my changes" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1/goals/g1"));
+  });
+
+  it("shows field errors on edit 422", async () => {
+    const user = userEvent.setup();
+
+    renderRoute("/projects/p1/goals/g1/edit", {
+      handlers: [
+        ...baseHandlers,
+        http.get("/api/v1/projects/:projectId/goals/g1", () => HttpResponse.json(existingGoal)),
+        http.patch("/api/v1/projects/p1/goals/g1", () =>
+          problemResponse(422, "validation_error", {
+            title: "Validation failed",
+            errors: [{ field: "/title", message: "Too short", code: "min_length" }],
+          }),
+        ),
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original title"));
+    await user.type(screen.getByLabelText("Title"), " x");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Too short")).toBeInTheDocument();
   });
 
   it("shows form error on unexpected mutation failure", async () => {

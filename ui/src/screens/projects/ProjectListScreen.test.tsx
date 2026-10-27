@@ -89,4 +89,41 @@ describe("ProjectListScreen", () => {
 
     expect(await within(dialog).findByText("Name is required")).toBeInTheDocument();
   });
+
+  it("closes the create dialog and resets form", async () => {
+    const user = userEvent.setup();
+    renderRoute("/", { handlers: [sessionHandler(), projectListHandler([])] });
+
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New project" }));
+
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Name"), "Draft");
+    await user.type(within(dialog).getByLabelText("Description"), "Some description");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows generic error in create dialog on non-422 failure", async () => {
+    const user = userEvent.setup();
+    renderRoute("/", {
+      handlers: [
+        sessionHandler(),
+        projectListHandler([]),
+        http.post("/api/v1/projects", () =>
+          problemResponse(500, "internal-error", { title: "Server Error" }),
+        ),
+      ],
+    });
+
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New project" }));
+
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Name"), "Test");
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+
+    expect(await within(dialog).findByText("Server Error")).toBeInTheDocument();
+  });
 });
