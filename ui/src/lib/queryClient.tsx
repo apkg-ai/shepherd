@@ -1,9 +1,14 @@
-import { MutationCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { isShepherdError } from "../api/problem";
 import { useToast } from "../components/Toast";
 
-export function createQueryClient(onMutationError?: (message: string) => void): QueryClient {
+interface QueryClientOptions {
+  onMutationError?: (message: string) => void;
+  onAuthExpired?: () => void;
+}
+
+export function createQueryClient(options?: QueryClientOptions): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
@@ -14,10 +19,21 @@ export function createQueryClient(onMutationError?: (message: string) => void): 
       },
       mutations: { retry: false },
     },
+    queryCache: new QueryCache({
+      onError: (error) => {
+        if (isShepherdError(error) && error.status === 401) {
+          options?.onAuthExpired?.();
+        }
+      },
+    }),
     mutationCache: new MutationCache({
       onError: (error, _variables, _context, mutation) => {
+        if (isShepherdError(error) && error.status === 401) {
+          options?.onAuthExpired?.();
+          return;
+        }
         if (mutation.meta?.silent === true) return;
-        onMutationError?.(
+        options?.onMutationError?.(
           isShepherdError(error) ? (error.detail ?? error.title) : "Request failed",
         );
       },
@@ -27,6 +43,10 @@ export function createQueryClient(onMutationError?: (message: string) => void): 
 
 export function AppQueryProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
-  const [client] = useState(() => createQueryClient((message) => toast(message, "error")));
+  const [client] = useState(() =>
+    createQueryClient({
+      onMutationError: (message) => toast(message, "error"),
+    }),
+  );
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }

@@ -1,9 +1,8 @@
-import { http } from "msw";
-import { screen, waitFor } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { getGetHealthMockHandler } from "../api/generated/system/system.msw";
-import { problemResponse } from "../test/msw";
+import { sessionHandler, projectListHandler } from "../test/msw";
 import { renderRoute } from "../test/test-utils";
 
 const healthy = getGetHealthMockHandler({
@@ -12,21 +11,23 @@ const healthy = getGetHealthMockHandler({
   schema_version: 1,
 });
 
+const authed = [healthy, sessionHandler(), projectListHandler([])];
+
 describe("AppShell", () => {
   it("renders the accessible scaffold: skip link, landmarks, brand, theme toggle", async () => {
-    renderRoute("/", { handlers: [healthy] });
+    renderRoute("/", { handlers: authed });
 
     expect(screen.getByRole("link", { name: "Skip to content" })).toHaveAttribute("href", "#main");
     expect(screen.getByRole("banner")).toBeInTheDocument();
     expect(screen.getByRole("main")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Shepherd" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Dark" })).toBeInTheDocument();
-    await screen.findByText("0.1.0"); // settle the health query
+    await screen.findByText("Projects");
   });
 
   it("skip link focuses main without navigating", async () => {
     const user = userEvent.setup();
-    renderRoute("/", { handlers: [healthy] });
+    renderRoute("/", { handlers: authed });
 
     await user.click(screen.getByRole("link", { name: "Skip to content" }));
     expect(screen.getByRole("main")).toHaveFocus();
@@ -34,39 +35,12 @@ describe("AppShell", () => {
   });
 });
 
-describe("HomeScreen", () => {
-  it("shows the daemon's health status and version", async () => {
-    renderRoute("/", { handlers: [healthy] });
+describe("ProjectListScreen", () => {
+  it("shows the empty state with CTA when no projects exist", async () => {
+    renderRoute("/", { handlers: authed });
 
-    expect(await screen.findByText("pass")).toBeInTheDocument();
-    expect(screen.getByText("0.1.0")).toBeInTheDocument();
-    expect(screen.getByText("Schema")).toBeInTheDocument();
-    expect(screen.getByText("1")).toBeInTheDocument();
-  });
-
-  it("shows an error state with retry when health fails, and recovers", async () => {
-    const user = userEvent.setup();
-    let failing = true;
-    renderRoute("/", {
-      handlers: [
-        http.get("*/health", () => {
-          if (failing) {
-            return problemResponse(500, "internal-error", {
-              title: "Internal Server Error",
-              detail: "Health check failed.",
-            });
-          }
-          return undefined;
-        }),
-        healthy,
-      ],
-    });
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Internal Server Error");
-
-    failing = false;
-    await user.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(screen.getByText("pass")).toBeInTheDocument());
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create your first project" })).toBeInTheDocument();
   });
 });
 

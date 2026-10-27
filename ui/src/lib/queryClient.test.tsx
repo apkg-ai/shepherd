@@ -33,7 +33,7 @@ describe("createQueryClient", () => {
 
   it("reports mutation errors unless the mutation opts out", async () => {
     const onError = vi.fn();
-    const client = createQueryClient(onError);
+    const client = createQueryClient({ onMutationError: onError });
 
     await client
       .getMutationCache()
