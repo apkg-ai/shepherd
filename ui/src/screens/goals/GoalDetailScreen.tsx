@@ -5,7 +5,9 @@ import { useGetGoal } from "../../api/generated/goals/goals";
 import { useListEpics } from "../../api/generated/epics/epics";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { Button } from "../../components/Button";
+import { CardGrid, StaticCard } from "../../components/CardGrid";
 import { PageHeader } from "../../components/PageHeader";
+import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import styles from "./GoalDetailScreen.module.css";
 
@@ -50,33 +52,34 @@ export function GoalDetailScreen() {
           </Link>
         }
       >
-        <span className={styles.counts}>
-          {t("goal.detail.epicCount", { count: goal.data.epic_counts.total })}
-        </span>
+        {goal.data.epic_counts.total > 0 ? (
+          <span className={styles.counts}>
+            {t("goal.detail.epicCount", { count: goal.data.epic_counts.total })}
+          </span>
+        ) : null}
       </PageHeader>
 
       <section aria-label={t("goal.detail.epicsTitle")}>
         <h3 className={styles.sectionTitle}>{t("goal.detail.epicsTitle")}</h3>
         {allEpics.length === 0 ? (
-          <EmptyState title={t("goal.detail.emptyEpicsTitle")}>
+          <EmptyState title={t("goal.detail.emptyEpicsTitle")} icon="🏗️">
             <p className={styles.emptyHint}>{t("goal.detail.emptyEpicsCta")}</p>
           </EmptyState>
         ) : (
-          <ul className={styles.grid}>
+          <CardGrid>
             {allEpics.map((epic) => (
-              <li key={epic.id} className={styles.card}>
-                <div className={styles.cardContent}>
-                  <span className={styles.cardTitle}>{epic.title}</span>
-                  <span className={styles.statusBadge} data-status={epic.status}>
-                    {epic.status}
-                  </span>
-                  <span className={styles.cardMeta}>
-                    {t("goal.detail.taskCount", { count: epic.task_counts.total })}
-                  </span>
-                </div>
-              </li>
+              <StaticCard
+                key={epic.id}
+                title={epic.title}
+                badge={<StatusBadge status={epic.status} />}
+                meta={
+                  epic.task_counts.total > 0
+                    ? t("goal.detail.taskCount", { count: epic.task_counts.total })
+                    : undefined
+                }
+              />
             ))}
-          </ul>
+          </CardGrid>
         )}
       </section>
     </>

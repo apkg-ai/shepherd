@@ -48,9 +48,9 @@
 
 .main {
   flex: 1;
-  padding: var(--space-5) var(--space-4);
-  max-width: 720px;
+  max-width: 960px;
   width: 100%;
   margin: 0 auto;
+  padding: var(--space-5) var(--space-4);
   box-sizing: border-box;
 }

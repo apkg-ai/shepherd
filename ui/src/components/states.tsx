@@ -13,9 +13,18 @@ export function LoadingState({ label }: { label?: string }) {
   );
 }
 
-export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
+export function EmptyState({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon?: string;
+  children?: ReactNode;
+}) {
   return (
-    <div className={styles.state}>
+    <div className={styles.empty}>
+      {icon ? <span className={styles.emptyIcon}>{icon}</span> : null}
       <p className={styles.emptyTitle}>{title}</p>
       {children}
     </div>

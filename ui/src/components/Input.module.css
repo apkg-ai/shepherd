@@ -1,0 +1,32 @@
+.input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-md);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  box-sizing: border-box;
+}
+
+.input:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.textarea {
+  composes: input;
+  resize: vertical;
+  font-family: var(--font-body);
+  line-height: 1.5;
+}
+
+.mono {
+  composes: input;
+  font-family: var(--font-mono);
+}

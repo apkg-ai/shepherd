@@ -18,6 +18,7 @@ import { Breadcrumbs, type BreadcrumbItem } from "../../components/Breadcrumbs";
 import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { FormField } from "../../components/FormField";
+import inputStyles from "../../components/Input.module.css";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, LoadingState } from "../../components/states";
 import styles from "./GoalFormScreen.module.css";
@@ -253,7 +254,7 @@ function GoalForm({
             <input
               {...props}
               type="text"
-              className={styles.input}
+              className={inputStyles.input}
               value={title}
               onChange={(e) => {
                 setTitle(e.target.value);
@@ -267,7 +268,7 @@ function GoalForm({
           {(props) => (
             <textarea
               {...props}
-              className={styles.textarea}
+              className={inputStyles.textarea}
               value={description}
               onChange={(e) => {
                 setDescription(e.target.value);

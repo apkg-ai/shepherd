@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -11,9 +11,10 @@ import type { Project } from "../../api/generated/model/project";
 import { isShepherdError, fieldErrors } from "../../api/problem";
 import { newIdempotencyKey } from "../../lib/idempotency";
 import { Button } from "../../components/Button";
+import { Card, CardGrid } from "../../components/CardGrid";
 import { Dialog } from "../../components/Dialog";
 import { FormField } from "../../components/FormField";
-// LoadMore omitted: pagination deferred until SSE-driven cache is in place
+import inputStyles from "../../components/Input.module.css";
 import { PageHeader } from "../../components/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import styles from "./ProjectListScreen.module.css";
@@ -44,27 +45,27 @@ export function ProjectListScreen() {
       />
 
       {allItems.length === 0 ? (
-        <EmptyState title={t("project.list.emptyTitle")}>
+        <EmptyState title={t("project.list.emptyTitle")} icon="📁">
           <Button variant="primary" onClick={() => setDialogOpen(true)}>
             {t("project.list.emptyCta")}
           </Button>
         </EmptyState>
       ) : (
-        <ul className={styles.grid}>
+        <CardGrid>
           {allItems.map((project) => (
-            <li key={project.id} className={styles.card}>
-              <Link to={`/projects/${project.id}`} className={styles.cardLink}>
-                <span className={styles.cardName}>{project.name}</span>
-                {project.description ? (
-                  <span className={styles.cardDescription}>{project.description}</span>
-                ) : null}
-                <span className={styles.cardMeta}>
-                  {t("project.overview.epicCount", { count: project.epic_counts.total })}
-                </span>
-              </Link>
-            </li>
+            <Card
+              key={project.id}
+              to={`/projects/${project.id}`}
+              title={project.name}
+              description={project.description || undefined}
+              meta={
+                project.epic_counts.total > 0
+                  ? t("project.overview.epicCount", { count: project.epic_counts.total })
+                  : undefined
+              }
+            />
           ))}
-        </ul>
+        </CardGrid>
       )}
 
       <CreateProjectDialog
@@ -140,7 +141,7 @@ function CreateProjectDialog({
             <input
               {...props}
               type="text"
-              className={styles.input}
+              className={inputStyles.input}
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
@@ -151,7 +152,7 @@ function CreateProjectDialog({
           {(props) => (
             <textarea
               {...props}
-              className={styles.textarea}
+              className={inputStyles.textarea}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}

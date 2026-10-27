@@ -4,9 +4,9 @@ import { useGetProject } from "../../api/generated/projects/projects";
 import { useListGoals } from "../../api/generated/goals/goals";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { Button } from "../../components/Button";
+import { Card, CardGrid } from "../../components/CardGrid";
 import { PageHeader } from "../../components/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
-import styles from "./ProjectOverviewScreen.module.css";
 
 export function ProjectOverviewScreen() {
   const { t } = useTranslation();
@@ -40,27 +40,27 @@ export function ProjectOverviewScreen() {
       />
 
       {allGoals.length === 0 ? (
-        <EmptyState title={t("project.overview.emptyGoalsTitle")}>
+        <EmptyState title={t("project.overview.emptyGoalsTitle")} icon="🎯">
           <Link to={`/projects/${projectId}/goals/new`}>
             <Button variant="primary">{t("project.overview.emptyGoalsCta")}</Button>
           </Link>
         </EmptyState>
       ) : (
-        <ul className={styles.grid}>
+        <CardGrid>
           {allGoals.map((goal) => (
-            <li key={goal.id} className={styles.card}>
-              <Link to={`/projects/${projectId}/goals/${goal.id}`} className={styles.cardLink}>
-                <span className={styles.cardTitle}>{goal.title}</span>
-                {goal.description ? (
-                  <span className={styles.cardDescription}>{goal.description}</span>
-                ) : null}
-                <span className={styles.cardMeta}>
-                  {t("project.overview.epicCount", { count: goal.epic_counts.total })}
-                </span>
-              </Link>
-            </li>
+            <Card
+              key={goal.id}
+              to={`/projects/${projectId}/goals/${goal.id}`}
+              title={goal.title}
+              description={goal.description || undefined}
+              meta={
+                goal.epic_counts.total > 0
+                  ? t("project.overview.epicCount", { count: goal.epic_counts.total })
+                  : undefined
+              }
+            />
           ))}
-        </ul>
+        </CardGrid>
       )}
     </>
   );
