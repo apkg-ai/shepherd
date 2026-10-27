@@ -9,7 +9,10 @@ core/shepherd-core/src/
   model/{mod,project,goal,epic,task,claim,content,review,identity,event}.rs
   workflow/{mod,epic,task,eligibility,policy}.rs
   storage/{mod,connect,transaction,rows}.rs
-  commands/{mod,hierarchy,dependencies,claims,reports,content,reviews,identity,archive}.rs
+  commands/{mod,dependencies,claims,reports,reviews,archive}.rs
+  commands/hierarchy/{mod,projects,goals,task_types,epics,tasks}.rs
+  commands/content/{mod,documents,reads,selection}.rs
+  commands/identity/{mod,bootstrap,agents,credentials,sessions}.rs
   queries/{mod,hierarchy,work,context,history,graph}.rs
   dag.rs, lease.rs, export.rs, error.rs, lib.rs
 core/shepherd-server/src/
