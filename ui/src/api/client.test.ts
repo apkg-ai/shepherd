@@ -1,4 +1,4 @@
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse, passthrough } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { server, problemResponse } from "../test/msw";
 import { shepherdFetch, setCsrfToken } from "./client";
@@ -8,6 +8,7 @@ const URL = "/api/v1/projects/test-client";
 
 afterEach(() => {
   setCsrfToken(undefined);
+  vi.useRealTimers();
 });
 
 describe("shepherdFetch", () => {
@@ -182,9 +183,24 @@ describe("shepherdFetch", () => {
       );
       vi.useFakeTimers({ shouldAdvanceTime: true });
       const result = await shepherdFetch(URL, { method: "GET" });
-      vi.useRealTimers();
       expect(result).toEqual({ ok: true });
       expect(callCount).toBe(3);
+    });
+
+    it("retries GET on network failure and succeeds", async () => {
+      let callCount = 0;
+      server.use(
+        http.get(URL, () => {
+          callCount++;
+          // passthrough hits the real (absent) jsdom network → fetch TypeError
+          if (callCount < 2) return passthrough();
+          return HttpResponse.json({ ok: true });
+        }),
+      );
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const result = await shepherdFetch(URL, { method: "GET" });
+      expect(result).toEqual({ ok: true });
+      expect(callCount).toBe(2);
     });
 
     it("does not retry 4xx errors", async () => {
@@ -228,7 +244,6 @@ describe("shepherdFetch", () => {
         body: JSON.stringify({}),
         headers: { "Idempotency-Key": "test-key" },
       });
-      vi.useRealTimers();
       expect(result).toEqual({ ok: true });
       expect(callCount).toBe(2);
     });
@@ -237,7 +252,6 @@ describe("shepherdFetch", () => {
       server.use(http.get(URL, () => problemResponse(503, "storage_busy")));
       vi.useFakeTimers({ shouldAdvanceTime: true });
       await expect(shepherdFetch(URL, { method: "GET" })).rejects.toThrow(ShepherdError);
-      vi.useRealTimers();
     });
   });
 });

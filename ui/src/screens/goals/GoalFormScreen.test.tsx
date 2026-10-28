@@ -2,7 +2,13 @@ import { http, HttpResponse } from "msw";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { sessionHandler, projectHandler, problemResponse } from "../../test/msw";
+import {
+  sessionHandler,
+  projectHandler,
+  problemResponse,
+  goalListHandler,
+  epicListHandler,
+} from "../../test/msw";
 import { server } from "../../test/msw";
 import { makeProject, makeGoal, makePage } from "../../test/fixtures";
 import { renderRoute } from "../../test/test-utils";
@@ -135,6 +141,7 @@ describe("GoalFormScreen — edit mode", () => {
   const editHandlers = [
     ...baseHandlers,
     http.get("/api/v1/projects/:projectId/goals/g1", () => HttpResponse.json(existingGoal)),
+    epicListHandler([]),
   ];
 
   it("loads existing goal data into form", async () => {
@@ -224,12 +231,13 @@ describe("GoalFormScreen — edit mode", () => {
     );
   });
 
-  it("conflict 'Save anyway' returns to the form with updated revision", async () => {
+  it("conflict 'Save anyway' resubmits with the remote revision", async () => {
     const user = userEvent.setup();
     const updated = makeGoal({ ...existingGoal, title: "Updated by someone", revision: 2 });
 
     let goalGetCount = 0;
     let patchCount = 0;
+    const ifMatchHeaders: Array<string | null> = [];
     const conflictHandlers = [
       ...baseHandlers,
       http.get("/api/v1/projects/:projectId/goals/g1", () => {
@@ -237,15 +245,16 @@ describe("GoalFormScreen — edit mode", () => {
         if (goalGetCount <= 1) return HttpResponse.json(existingGoal);
         return HttpResponse.json(updated);
       }),
-      http.patch("/api/v1/projects/p1/goals/g1", () => {
+      http.patch("/api/v1/projects/p1/goals/g1", ({ request }) => {
         patchCount++;
+        ifMatchHeaders.push(request.headers.get("if-match"));
         if (patchCount <= 1) return problemResponse(412, "revision_conflict", { title: "Stale" });
         return HttpResponse.json({ ...updated, title: "My edit" });
       }),
-      http.get("/api/v1/projects/:projectId/epics", () => HttpResponse.json(makePage([]))),
+      epicListHandler([]),
     ];
 
-    renderRoute("/projects/p1/goals/g1/edit", { handlers: conflictHandlers });
+    const { router } = renderRoute("/projects/p1/goals/g1/edit", { handlers: conflictHandlers });
 
     await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original title"));
     await user.clear(screen.getByLabelText("Title"));
@@ -255,9 +264,44 @@ describe("GoalFormScreen — edit mode", () => {
     expect(await screen.findByText("Edit conflict")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save anyway" }));
 
-    // Returns to form — conflict is cleared
+    // Returns to the form with local edits intact and the conflict cleared
     await waitFor(() => expect(screen.queryByText("Edit conflict")).not.toBeInTheDocument());
     expect(screen.getByLabelText("Title")).toHaveValue("My edit");
+
+    // Resubmitting must carry the remote revision adopted from the conflict
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1/goals/g1"));
+    expect(ifMatchHeaders).toEqual([`"1"`, `"2"`]);
+    expect(patchCount).toBe(2);
+    expect(goalGetCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows a generic error when the conflict refetch fails", async () => {
+    const user = userEvent.setup();
+
+    let goalGetCount = 0;
+    renderRoute("/projects/p1/goals/g1/edit", {
+      handlers: [
+        ...baseHandlers,
+        http.get("/api/v1/projects/:projectId/goals/g1", () => {
+          goalGetCount++;
+          if (goalGetCount <= 1) return HttpResponse.json(existingGoal);
+          return problemResponse(500, "internal-error", { title: "Refetch failed" });
+        }),
+        http.patch("/api/v1/projects/p1/goals/g1", () =>
+          problemResponse(412, "revision_conflict", { title: "Stale" }),
+        ),
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original title"));
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "My edit");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Unexpected error")).toBeInTheDocument();
+    expect(screen.queryByText("Edit conflict")).not.toBeInTheDocument();
+    expect(goalGetCount).toBe(2);
   });
 
   it("conflict 'Discard my changes' navigates back to goal detail", async () => {
@@ -338,7 +382,7 @@ describe("GoalFormScreen — create cancel", () => {
   it("cancel navigates back to project overview when form is clean", async () => {
     const project = makeProject({ id: "p1", name: "Space Game" });
     const { router } = renderRoute("/projects/p1/goals/new", {
-      handlers: [sessionHandler(), projectHandler(project)],
+      handlers: [sessionHandler(), projectHandler(project), goalListHandler([])],
     });
 
     await screen.findByRole("heading", { name: "New goal" });

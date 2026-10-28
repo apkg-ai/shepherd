@@ -5,9 +5,9 @@ import { ShepherdError } from "../api/problem";
 import { ToastProvider } from "../components/Toast";
 import { AppQueryProvider, createQueryClient } from "./queryClient";
 
-function shepherd(status: number): ShepherdError {
+function shepherd(status: number, type = "test-error"): ShepherdError {
   return new ShepherdError({
-    type: "urn:shepherd:error:test-error",
+    type: `urn:shepherd:error:${type}`,
     title: "Test",
     status,
   });
@@ -29,6 +29,11 @@ describe("createQueryClient", () => {
     expect(retry(0, shepherd(500))).toBe(true);
     expect(retry(1, new TypeError("network down"))).toBe(true);
     expect(retry(2, shepherd(500))).toBe(false);
+  });
+
+  it("never retries storage_busy — the transport layer already retried it", () => {
+    expect(retry(0, shepherd(503, "storage_busy"))).toBe(false);
+    expect(retry(1, shepherd(503, "storage_busy"))).toBe(false);
   });
 
   it("reports mutation errors unless the mutation opts out", async () => {
@@ -63,6 +68,36 @@ describe("createQueryClient", () => {
       .execute(undefined)
       .catch(() => {});
     expect(onError).toHaveBeenCalledWith("Request failed");
+  });
+
+  it("calls onAuthExpired when a query fails with 401", async () => {
+    const onAuthExpired = vi.fn();
+    const client = createQueryClient({ onAuthExpired });
+
+    await client
+      .getQueryCache()
+      .build(client, {
+        queryKey: ["session"],
+        queryFn: () => Promise.reject(shepherd(401)),
+        retry: false,
+      })
+      .fetch()
+      .catch(() => {});
+    expect(onAuthExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes mutation 401 to onAuthExpired instead of the toast path", async () => {
+    const onMutationError = vi.fn();
+    const onAuthExpired = vi.fn();
+    const client = createQueryClient({ onMutationError, onAuthExpired });
+
+    await client
+      .getMutationCache()
+      .build(client, { mutationFn: () => Promise.reject(shepherd(401)) })
+      .execute(undefined)
+      .catch(() => {});
+    expect(onAuthExpired).toHaveBeenCalledTimes(1);
+    expect(onMutationError).not.toHaveBeenCalled();
   });
 });
 

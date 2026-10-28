@@ -33,7 +33,9 @@ test.describe("scaffold shell", () => {
   test("unknown routes show NotFound with a way back home", async ({ page }) => {
     await page.goto("/#/definitely-not-a-route");
     await expect(page.getByText("Page not found")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Back home" })).toBeVisible();
+    await page.getByRole("link", { name: "Back home" }).click();
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    await expect(page).toHaveURL(/#\/login$/);
   });
 });
 

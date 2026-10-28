@@ -1,10 +1,10 @@
-import { Link, useParams } from "react-router";
+import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useGetProject } from "../../api/generated/projects/projects";
 import { useListGoals } from "../../api/generated/goals/goals";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
-import { Button } from "../../components/Button";
 import { Card, CardGrid } from "../../components/CardGrid";
+import { LinkButton } from "../../components/LinkButton";
 import { PageHeader } from "../../components/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 
@@ -33,17 +33,17 @@ export function ProjectOverviewScreen() {
         title={project.data.name}
         description={project.data.description || undefined}
         actions={
-          <Link to={`/projects/${projectId}/goals/new`}>
-            <Button variant="primary">{t("project.overview.newGoal")}</Button>
-          </Link>
+          <LinkButton to={`/projects/${projectId}/goals/new`} variant="primary">
+            {t("project.overview.newGoal")}
+          </LinkButton>
         }
       />
 
       {allGoals.length === 0 ? (
         <EmptyState title={t("project.overview.emptyGoalsTitle")} icon="🎯">
-          <Link to={`/projects/${projectId}/goals/new`}>
-            <Button variant="primary">{t("project.overview.emptyGoalsCta")}</Button>
-          </Link>
+          <LinkButton to={`/projects/${projectId}/goals/new`} variant="primary">
+            {t("project.overview.emptyGoalsCta")}
+          </LinkButton>
         </EmptyState>
       ) : (
         <CardGrid>

@@ -16,7 +16,6 @@
       "forbidden": "This token does not have browser session capability."
     },
     "session": {
-      "expired": "Your session has expired. Please sign in again.",
       "logout": "Sign out"
     }
   },
@@ -33,7 +32,6 @@
       "skipToContent": "Skip to content"
     },
     "error": {
-      "forbidden": "You do not have permission to perform this action.",
       "title": "Something went wrong",
       "unexpected": "Unexpected error"
     },
@@ -43,12 +41,20 @@
     },
     "state": {
       "loading": "Loading…"
+    },
+    "status": {
+      "active": "Active",
+      "cancelled": "Cancelled",
+      "done": "Done",
+      "open": "Open",
+      "proposed": "Proposed"
     }
   },
   "goal": {
     "conflict": {
       "description": "This goal was updated since you started editing. Compare your changes with the current version.",
       "discard": "Discard my changes",
+      "none": "—",
       "retry": "Save anyway",
       "theirs": "Current version",
       "title": "Edit conflict",

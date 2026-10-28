@@ -1,6 +1,6 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { isShepherdError } from "../api/problem";
+import { isShepherdError, errorSlug } from "../api/problem";
 import { setCsrfToken } from "../api/client";
 import { useToast } from "../components/Toast";
 
@@ -13,8 +13,13 @@ export function createQueryClient(options?: QueryClientOptions): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
+        // storage_busy is already retried at the transport layer (client.ts);
+        // retrying here too would multiply attempts.
         retry: (failureCount, error) =>
-          !(isShepherdError(error) && error.status < 500) && failureCount < 2,
+          !(
+            isShepherdError(error) &&
+            (error.status < 500 || errorSlug(error) === "storage_busy")
+          ) && failureCount < 2,
         staleTime: 5_000,
         refetchOnWindowFocus: true,
       },

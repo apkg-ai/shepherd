@@ -14,7 +14,6 @@ export function AppLayout() {
 
   return (
     <div className={styles.layout}>
-      {/* SSE subscription will be wired in a future step */}
       <Outlet />
     </div>
   );

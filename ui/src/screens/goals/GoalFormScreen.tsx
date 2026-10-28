@@ -61,6 +61,7 @@ export function GoalFormScreen() {
       initialTitle={isEdit ? goal.data!.title : ""}
       initialDescription={isEdit ? goal.data!.description : ""}
       initialRevision={isEdit ? goal.data!.revision : 0}
+      key={goalId ?? "new"}
     />
   );
 }
@@ -146,11 +147,8 @@ function GoalForm({
       setIdempotencyKey(newIdempotencyKey());
       if (isShepherdError(error) && error.status === 412) {
         try {
-          const fresh = await queryClient.fetchQuery<Goal>({
-            queryKey: getGetGoalQueryKey(projectId, goalId!),
-            queryFn: () => getGoal(projectId, goalId!),
-            staleTime: 0,
-          });
+          // Direct call: a failed refetch must not poison the mounted goal query.
+          const fresh = await getGoal(projectId, goalId!);
           setConflict({
             localTitle: title,
             localDescription: description,
@@ -220,7 +218,7 @@ function GoalForm({
               <dt>{t("goal.form.titleLabel")}</dt>
               <dd>{conflict.localTitle}</dd>
               <dt>{t("goal.form.descriptionLabel")}</dt>
-              <dd>{conflict.localDescription || "—"}</dd>
+              <dd>{conflict.localDescription || t("goal.conflict.none")}</dd>
             </dl>
           </div>
           <div className={styles.conflictPane}>
@@ -229,7 +227,7 @@ function GoalForm({
               <dt>{t("goal.form.titleLabel")}</dt>
               <dd>{conflict.remoteTitle}</dd>
               <dt>{t("goal.form.descriptionLabel")}</dt>
-              <dd>{conflict.remoteDescription || "—"}</dd>
+              <dd>{conflict.remoteDescription || t("goal.conflict.none")}</dd>
             </dl>
           </div>
         </div>

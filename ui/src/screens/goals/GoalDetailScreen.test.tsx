@@ -70,7 +70,7 @@ describe("GoalDetailScreen", () => {
 
     expect(await screen.findByText("Damage model")).toBeInTheDocument();
     expect(screen.getByText("Targeting")).toBeInTheDocument();
-    expect(screen.getByText("active")).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByText("3 tasks")).toBeInTheDocument();
   });
 

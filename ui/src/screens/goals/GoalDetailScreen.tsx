@@ -1,11 +1,11 @@
-import { Link, useParams } from "react-router";
+import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useGetProject } from "../../api/generated/projects/projects";
 import { useGetGoal } from "../../api/generated/goals/goals";
 import { useListEpics } from "../../api/generated/epics/epics";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
-import { Button } from "../../components/Button";
 import { CardGrid, StaticCard } from "../../components/CardGrid";
+import { LinkButton } from "../../components/LinkButton";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
@@ -47,9 +47,9 @@ export function GoalDetailScreen() {
         title={goal.data.title}
         description={goal.data.description || undefined}
         actions={
-          <Link to={`/projects/${projectId}/goals/${goalId}/edit`}>
-            <Button>{t("goal.detail.edit")}</Button>
-          </Link>
+          <LinkButton to={`/projects/${projectId}/goals/${goalId}/edit`}>
+            {t("goal.detail.edit")}
+          </LinkButton>
         }
       >
         {goal.data.epic_counts.total > 0 ? (
