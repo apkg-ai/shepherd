@@ -126,4 +126,61 @@ describe("ProjectListScreen", () => {
 
     expect(await within(dialog).findByText("Server Error")).toBeInTheDocument();
   });
+
+  it("reuses the idempotency key after a non-422 create failure", async () => {
+    const user = userEvent.setup();
+    const keys: Array<string | null> = [];
+    renderRoute("/", {
+      handlers: [
+        sessionHandler(),
+        projectListHandler([]),
+        http.post("/api/v1/projects", ({ request }) => {
+          keys.push(request.headers.get("idempotency-key"));
+          return problemResponse(500, "internal-error", { title: "Server Error" });
+        }),
+      ],
+    });
+
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New project" }));
+
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Name"), "Test");
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+    expect(await within(dialog).findByText("Server Error")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(keys).toHaveLength(2));
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("rotates the idempotency key on 422", async () => {
+    const user = userEvent.setup();
+    const keys: Array<string | null> = [];
+    renderRoute("/", {
+      handlers: [
+        sessionHandler(),
+        projectListHandler([]),
+        http.post("/api/v1/projects", ({ request }) => {
+          keys.push(request.headers.get("idempotency-key"));
+          return problemResponse(422, "validation_error", {
+            title: "Validation failed",
+            errors: [{ field: "/name", message: "Name is required", code: "required" }],
+          });
+        }),
+      ],
+    });
+
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New project" }));
+
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Name"), "x");
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+    expect(await within(dialog).findByText("Name is required")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(keys).toHaveLength(2));
+    expect(keys[1]).not.toBe(keys[0]);
+  });
 });

@@ -14,8 +14,9 @@ export function SignOutButton() {
 
   const logout = useDeleteBrowserSession({
     mutation: {
-      meta: { silent: true },
-      onSettled: () => {
+      // Errors surface through the global mutation toast; the client-side
+      // session state is only discarded once the server confirms sign-out.
+      onSuccess: () => {
         setCsrfToken(undefined);
         queryClient.clear();
         void navigate("/login", { replace: true });

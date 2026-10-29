@@ -17,11 +17,15 @@ export function AuthBoundary() {
 
   if (session.isPending) return <LoadingState />;
 
+  // A failed refetch with cached data (e.g. a transient error on tab focus)
+  // must not unmount the app and lose in-progress form state.
   if (session.isError) {
     if (isShepherdError(session.error) && session.error.status === 401) {
       return <Navigate to="/login" replace />;
     }
-    return <ErrorState error={session.error} onRetry={() => void session.refetch()} />;
+    if (!session.data) {
+      return <ErrorState error={session.error} onRetry={() => void session.refetch()} />;
+    }
   }
 
   return <Outlet />;

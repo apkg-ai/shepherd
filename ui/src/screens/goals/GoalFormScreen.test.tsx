@@ -74,6 +74,67 @@ describe("GoalFormScreen — create mode", () => {
     expect(await screen.findByText("Title is required")).toBeInTheDocument();
   });
 
+  it("reuses the idempotency key after a non-422 create failure", async () => {
+    const user = userEvent.setup();
+    const keys: Array<string | null> = [];
+    server.use(
+      http.post("/api/v1/projects/p1/goals", ({ request }) => {
+        keys.push(request.headers.get("idempotency-key"));
+        return problemResponse(500, "internal-error", { title: "Server Error" });
+      }),
+    );
+
+    renderRoute("/projects/p1/goals/new", { handlers: baseHandlers });
+
+    await screen.findByLabelText("Title");
+    await user.type(screen.getByLabelText("Title"), "Test");
+    await user.click(screen.getByRole("button", { name: "Create goal" }));
+    expect(await screen.findByText("Server Error")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Create goal" }));
+    await waitFor(() => expect(keys).toHaveLength(2));
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("rotates the idempotency key on 422", async () => {
+    const user = userEvent.setup();
+    const keys: Array<string | null> = [];
+    server.use(
+      http.post("/api/v1/projects/p1/goals", ({ request }) => {
+        keys.push(request.headers.get("idempotency-key"));
+        return problemResponse(422, "validation_error", {
+          title: "Validation failed",
+          errors: [{ field: "/title", message: "Too short", code: "min_length" }],
+        });
+      }),
+    );
+
+    renderRoute("/projects/p1/goals/new", { handlers: baseHandlers });
+
+    await screen.findByLabelText("Title");
+    await user.type(screen.getByLabelText("Title"), "x");
+    await user.click(screen.getByRole("button", { name: "Create goal" }));
+    expect(await screen.findByText("Too short")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Create goal" }));
+    await waitFor(() => expect(keys).toHaveLength(2));
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it("resets form state when the project route changes", async () => {
+    const user = userEvent.setup();
+    const project2 = makeProject({ id: "p2", name: "Other Game" });
+    const { router } = renderRoute("/projects/p1/goals/new", {
+      handlers: [sessionHandler(), projectHandler(project), projectHandler(project2)],
+    });
+
+    await screen.findByLabelText("Title");
+    await user.type(screen.getByLabelText("Title"), "Draft");
+
+    await router.navigate("/projects/p2/goals/new");
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(""));
+  });
+
   it("shows generic form error on non-422 create failure", async () => {
     const user = userEvent.setup();
 
@@ -332,6 +393,8 @@ describe("GoalFormScreen — edit mode", () => {
     await user.click(screen.getByRole("button", { name: "Discard my changes" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1/goals/g1"));
+    // The conflict refetch seeded the cache: detail shows the remote version
+    expect(await screen.findByRole("heading", { name: "Updated" })).toBeInTheDocument();
   });
 
   it("shows field errors on edit 422", async () => {

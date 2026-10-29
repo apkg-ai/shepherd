@@ -106,8 +106,10 @@ function CreateProjectDialog({
       onCreated(data.id);
     },
     onError: (error) => {
-      setIdempotencyKey(newIdempotencyKey());
       if (isShepherdError(error) && error.status === 422) {
+        // The payload must change, so the next attempt needs a fresh key; other
+        // failures reuse it so the server can replay a committed request.
+        setIdempotencyKey(newIdempotencyKey());
         setErrors(fieldErrors(error));
       } else {
         setErrors({ _form: isShepherdError(error) ? error.title : t("common.error.unexpected") });

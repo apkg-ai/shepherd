@@ -1,7 +1,8 @@
-import { http } from "msw";
+import { http, HttpResponse } from "msw";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { makeBrowserSession } from "../../test/fixtures";
 import {
   sessionHandler,
   expiredSessionHandler,
@@ -56,5 +57,33 @@ describe("AuthBoundary", () => {
     failing = false;
     await user.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(screen.getByText("No projects yet")).toBeInTheDocument());
+  });
+
+  it("keeps children mounted when a background session refetch fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let sessionCalls = 0;
+      renderRoute("/", {
+        handlers: [
+          http.get("/api/v1/session", () => {
+            sessionCalls++;
+            if (sessionCalls === 1) return HttpResponse.json(makeBrowserSession());
+            return problemResponse(500, "internal-error", { title: "Transient error" });
+          }),
+          projectListHandler([]),
+        ],
+      });
+
+      expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+
+      vi.advanceTimersByTime(6000); // past the 5s staleTime
+      window.dispatchEvent(new Event("visibilitychange"));
+
+      await waitFor(() => expect(sessionCalls).toBe(2));
+      expect(screen.getByText("No projects yet")).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

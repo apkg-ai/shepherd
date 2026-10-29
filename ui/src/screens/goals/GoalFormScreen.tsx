@@ -61,7 +61,7 @@ export function GoalFormScreen() {
       initialTitle={isEdit ? goal.data!.title : ""}
       initialDescription={isEdit ? goal.data!.description : ""}
       initialRevision={isEdit ? goal.data!.revision : 0}
-      key={goalId ?? "new"}
+      key={`${projectId}:${goalId ?? "new"}`}
     />
   );
 }
@@ -115,8 +115,10 @@ function GoalForm({
       void navigate(`/projects/${projectId}/goals/${data.id}`, { replace: true });
     },
     onError: (error) => {
-      setIdempotencyKey(newIdempotencyKey());
       if (isShepherdError(error) && error.status === 422) {
+        // The payload must change, so the next attempt needs a fresh key; other
+        // failures reuse it so the server can replay a committed request.
+        setIdempotencyKey(newIdempotencyKey());
         setErrors(fieldErrors(error));
       } else {
         setErrors({ _form: isShepherdError(error) ? error.title : t("common.error.unexpected") });
@@ -144,11 +146,13 @@ function GoalForm({
       void navigate(`/projects/${projectId}/goals/${goalId}`, { replace: true });
     },
     onError: async (error) => {
-      setIdempotencyKey(newIdempotencyKey());
       if (isShepherdError(error) && error.status === 412) {
+        // The retry carries a different revision, so it needs a fresh key.
+        setIdempotencyKey(newIdempotencyKey());
         try {
           // Direct call: a failed refetch must not poison the mounted goal query.
           const fresh = await getGoal(projectId, goalId!);
+          queryClient.setQueryData(getGetGoalQueryKey(projectId, goalId!), fresh);
           setConflict({
             localTitle: title,
             localDescription: description,
@@ -160,6 +164,7 @@ function GoalForm({
           setErrors({ _form: t("common.error.unexpected") });
         }
       } else if (isShepherdError(error) && error.status === 422) {
+        setIdempotencyKey(newIdempotencyKey());
         setErrors(fieldErrors(error));
       } else {
         setErrors({ _form: isShepherdError(error) ? error.title : t("common.error.unexpected") });
