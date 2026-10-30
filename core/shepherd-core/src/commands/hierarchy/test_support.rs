@@ -93,12 +93,7 @@ pub(super) async fn goal(f: &Fixture, project: ProjectId, title: &str) -> Goal {
         .value
 }
 
-pub(super) async fn epic(
-    f: &Fixture,
-    project: ProjectId,
-    goal: GoalId,
-    title: &str,
-) -> Epic {
+pub(super) async fn epic(f: &Fixture, project: ProjectId, goal: GoalId, title: &str) -> Epic {
     f.store
         .create_epic(
             ctx(&f.owner, &f.clock, None),
@@ -114,12 +109,7 @@ pub(super) async fn epic(
         .value
 }
 
-pub(super) async fn task(
-    f: &Fixture,
-    project: ProjectId,
-    epic: EpicId,
-    title: &str,
-) -> Task {
+pub(super) async fn task(f: &Fixture, project: ProjectId, epic: EpicId, title: &str) -> Task {
     f.store
         .create_task(
             ctx(&f.owner, &f.clock, None),

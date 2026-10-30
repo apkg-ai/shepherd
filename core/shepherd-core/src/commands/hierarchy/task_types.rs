@@ -135,199 +135,199 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_support::*;
+    use super::*;
 
-#[tokio::test]
-async fn task_type_commands_enforce_key_rules_and_revisions() {
-    let f = fixture().await;
-    let project = project(&f, "P").await;
+    #[tokio::test]
+    async fn task_type_commands_enforce_key_rules_and_revisions() {
+        let f = fixture().await;
+        let project = project(&f, "P").await;
 
-    let err = f
-        .store
-        .create_task_type(
-            ctx(&f.owner, &f.clock, None),
-            project.id,
-            TaskTypeCreate {
-                key: "Bad".to_string(),
-                label: "Bad".to_string(),
-            },
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, DomainError::Validation { field: "key", .. }));
-
-    let custom = f
-        .store
-        .create_task_type(
-            ctx(&f.owner, &f.clock, None),
-            project.id,
-            TaskTypeCreate {
-                key: "ops".to_string(),
-                label: "Ops".to_string(),
-            },
-        )
-        .await
-        .unwrap()
-        .value;
-    assert!(!custom.builtin);
-
-    for key in ["code", "ops"] {
         let err = f
             .store
             .create_task_type(
                 ctx(&f.owner, &f.clock, None),
                 project.id,
                 TaskTypeCreate {
-                    key: key.to_string(),
-                    label: "Again".to_string(),
+                    key: "Bad".to_string(),
+                    label: "Bad".to_string(),
                 },
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, DomainError::DuplicateTaskTypeKey { key: dup } if dup == key));
+        assert!(matches!(err, DomainError::Validation { field: "key", .. }));
+
+        let custom = f
+            .store
+            .create_task_type(
+                ctx(&f.owner, &f.clock, None),
+                project.id,
+                TaskTypeCreate {
+                    key: "ops".to_string(),
+                    label: "Ops".to_string(),
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        assert!(!custom.builtin);
+
+        for key in ["code", "ops"] {
+            let err = f
+                .store
+                .create_task_type(
+                    ctx(&f.owner, &f.clock, None),
+                    project.id,
+                    TaskTypeCreate {
+                        key: key.to_string(),
+                        label: "Again".to_string(),
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(matches!(err, DomainError::DuplicateTaskTypeKey { key: dup } if dup == key));
+        }
+
+        let err = f
+            .store
+            .update_task_type(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project.id,
+                TaskTypeId::generate(f.clock.now()),
+                TaskTypePatch::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotFound));
+        let err = f
+            .store
+            .update_task_type(
+                ctx(&f.owner, &f.clock, Some(5)),
+                project.id,
+                custom.id,
+                TaskTypePatch::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::RevisionConflict { .. }));
+
+        let renamed = f
+            .store
+            .update_task_type(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project.id,
+                custom.id,
+                TaskTypePatch {
+                    label: Some("Operations".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        assert_eq!(renamed.revision.value(), 2);
+        assert_eq!(renamed.label, "Operations");
+        assert_eq!(renamed.key, "ops");
+        assert!(!renamed.archived);
+
+        // Archived registry entries are frozen; the flag is one-way.
+        sqlx::query("UPDATE task_types SET archived = 1 WHERE id = ?1")
+            .bind(custom.id.to_string())
+            .execute(f.store.pool())
+            .await
+            .unwrap();
+        let err = f
+            .store
+            .update_task_type(
+                ctx(&f.owner, &f.clock, Some(2)),
+                project.id,
+                custom.id,
+                TaskTypePatch::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::ArchivedScope));
     }
 
-    let err = f
-        .store
-        .update_task_type(
-            ctx(&f.owner, &f.clock, Some(1)),
-            project.id,
-            TaskTypeId::generate(f.clock.now()),
-            TaskTypePatch::default(),
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, DomainError::NotFound));
-    let err = f
-        .store
-        .update_task_type(
-            ctx(&f.owner, &f.clock, Some(5)),
-            project.id,
-            custom.id,
-            TaskTypePatch::default(),
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, DomainError::RevisionConflict { .. }));
+    #[tokio::test]
+    async fn update_task_type_rejects_archive_reversal_and_validates_label() {
+        let f = fixture().await;
+        let p = project(&f, "P").await;
+        let custom = f
+            .store
+            .create_task_type(
+                ctx(&f.owner, &f.clock, None),
+                p.id,
+                TaskTypeCreate {
+                    key: "ops".to_string(),
+                    label: "Ops".to_string(),
+                },
+            )
+            .await
+            .unwrap()
+            .value;
 
-    let renamed = f
-        .store
-        .update_task_type(
-            ctx(&f.owner, &f.clock, Some(1)),
-            project.id,
-            custom.id,
-            TaskTypePatch {
-                label: Some("Operations".to_string()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
-        .value;
-    assert_eq!(renamed.revision.value(), 2);
-    assert_eq!(renamed.label, "Operations");
-    assert_eq!(renamed.key, "ops");
-    assert!(!renamed.archived);
+        // Clearing the archive flag is rejected: archival is one-way.
+        let err = f
+            .store
+            .update_task_type(
+                ctx(&f.owner, &f.clock, Some(1)),
+                p.id,
+                custom.id,
+                TaskTypePatch {
+                    archived: Some(false),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "archived",
+                ..
+            }
+        ));
 
-    // Archived registry entries are frozen; the flag is one-way.
-    sqlx::query("UPDATE task_types SET archived = 1 WHERE id = ?1")
-        .bind(custom.id.to_string())
-        .execute(f.store.pool())
-        .await
-        .unwrap();
-    let err = f
-        .store
-        .update_task_type(
-            ctx(&f.owner, &f.clock, Some(2)),
-            project.id,
-            custom.id,
-            TaskTypePatch::default(),
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, DomainError::ArchivedScope));
-}
+        // Blank label is rejected.
+        let err = f
+            .store
+            .update_task_type(
+                ctx(&f.owner, &f.clock, Some(1)),
+                p.id,
+                custom.id,
+                TaskTypePatch {
+                    label: Some("   ".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation { field: "label", .. }
+        ));
+    }
 
-#[tokio::test]
-async fn update_task_type_rejects_archive_reversal_and_validates_label() {
-    let f = fixture().await;
-    let p = project(&f, "P").await;
-    let custom = f
-        .store
-        .create_task_type(
-            ctx(&f.owner, &f.clock, None),
-            p.id,
-            TaskTypeCreate {
-                key: "ops".to_string(),
-                label: "Ops".to_string(),
-            },
-        )
-        .await
-        .unwrap()
-        .value;
+    #[tokio::test]
+    async fn create_task_type_rejects_agents() {
+        let f = fixture().await;
+        let p = project(&f, "P").await;
+        let agent = person(&f.clock, ActorKind::Agent, "agent");
+        register(&f.store, &agent).await;
 
-    // Clearing the archive flag is rejected: archival is one-way.
-    let err = f
-        .store
-        .update_task_type(
-            ctx(&f.owner, &f.clock, Some(1)),
-            p.id,
-            custom.id,
-            TaskTypePatch {
-                archived: Some(false),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(
-        err,
-        DomainError::Validation {
-            field: "archived",
-            ..
-        }
-    ));
-
-    // Blank label is rejected.
-    let err = f
-        .store
-        .update_task_type(
-            ctx(&f.owner, &f.clock, Some(1)),
-            p.id,
-            custom.id,
-            TaskTypePatch {
-                label: Some("   ".to_string()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(
-        err,
-        DomainError::Validation { field: "label", .. }
-    ));
-}
-
-#[tokio::test]
-async fn create_task_type_rejects_agents() {
-    let f = fixture().await;
-    let p = project(&f, "P").await;
-    let agent = person(&f.clock, ActorKind::Agent, "agent");
-    register(&f.store, &agent).await;
-
-    let err = f
-        .store
-        .create_task_type(
-            ctx(&agent, &f.clock, None),
-            p.id,
-            TaskTypeCreate {
-                key: "ops".to_string(),
-                label: "Ops".to_string(),
-            },
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, DomainError::Forbidden(_)));
-}
+        let err = f
+            .store
+            .create_task_type(
+                ctx(&agent, &f.clock, None),
+                p.id,
+                TaskTypeCreate {
+                    key: "ops".to_string(),
+                    label: "Ops".to_string(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)));
+    }
 }

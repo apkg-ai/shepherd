@@ -126,177 +126,69 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_support::*;
+    use super::*;
 
-#[tokio::test]
-async fn create_goal_requires_an_existing_project() {
-    let f = fixture().await;
-    let err = f
-        .store
-        .create_goal(
-            ctx(&f.owner, &f.clock, None),
-            ProjectId::generate(f.clock.now()),
-            GoalCreate {
-                title: "Orphan".to_string(),
-                description: None,
-            },
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, DomainError::NotFound));
-
-    let project = project(&f, "P").await;
-    let created = goal(&f, project.id, "G").await;
-    assert_eq!(created.project_id, project.id);
-    assert!(!created.completed);
-}
-
-#[tokio::test]
-async fn update_goal_scopes_by_project_and_checks_revision() {
-    let f = fixture().await;
-    let project_a = project(&f, "A").await;
-    let project_b = project(&f, "B").await;
-    let owned = goal(&f, project_a.id, "In A").await;
-
-    let err = f
-        .store
-        .update_goal(
-            ctx(&f.owner, &f.clock, Some(1)),
-            project_b.id,
-            owned.id,
-            TextPatch::default(),
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, DomainError::NotFound));
-    let err = f
-        .store
-        .update_goal(
-            ctx(&f.owner, &f.clock, Some(7)),
-            project_a.id,
-            owned.id,
-            TextPatch::default(),
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, DomainError::RevisionConflict { .. }));
-    let err = f
-        .store
-        .update_goal(
-            ctx(&f.owner, &f.clock, Some(1)),
-            project_a.id,
-            owned.id,
-            TextPatch {
-                title: Some("  ".to_string()),
-                description: None,
-            },
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(
-        err,
-        DomainError::Validation { field: "title", .. }
-    ));
-
-    let updated = f
-        .store
-        .update_goal(
-            ctx(&f.owner, &f.clock, Some(1)),
-            project_a.id,
-            owned.id,
-            TextPatch {
-                title: Some("Renamed".to_string()),
-                description: Some("body".to_string()),
-            },
-        )
-        .await
-        .unwrap()
-        .value;
-    assert_eq!(updated.revision.value(), 2);
-    assert_eq!(updated.title, "Renamed");
-    assert_eq!(updated.description, "body");
-}
-
-#[tokio::test]
-async fn empty_patches_are_rejected_without_writes() {
-    let f = fixture().await;
-    let project = project(&f, "P").await;
-    let goal = goal(&f, project.id, "G").await;
-    let code_type: TaskTypeId =
-        sqlx::query_scalar("SELECT id FROM task_types WHERE project_id = ?1 AND key = 'code'")
-            .bind(project.id.to_string())
-            .fetch_one(f.store.pool())
-            .await
-            .map(|id: String| id.parse().unwrap())
-            .unwrap();
-
-    let events_before: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
-        .fetch_one(f.store.pool())
-        .await
-        .unwrap();
-    let goal_err = f
-        .store
-        .update_goal(
-            ctx(&f.owner, &f.clock, Some(1)),
-            project.id,
-            goal.id,
-            TextPatch::default(),
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(
-        goal_err,
-        DomainError::Validation { field: "patch", .. }
-    ));
-    let type_err = f
-        .store
-        .update_task_type(
-            ctx(&f.owner, &f.clock, Some(1)),
-            project.id,
-            code_type,
-            TaskTypePatch::default(),
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(
-        type_err,
-        DomainError::Validation { field: "patch", .. }
-    ));
-
-    let goal_revision: i64 = sqlx::query_scalar("SELECT revision FROM goals WHERE id = ?1")
-        .bind(goal.id.to_string())
-        .fetch_one(f.store.pool())
-        .await
-        .unwrap();
-    assert_eq!(goal_revision, 1);
-    let type_revision: i64 =
-        sqlx::query_scalar("SELECT revision FROM task_types WHERE id = ?1")
-            .bind(code_type.to_string())
-            .fetch_one(f.store.pool())
-            .await
-            .unwrap();
-    assert_eq!(type_revision, 1);
-    let events_after: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
-        .fetch_one(f.store.pool())
-        .await
-        .unwrap();
-    assert_eq!(events_after, events_before);
-}
-
-#[tokio::test]
-async fn create_goal_validates_title_and_description() {
-    let f = fixture().await;
-    let p = project(&f, "P").await;
-
-    for title in ["   ", &"x".repeat(NAME_MAX_CHARS + 1)] {
+    #[tokio::test]
+    async fn create_goal_requires_an_existing_project() {
+        let f = fixture().await;
         let err = f
             .store
             .create_goal(
                 ctx(&f.owner, &f.clock, None),
-                p.id,
+                ProjectId::generate(f.clock.now()),
                 GoalCreate {
-                    title: title.to_string(),
+                    title: "Orphan".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotFound));
+
+        let project = project(&f, "P").await;
+        let created = goal(&f, project.id, "G").await;
+        assert_eq!(created.project_id, project.id);
+        assert!(!created.completed);
+    }
+
+    #[tokio::test]
+    async fn update_goal_scopes_by_project_and_checks_revision() {
+        let f = fixture().await;
+        let project_a = project(&f, "A").await;
+        let project_b = project(&f, "B").await;
+        let owned = goal(&f, project_a.id, "In A").await;
+
+        let err = f
+            .store
+            .update_goal(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project_b.id,
+                owned.id,
+                TextPatch::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotFound));
+        let err = f
+            .store
+            .update_goal(
+                ctx(&f.owner, &f.clock, Some(7)),
+                project_a.id,
+                owned.id,
+                TextPatch::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::RevisionConflict { .. }));
+        let err = f
+            .store
+            .update_goal(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project_a.id,
+                owned.id,
+                TextPatch {
+                    title: Some("  ".to_string()),
                     description: None,
                 },
             )
@@ -306,48 +198,156 @@ async fn create_goal_validates_title_and_description() {
             err,
             DomainError::Validation { field: "title", .. }
         ));
+
+        let updated = f
+            .store
+            .update_goal(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project_a.id,
+                owned.id,
+                TextPatch {
+                    title: Some("Renamed".to_string()),
+                    description: Some("body".to_string()),
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        assert_eq!(updated.revision.value(), 2);
+        assert_eq!(updated.title, "Renamed");
+        assert_eq!(updated.description, "body");
     }
 
-    let err = f
-        .store
-        .create_goal(
-            ctx(&f.owner, &f.clock, None),
-            p.id,
-            GoalCreate {
-                title: "Valid".to_string(),
-                description: Some("d".repeat(DESCRIPTION_MAX_CHARS + 1)),
-            },
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(
-        err,
-        DomainError::Validation {
-            field: "description",
-            ..
+    #[tokio::test]
+    async fn empty_patches_are_rejected_without_writes() {
+        let f = fixture().await;
+        let project = project(&f, "P").await;
+        let goal = goal(&f, project.id, "G").await;
+        let code_type: TaskTypeId =
+            sqlx::query_scalar("SELECT id FROM task_types WHERE project_id = ?1 AND key = 'code'")
+                .bind(project.id.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .map(|id: String| id.parse().unwrap())
+                .unwrap();
+
+        let events_before: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        let goal_err = f
+            .store
+            .update_goal(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project.id,
+                goal.id,
+                TextPatch::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            goal_err,
+            DomainError::Validation { field: "patch", .. }
+        ));
+        let type_err = f
+            .store
+            .update_task_type(
+                ctx(&f.owner, &f.clock, Some(1)),
+                project.id,
+                code_type,
+                TaskTypePatch::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            type_err,
+            DomainError::Validation { field: "patch", .. }
+        ));
+
+        let goal_revision: i64 = sqlx::query_scalar("SELECT revision FROM goals WHERE id = ?1")
+            .bind(goal.id.to_string())
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(goal_revision, 1);
+        let type_revision: i64 =
+            sqlx::query_scalar("SELECT revision FROM task_types WHERE id = ?1")
+                .bind(code_type.to_string())
+                .fetch_one(f.store.pool())
+                .await
+                .unwrap();
+        assert_eq!(type_revision, 1);
+        let events_after: i64 = sqlx::query_scalar("SELECT count(*) FROM events")
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+        assert_eq!(events_after, events_before);
+    }
+
+    #[tokio::test]
+    async fn create_goal_validates_title_and_description() {
+        let f = fixture().await;
+        let p = project(&f, "P").await;
+
+        for title in ["   ", &"x".repeat(NAME_MAX_CHARS + 1)] {
+            let err = f
+                .store
+                .create_goal(
+                    ctx(&f.owner, &f.clock, None),
+                    p.id,
+                    GoalCreate {
+                        title: title.to_string(),
+                        description: None,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                err,
+                DomainError::Validation { field: "title", .. }
+            ));
         }
-    ));
-}
 
-#[tokio::test]
-async fn create_goal_rejects_agents() {
-    let f = fixture().await;
-    let p = project(&f, "P").await;
-    let agent = person(&f.clock, ActorKind::Agent, "agent");
-    register(&f.store, &agent).await;
+        let err = f
+            .store
+            .create_goal(
+                ctx(&f.owner, &f.clock, None),
+                p.id,
+                GoalCreate {
+                    title: "Valid".to_string(),
+                    description: Some("d".repeat(DESCRIPTION_MAX_CHARS + 1)),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::Validation {
+                field: "description",
+                ..
+            }
+        ));
+    }
 
-    let err = f
-        .store
-        .create_goal(
-            ctx(&agent, &f.clock, None),
-            p.id,
-            GoalCreate {
-                title: "Goal".to_string(),
-                description: None,
-            },
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, DomainError::Forbidden(_)));
-}
+    #[tokio::test]
+    async fn create_goal_rejects_agents() {
+        let f = fixture().await;
+        let p = project(&f, "P").await;
+        let agent = person(&f.clock, ActorKind::Agent, "agent");
+        register(&f.store, &agent).await;
+
+        let err = f
+            .store
+            .create_goal(
+                ctx(&agent, &f.clock, None),
+                p.id,
+                GoalCreate {
+                    title: "Goal".to_string(),
+                    description: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)));
+    }
 }
