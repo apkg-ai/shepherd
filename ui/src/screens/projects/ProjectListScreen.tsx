@@ -8,7 +8,7 @@ import {
   getListProjectsQueryKey,
 } from "../../api/generated/projects/projects";
 import type { Project } from "../../api/generated/model/project";
-import { isShepherdError, fieldErrors } from "../../api/problem";
+import { isShepherdError, fieldErrors, errorSlug } from "../../api/problem";
 import { newIdempotencyKey } from "../../lib/idempotency";
 import { Button } from "../../components/Button";
 import { Card, CardGrid } from "../../components/CardGrid";
@@ -111,6 +111,14 @@ function CreateProjectDialog({
         // failures reuse it so the server can replay a committed request.
         setIdempotencyKey(newIdempotencyKey());
         setErrors(fieldErrors(error));
+      } else if (
+        isShepherdError(error) &&
+        error.status === 409 &&
+        errorSlug(error) === "idempotency_conflict"
+      ) {
+        // The REST contract: refetch and explain; do not repeat with a new key.
+        void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
+        setErrors({ _form: error.detail ?? error.title });
       } else {
         setErrors({ _form: isShepherdError(error) ? error.title : t("common.error.unexpected") });
       }

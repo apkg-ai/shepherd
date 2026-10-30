@@ -12,16 +12,23 @@ import {
   getListGoalsQueryKey,
 } from "../../api/generated/goals/goals";
 import type { Goal } from "../../api/generated/model/goal";
-import { isShepherdError, fieldErrors } from "../../api/problem";
+import { errorSlug, isShepherdError, fieldErrors, type ShepherdError } from "../../api/problem";
 import { newIdempotencyKey } from "../../lib/idempotency";
 import { Breadcrumbs, type BreadcrumbItem } from "../../components/Breadcrumbs";
 import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { FormField } from "../../components/FormField";
 import inputStyles from "../../components/Input.module.css";
+import { LinkButton } from "../../components/LinkButton";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, LoadingState } from "../../components/states";
 import styles from "./GoalFormScreen.module.css";
+
+// The REST contract: on 409 idempotency_conflict, refetch and explain;
+// never repeat automatically with a new key.
+function isIdempotencyConflict(error: ShepherdError): boolean {
+  return error.status === 409 && errorSlug(error) === "idempotency_conflict";
+}
 
 export function GoalFormScreen() {
   const { t } = useTranslation();
@@ -98,6 +105,7 @@ function GoalForm({
   const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState(initialDescription);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [createConflict, setCreateConflict] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey);
   const [revision, setRevision] = useState(initialRevision);
   const [dirty, setDirty] = useState(false);
@@ -119,8 +127,16 @@ function GoalForm({
         // The payload must change, so the next attempt needs a fresh key; other
         // failures reuse it so the server can replay a committed request.
         setIdempotencyKey(newIdempotencyKey());
+        setCreateConflict(false);
         setErrors(fieldErrors(error));
+      } else if (isShepherdError(error) && isIdempotencyConflict(error)) {
+        // The stored request has a different payload: an earlier attempt may
+        // have committed. Keep the key so the user can reconcile, not repeat.
+        void queryClient.invalidateQueries({ queryKey: getListGoalsQueryKey(projectId) });
+        setCreateConflict(true);
+        setErrors({ _form: t("goal.form.conflictPreviousSubmission") });
       } else {
+        setCreateConflict(false);
         setErrors({ _form: isShepherdError(error) ? error.title : t("common.error.unexpected") });
       }
     },
@@ -146,9 +162,7 @@ function GoalForm({
       void navigate(`/projects/${projectId}/goals/${goalId}`, { replace: true });
     },
     onError: async (error) => {
-      if (isShepherdError(error) && error.status === 412) {
-        // The retry carries a different revision, so it needs a fresh key.
-        setIdempotencyKey(newIdempotencyKey());
+      if (isShepherdError(error) && (error.status === 412 || isIdempotencyConflict(error))) {
         try {
           // Direct call: a failed refetch must not poison the mounted goal query.
           const fresh = await getGoal(projectId, goalId!);
@@ -186,6 +200,9 @@ function GoalForm({
 
   const handleConflictRetry = () => {
     if (!conflict) return;
+    // The resubmission carries a different revision or payload, so it needs a
+    // fresh key — but only on the user's explicit decision, never automatically.
+    setIdempotencyKey(newIdempotencyKey());
     setRevision(conflict.remoteRevision);
     setConflict(null);
   };
@@ -282,6 +299,11 @@ function GoalForm({
           )}
         </FormField>
         {errors._form ? <p className={styles.formError}>{errors._form}</p> : null}
+        {createConflict ? (
+          <p className={styles.formLink}>
+            <LinkButton to={`/projects/${projectId}`}>{t("goal.form.inspectGoals")}</LinkButton>
+          </p>
+        ) : null}
         <div className={styles.actions}>
           <Button type="button" onClick={handleCancel}>
             {t("common.action.cancel")}

@@ -183,4 +183,39 @@ describe("ProjectListScreen", () => {
     await waitFor(() => expect(keys).toHaveLength(2));
     expect(keys[1]).not.toBe(keys[0]);
   });
+
+  it("explains an idempotency conflict without rotating the key", async () => {
+    const user = userEvent.setup();
+    const keys: Array<string | null> = [];
+    renderRoute("/", {
+      handlers: [
+        sessionHandler(),
+        projectListHandler([]),
+        http.post("/api/v1/projects", ({ request }) => {
+          keys.push(request.headers.get("idempotency-key"));
+          return problemResponse(409, "idempotency_conflict", {
+            title: "Conflict",
+            detail: "This idempotency key was already used with a different request.",
+          });
+        }),
+      ],
+    });
+
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New project" }));
+
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Name"), "Test");
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+
+    expect(
+      await within(dialog).findByText(
+        "This idempotency key was already used with a different request.",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(keys).toHaveLength(2));
+    expect(keys[1]).toBe(keys[0]);
+  });
 });

@@ -135,6 +135,38 @@ describe("GoalFormScreen — create mode", () => {
     await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(""));
   });
 
+  it("explains an idempotency conflict and links to the goal list", async () => {
+    const user = userEvent.setup();
+    const keys: Array<string | null> = [];
+    server.use(
+      http.post("/api/v1/projects/p1/goals", ({ request }) => {
+        keys.push(request.headers.get("idempotency-key"));
+        return problemResponse(409, "idempotency_conflict", { title: "Conflict" });
+      }),
+    );
+
+    renderRoute("/projects/p1/goals/new", { handlers: baseHandlers });
+
+    await screen.findByLabelText("Title");
+    await user.type(screen.getByLabelText("Title"), "Edited");
+    await user.click(screen.getByRole("button", { name: "Create goal" }));
+
+    expect(
+      await screen.findByText(
+        "A previous submission may already have created this goal. Check the project goals before submitting again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Check project goals" })).toHaveAttribute(
+      "href",
+      "/projects/p1",
+    );
+
+    // The key is retained so a repeated identical payload can still replay
+    await user.click(screen.getByRole("button", { name: "Create goal" }));
+    await waitFor(() => expect(keys).toHaveLength(2));
+    expect(keys[1]).toBe(keys[0]);
+  });
+
   it("shows generic form error on non-422 create failure", async () => {
     const user = userEvent.setup();
 
@@ -335,6 +367,56 @@ describe("GoalFormScreen — edit mode", () => {
     expect(ifMatchHeaders).toEqual([`"1"`, `"2"`]);
     expect(patchCount).toBe(2);
     expect(goalGetCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows the conflict UI for an idempotency conflict and rotates the key on retry", async () => {
+    const user = userEvent.setup();
+    const committed = makeGoal({ ...existingGoal, title: "Committed earlier edit", revision: 2 });
+
+    let goalGetCount = 0;
+    let patchCount = 0;
+    const keys: Array<string | null> = [];
+    const ifMatchHeaders: Array<string | null> = [];
+    const { router } = renderRoute("/projects/p1/goals/g1/edit", {
+      handlers: [
+        ...baseHandlers,
+        http.get("/api/v1/projects/:projectId/goals/g1", () => {
+          goalGetCount++;
+          if (goalGetCount <= 1) return HttpResponse.json(existingGoal);
+          return HttpResponse.json(committed);
+        }),
+        http.patch("/api/v1/projects/p1/goals/g1", ({ request }) => {
+          patchCount++;
+          keys.push(request.headers.get("idempotency-key"));
+          ifMatchHeaders.push(request.headers.get("if-match"));
+          if (patchCount <= 1) {
+            return problemResponse(409, "idempotency_conflict", { title: "Conflict" });
+          }
+          return HttpResponse.json({ ...committed, title: "My second edit" });
+        }),
+        epicListHandler([]),
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original title"));
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "My second edit");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    // The committed version is offered for comparison
+    expect(await screen.findByText("Edit conflict")).toBeInTheDocument();
+    expect(screen.getAllByText("Committed earlier edit").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("My second edit")).toBeInTheDocument();
+
+    // Explicit retry: back to the form, then resubmit with a fresh key and
+    // the remote revision
+    await user.click(screen.getByRole("button", { name: "Save anyway" }));
+    await waitFor(() => expect(screen.queryByText("Edit conflict")).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1/goals/g1"));
+    expect(ifMatchHeaders).toEqual([`"1"`, `"2"`]);
+    expect(keys[1]).not.toBe(keys[0]);
+    expect(patchCount).toBe(2);
   });
 
   it("shows a generic error when the conflict refetch fails", async () => {

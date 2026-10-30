@@ -71,12 +71,14 @@
       "taskCount_other": "{{count}} tasks"
     },
     "form": {
+      "conflictPreviousSubmission": "A previous submission may already have created this goal. Check the project goals before submitting again.",
       "createSubmit": "Create goal",
       "descriptionLabel": "Description",
       "discardConfirm": "Discard changes",
       "discardDescription": "You have unsaved changes. Are you sure you want to discard them?",
       "discardTitle": "Discard changes?",
       "editTitle": "Edit goal",
+      "inspectGoals": "Check project goals",
       "newTitle": "New goal",
       "titleLabel": "Title",
       "updateSubmit": "Save changes"

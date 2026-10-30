@@ -82,6 +82,8 @@ describe("AuthBoundary", () => {
       await waitFor(() => expect(sessionCalls).toBe(2));
       expect(screen.getByText("No projects yet")).toBeInTheDocument();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      // Cached session data keeps the header sign-out usable
+      expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

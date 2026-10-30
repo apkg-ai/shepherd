@@ -24,7 +24,8 @@ export function SignOutButton() {
     },
   });
 
-  if (!session.data || session.isError) return null;
+  // Cached data outlives a transient refetch failure; stay usable in that state.
+  if (!session.data) return null;
 
   return (
     <Button variant="ghost" busy={logout.isPending} onClick={() => logout.mutate(undefined)}>

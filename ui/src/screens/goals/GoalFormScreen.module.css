@@ -9,6 +9,10 @@
   color: var(--color-danger);
 }
 
+.formLink {
+  margin: 0 0 var(--space-3);
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;
