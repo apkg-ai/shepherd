@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./helpers/coverage";
+import { login } from "./helpers/auth";
 
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"];
 const DISABLED_RULES = ["frame-tested", "hidden-content"];
@@ -32,8 +33,13 @@ async function auditRoute(page: Page, path: string, name: string) {
   await auditBothThemes(page, name);
 }
 
-test("home screen passes WCAG AA in both themes", async ({ page }) => {
-  await auditRoute(page, "/#/", "home");
+test("login screen passes WCAG AA in both themes", async ({ page }) => {
+  await auditRoute(page, "/#/login", "login");
+});
+
+test("project list passes WCAG AA in both themes", async ({ page }) => {
+  await login(page);
+  await auditRoute(page, "/#/", "project-list");
 });
 
 test("not-found screen passes WCAG AA in both themes", async ({ page }) => {

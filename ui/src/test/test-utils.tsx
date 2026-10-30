@@ -11,7 +11,9 @@ import { server } from "./msw";
 function TestQueryProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const [client] = useState(() => {
-    const queryClient = createQueryClient((message) => toast(message, "error"));
+    const queryClient = createQueryClient({
+      onMutationError: (message: string) => toast(message, "error"),
+    });
     queryClient.setDefaultOptions({
       queries: {
         ...queryClient.getDefaultOptions().queries,

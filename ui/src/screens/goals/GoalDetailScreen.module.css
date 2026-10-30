@@ -1,0 +1,16 @@
+.counts {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.sectionTitle {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin: var(--space-5) 0 var(--space-3);
+}
+
+.emptyHint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}

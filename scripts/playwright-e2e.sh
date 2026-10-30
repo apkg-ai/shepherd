@@ -49,6 +49,7 @@ for _ in $(seq 1 50); do
 done
 [ "$booted" = true ] || { echo "playwright-e2e: FAIL — server did not answer /health within 5s" >&2; exit 1; }
 
+OWNER_TOKEN="$(cat "$DATA_DIR/owner-token")"
 echo "playwright-e2e: server running on $BASE (PID $SERVER_PID)"
 
-(cd "$ROOT/ui" && PLAYWRIGHT_BASE_URL="$BASE" npx playwright test "$@")
+(cd "$ROOT/ui" && PLAYWRIGHT_BASE_URL="$BASE" SHEPHERD_OWNER_TOKEN="$OWNER_TOKEN" npx playwright test "$@")

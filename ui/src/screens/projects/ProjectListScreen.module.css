@@ -1,0 +1,12 @@
+.formError {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-danger);
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}

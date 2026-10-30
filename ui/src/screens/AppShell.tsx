@@ -2,6 +2,7 @@ import { useRef, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Outlet } from "react-router";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { SignOutButton } from "../components/SignOutButton";
 import styles from "./AppShell.module.css";
 
 export function AppShell() {
@@ -24,7 +25,10 @@ export function AppShell() {
             {t("app.brand.name")}
           </Link>
         </h1>
-        <ThemeToggle />
+        <div className={styles.headerActions}>
+          <SignOutButton />
+          <ThemeToggle />
+        </div>
       </header>
       <main id="main" ref={mainRef} tabIndex={-1} className={styles.main}>
         <Outlet />

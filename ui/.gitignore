@@ -27,3 +27,4 @@ dist-ssr
 coverage
 e2e-artifacts
 playwright-report
+test-results

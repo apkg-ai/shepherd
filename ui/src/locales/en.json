@@ -4,6 +4,21 @@
       "name": "Shepherd"
     }
   },
+  "auth": {
+    "login": {
+      "title": "Sign in",
+      "description": "Enter your owner token to continue.",
+      "tokenLabel": "Owner token",
+      "tokenPlaceholder": "Paste your token",
+      "tokenHint": "Your token is in the .shepherd/identity file created when the daemon starts.",
+      "submit": "Sign in",
+      "invalidToken": "Invalid or expired token.",
+      "forbidden": "This token does not have browser session capability."
+    },
+    "session": {
+      "logout": "Sign out"
+    }
+  },
   "common": {
     "action": {
       "backHome": "Back home",
@@ -20,23 +35,53 @@
       "title": "Something went wrong",
       "unexpected": "Unexpected error"
     },
+    "nav": {
+      "breadcrumb": "Breadcrumb",
+      "projects": "Projects"
+    },
     "state": {
       "loading": "Loading…"
-    }
-  },
-  "home": {
-    "screen": {
-      "title": "Shepherd",
-      "description": "v1 scaffold — the daemon serves this shell and a health endpoint."
-    },
-    "fact": {
-      "status": "Status",
-      "version": "Version",
-      "schema": "Schema"
     },
     "status": {
-      "pass": "pass",
-      "fail": "fail"
+      "active": "Active",
+      "cancelled": "Cancelled",
+      "done": "Done",
+      "open": "Open",
+      "proposed": "Proposed"
+    }
+  },
+  "goal": {
+    "conflict": {
+      "description": "This goal was updated since you started editing. Compare your changes with the current version.",
+      "discard": "Discard my changes",
+      "none": "—",
+      "retry": "Save anyway",
+      "theirs": "Current version",
+      "title": "Edit conflict",
+      "yours": "Your version"
+    },
+    "detail": {
+      "edit": "Edit",
+      "emptyEpicsCta": "Epics will appear here once created.",
+      "emptyEpicsTitle": "No epics yet",
+      "epicCount_one": "{{count}} epic",
+      "epicCount_other": "{{count}} epics",
+      "epicsTitle": "Epics",
+      "taskCount_one": "{{count}} task",
+      "taskCount_other": "{{count}} tasks"
+    },
+    "form": {
+      "conflictPreviousSubmission": "A previous submission may already have created this goal. Check the project goals before submitting again.",
+      "createSubmit": "Create goal",
+      "descriptionLabel": "Description",
+      "discardConfirm": "Discard changes",
+      "discardDescription": "You have unsaved changes. Are you sure you want to discard them?",
+      "discardTitle": "Discard changes?",
+      "editTitle": "Edit goal",
+      "inspectGoals": "Check project goals",
+      "newTitle": "New goal",
+      "titleLabel": "Title",
+      "updateSubmit": "Save changes"
     }
   },
   "not-found": {
@@ -44,11 +89,33 @@
       "title": "Page not found"
     }
   },
+  "project": {
+    "form": {
+      "createSubmit": "Create project",
+      "createTitle": "New project",
+      "descriptionLabel": "Description",
+      "nameLabel": "Name"
+    },
+    "list": {
+      "create": "New project",
+      "description": "All projects in this Shepherd instance.",
+      "emptyCta": "Create your first project",
+      "emptyTitle": "No projects yet",
+      "title": "Projects"
+    },
+    "overview": {
+      "emptyGoalsCta": "Create your first goal",
+      "emptyGoalsTitle": "No goals yet",
+      "epicCount_one": "{{count}} epic",
+      "epicCount_other": "{{count}} epics",
+      "newGoal": "New goal"
+    }
+  },
   "theme": {
     "toggle": {
+      "dark": "Dark",
       "label": "Theme",
       "light": "Light",
-      "dark": "Dark",
       "system": "System"
     }
   }

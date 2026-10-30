@@ -23,7 +23,14 @@ export function Button({
       aria-busy={busy || undefined}
       {...rest}
     >
-      {busy ? "…" : children}
+      {busy ? (
+        <>
+          <span className={styles.spinner} aria-hidden="true" />
+          {children}
+        </>
+      ) : (
+        children
+      )}
     </button>
   );
 }
