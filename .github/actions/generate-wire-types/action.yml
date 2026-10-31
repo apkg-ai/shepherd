@@ -1,5 +1,5 @@
 name: Generate wire types
-description: Install the pinned openapi-to-rust and regenerate core/shepherd-server/src/generated.
+description: Install the pinned openapi-to-rust and regenerate src/generated for shepherd-server and shepherd-client.
 inputs:
   version:
     description: openapi-to-rust version
