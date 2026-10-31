@@ -60,7 +60,7 @@ export function ProjectListScreen() {
               description={project.description || undefined}
               meta={
                 project.epic_counts.total > 0
-                  ? t("project.overview.epicCount", { count: project.epic_counts.total })
+                  ? t("project.list.goalSummary", { epics: project.epic_counts.total })
                   : undefined
               }
             />

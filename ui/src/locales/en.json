@@ -218,6 +218,7 @@
       "description": "All projects in this Shepherd instance.",
       "emptyCta": "Create your first project",
       "emptyTitle": "No projects yet",
+      "goalSummary": "{{epics}} epics across goals",
       "title": "Projects"
     },
     "overview": {
