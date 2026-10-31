@@ -84,6 +84,8 @@ Delivered:
 - Coverage gate: the unit suite in `.github/workflows/quality-gates.yaml` now ignores `shepherd-client/` alongside `shepherd-server/` (the suite is scoped to shepherd-core; client and server are covered by the integration suite). Replicated CI coverage locally: core-unit 95.9% (gate 95), core-integration 92.6% (gate 70), core total union 95.4% (gate 92).
 - Commands (core/ unless noted): `scripts/regen-generated.sh` exit 0; `cargo fmt --check` exit 0; `cargo test --workspace` exit 0 (31 suites, incl. the 25 client contract tests); `cargo clippy --all-targets -- -D warnings` exit 0; repo root `python3 plan/validate.py` PASS; `shellcheck scripts/regen-generated.sh` exit 0; both CI `cargo llvm-cov` invocations replicated locally with thresholds met.
 
+- Flake repair surfaced by CI on this branch: `sse_sends_comment_heartbeats_without_ids` paused the tokio clock and relied on auto-advance, which races past sqlx's real-time internals while the liveness recheck's SQLite IO is in flight (stream closes; reproduced twice on CI under llvm-cov, never locally). The test now waits the real 15s heartbeat bounded by a 20s timeout — slower but deterministic.
+
 Limitations and temporary interfaces:
 
 - `exportProject`/`importProject` remain absent from `openapi/shepherd.yaml` (deferred to #97 with steps 014/015), so the client ships 68 operations and no export/import byte-streaming methods; they land with #97 against the restored contract. No other temporary interfaces.
