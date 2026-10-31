@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use shepherd_client::{
-    CallOptions, Client, Error, EventStreamItem, ListClaimsQuery, ListTasksQuery, PageQuery,
-    Secret, load_token_file, types,
+    CallOptions, Client, Error, EventStreamItem, ListClaimsQuery, ListSubmissionsQuery,
+    ListTasksQuery, PageQuery, Secret, load_token_file, types,
 };
 use shepherd_core::commands::IdentityPaths;
 use shepherd_core::storage::{open, testing};
@@ -881,4 +881,703 @@ async fn events_invalid_cursor_rejected_422() {
         assert_eq!(problem.status, 422, "{cursor}");
         assert_eq!(problem.code, "invalid_cursor", "{cursor}");
     }
+}
+
+// ── Catalog sweep: every typed method runs against the live contract ────
+
+async fn task_revision(client: &Client, project: Uuid, task: Uuid) -> u64 {
+    client.get_task(project, task).await.unwrap().revision as u64
+}
+
+fn reason(text: &str) -> types::ReasonInput {
+    types::ReasonInput {
+        reason: text.into(),
+    }
+}
+
+#[tokio::test]
+async fn live_catalog_hierarchy_commands_round_trip() {
+    let server = live_server().await;
+    let client = server.client();
+    let h = seed_hierarchy(&client).await;
+    let project = h.project.id;
+
+    let health = client.get_health().await.unwrap();
+    assert_eq!(health.status, types::HealthStatus::Pass);
+
+    let renamed = client
+        .update_project(
+            project,
+            &types::ProjectPatch {
+                name: Some("P2".into()),
+                ..Default::default()
+            },
+            &keyed().if_match(h.project.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert_eq!(renamed.name, "P2");
+
+    let goal = client
+        .list_goals(project, &Default::default())
+        .await
+        .unwrap()
+        .items
+        .remove(0);
+    let goal = client
+        .update_goal(
+            project,
+            goal.id,
+            &types::TextPatch {
+                description: Some("described".into()),
+                ..Default::default()
+            },
+            &keyed().if_match(goal.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        client.get_goal(project, goal.id).await.unwrap().description,
+        "described"
+    );
+    assert_eq!(
+        client
+            .get_goal_graph(project, goal.id)
+            .await
+            .unwrap()
+            .nodes
+            .len(),
+        1
+    );
+
+    let epic = client
+        .update_epic(
+            project,
+            h.epic.id,
+            &types::TextPatch {
+                title: Some("E2".into()),
+                ..Default::default()
+            },
+            &keyed().if_match(h.epic.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert_eq!(epic.title, "E2");
+    assert_eq!(client.get_epic(project, epic.id).await.unwrap().title, "E2");
+    client.get_epic_graph(project, epic.id).await.unwrap();
+
+    let blocked = client
+        .block_epic(
+            project,
+            epic.id,
+            &reason("waiting"),
+            &keyed().if_match(epic.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert!(!blocked.blocks.is_empty());
+    let unblocked = client
+        .unblock_epic(project, epic.id, &keyed().if_match(blocked.revision as u64))
+        .await
+        .unwrap();
+    assert!(unblocked.blocks.is_empty());
+
+    let task_type = client
+        .create_task_type(
+            project,
+            &types::TaskTypeCreate {
+                key: "docs".into(),
+                label: "Docs".into(),
+            },
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    let relabeled = client
+        .update_task_type(
+            project,
+            task_type.id,
+            &types::TaskTypePatch {
+                label: Some("Documentation".into()),
+                ..Default::default()
+            },
+            &keyed().if_match(task_type.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert_eq!(relabeled.label, "Documentation");
+    assert!(
+        client
+            .list_task_types(project, &Default::default())
+            .await
+            .unwrap()
+            .items
+            .len()
+            >= 2
+    );
+
+    let second = client
+        .create_task(
+            project,
+            &types::TaskCreate::new(epic.id, "T2".into(), "code".into()),
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    let dependency = client
+        .create_dependency(
+            project,
+            &types::DependencyCreate {
+                level: types::DependencyCreateLevel::Task,
+                dependent_id: second.id,
+                prerequisite_id: h.task.id,
+            },
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        client
+            .list_dependencies(project, &Default::default())
+            .await
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    let ack = client
+        .delete_dependency(
+            project,
+            dependency.id,
+            &keyed().if_match(dependency.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert!(ack.ok);
+
+    let rev = task_revision(&client, project, second.id).await;
+    let blocked = client
+        .block_task(project, second.id, &reason("infra"), &keyed().if_match(rev))
+        .await
+        .unwrap();
+    assert!(!blocked.blocks.is_empty());
+    client
+        .unblock_task(
+            project,
+            second.id,
+            &keyed().if_match(blocked.revision as u64),
+        )
+        .await
+        .unwrap();
+
+    let rev = task_revision(&client, project, second.id).await;
+    let cancelled = client
+        .cancel_task(
+            project,
+            second.id,
+            &reason("descoped"),
+            &keyed().if_match(rev),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cancelled.status, types::EntityStatus::Cancelled);
+    let archived = client
+        .archive_task(
+            project,
+            second.id,
+            &reason("cleanup"),
+            &keyed().if_match(cancelled.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert!(archived.archived);
+
+    // Acceptance is gated on review state; the rejection must surface as a
+    // typed Problem, not a success.
+    let rev = task_revision(&client, project, h.task.id).await;
+    let err = client
+        .accept_task(project, h.task.id, &keyed().if_match(rev))
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(409));
+    assert!(err.request_id().is_some());
+    assert!(err.problem().is_some());
+    assert!(!err.unknown_outcome());
+
+    let err = client
+        .accept_epic(
+            project,
+            epic.id,
+            &keyed().if_match(unblocked.revision as u64),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(409));
+    let err = client
+        .complete_epic(
+            project,
+            epic.id,
+            &reason("done"),
+            &keyed().if_match(unblocked.revision as u64),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(409));
+
+    // Waiving requires a cancelled task (plan/04).
+    let waivable = client
+        .create_task(
+            project,
+            &types::TaskCreate::new(epic.id, "T5".into(), "code".into()),
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    let cancelled = client
+        .cancel_task(
+            project,
+            waivable.id,
+            &reason("descoped"),
+            &keyed().if_match(waivable.revision as u64),
+        )
+        .await
+        .unwrap();
+    // A waiver satisfies dependents' gates; the task itself stays cancelled.
+    let waived = client
+        .waive_task(
+            project,
+            waivable.id,
+            &reason("not needed"),
+            &keyed().if_match(cancelled.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert_eq!(waived.status, types::EntityStatus::Cancelled);
+    assert!(waived.revision > cancelled.revision);
+
+    assert!(
+        !client
+            .list_history(project, &Default::default())
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+
+    let scratch = client
+        .create_project(&types::ProjectCreate::new("Scratch".into()), &keyed())
+        .await
+        .unwrap();
+    let archived = client
+        .archive_project(
+            scratch.id,
+            &reason("cleanup"),
+            &keyed().if_match(scratch.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert!(archived.archived);
+    let scratch_goal = client
+        .create_goal(project, &types::GoalCreate::new("G2".into()), &keyed())
+        .await
+        .unwrap();
+    let archived = client
+        .archive_goal(
+            project,
+            scratch_goal.id,
+            &reason("cleanup"),
+            &keyed().if_match(scratch_goal.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert!(archived.archived);
+    let scratch_epic = client
+        .create_epic(
+            project,
+            &types::EpicCreate::new(goal.id, "E3".into()),
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    let rev = scratch_epic.revision as u64;
+    let cancelled = client
+        .cancel_epic(
+            project,
+            scratch_epic.id,
+            &reason("descoped"),
+            &keyed().if_match(rev),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cancelled.status, types::EntityStatus::Cancelled);
+    let archived = client
+        .archive_epic(
+            project,
+            scratch_epic.id,
+            &reason("cleanup"),
+            &keyed().if_match(cancelled.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert!(archived.archived);
+}
+
+#[tokio::test]
+async fn live_catalog_documents_submissions_and_reviews() {
+    let server = live_server().await;
+    let client = server.client();
+    // Plan-phase claims are only eligible when the project requires planning.
+    let project = client
+        .create_project(
+            &types::ProjectCreate::builder("P".into())
+                .settings(types::ProjectSettings {
+                    planning_required: true,
+                    proposal_gate: false,
+                    plan_review: types::ReviewPolicy::Human,
+                    work_review: types::ReviewPolicy::Human,
+                })
+                .build(),
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    let goal = client
+        .create_goal(project.id, &types::GoalCreate::new("G".into()), &keyed())
+        .await
+        .unwrap();
+    let epic = client
+        .create_epic(
+            project.id,
+            &types::EpicCreate::new(goal.id, "E".into()),
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    let task = client
+        .create_task(
+            project.id,
+            &types::TaskCreate::new(epic.id, "T".into(), "code".into()),
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    let h = Hierarchy {
+        project,
+        epic,
+        task,
+    };
+    let project = h.project.id;
+
+    let document = client
+        .create_document(
+            project,
+            &types::DocumentCreate {
+                title: "Plan".into(),
+                body: "step one".into(),
+                kind: types::DocumentCreateKind::Plan,
+                owner_kind: types::DocumentCreateOwnerKind::Task,
+                owner_id: h.task.id,
+                links: Vec::new(),
+            },
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        client
+            .list_documents(project, &Default::default())
+            .await
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    assert_eq!(
+        client.get_document(project, document.id).await.unwrap().id,
+        document.id
+    );
+
+    let revision = client
+        .create_document_revision(
+            project,
+            document.id,
+            &types::RevisionCreate {
+                body: "step one, revised".into(),
+                links: Vec::new(),
+            },
+            &keyed().if_match(document.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert!(
+        !client
+            .list_document_revisions(project, document.id, &Default::default())
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert_eq!(
+        client
+            .get_document_revision(project, revision.id)
+            .await
+            .unwrap()
+            .id,
+        revision.id
+    );
+
+    // Plan-phase claim: select the drafted plan, then report `succeeded` to
+    // produce the plan submission for review (plan/04).
+    let rev = task_revision(&client, project, h.task.id).await;
+    let grant = client
+        .claim_task(
+            project,
+            h.task.id,
+            &types::ClaimInput::new(types::ClaimInputPhase::Plan),
+            &keyed().if_match(rev),
+        )
+        .await
+        .unwrap();
+    let rev = task_revision(&client, project, h.task.id).await;
+    let task = client
+        .select_task_plan(
+            project,
+            h.task.id,
+            &types::SelectPlanInput {
+                document_revision_id: revision.id,
+            },
+            &keyed().if_match(rev),
+        )
+        .await
+        .unwrap();
+    assert!(!task.selected_plan_revision_ids.is_empty());
+    let lease = Secret::new(grant.lease_token.clone());
+    let report = types::ReportInput::new(
+        vec![revision.id.to_string()],
+        Vec::new(),
+        types::ReportInputOutcome::Succeeded,
+        "plan drafted".into(),
+    );
+    client
+        .report_claim(
+            project,
+            grant.claim.id,
+            &report,
+            &keyed().lease_token(lease),
+        )
+        .await
+        .unwrap();
+
+    let submission = client
+        .list_submissions(project, &Default::default())
+        .await
+        .unwrap()
+        .items
+        .remove(0);
+    assert_eq!(
+        client
+            .get_submission(project, submission.id)
+            .await
+            .unwrap()
+            .id,
+        submission.id
+    );
+
+    let review = client
+        .review_submission(
+            project,
+            submission.id,
+            &types::ReviewInput {
+                decision: types::ReviewInputDecision::Approve,
+                reason: "sound plan".into(),
+                claim_id: None,
+            },
+            &keyed().if_match(submission.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert_eq!(review.decision, types::ReviewDecision::Approve);
+    assert_eq!(
+        client
+            .list_submission_reviews(project, submission.id, &Default::default())
+            .await
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+
+    // A second pending plan submission on a fresh task gets withdrawn.
+    let other = client
+        .create_task(
+            project,
+            &types::TaskCreate::new(h.epic.id, "T3".into(), "code".into()),
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    let other_doc = client
+        .create_document(
+            project,
+            &types::DocumentCreate {
+                title: "Plan T3".into(),
+                body: "draft".into(),
+                kind: types::DocumentCreateKind::Plan,
+                owner_kind: types::DocumentCreateOwnerKind::Task,
+                owner_id: other.id,
+                links: Vec::new(),
+            },
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    let other_rev = client
+        .create_document_revision(
+            project,
+            other_doc.id,
+            &types::RevisionCreate {
+                body: "draft".into(),
+                links: Vec::new(),
+            },
+            &keyed().if_match(other_doc.revision as u64),
+        )
+        .await
+        .unwrap();
+    let grant = client
+        .claim_task(
+            project,
+            other.id,
+            &types::ClaimInput::new(types::ClaimInputPhase::Plan),
+            &keyed().if_match(other.revision as u64),
+        )
+        .await
+        .unwrap();
+    let rev = task_revision(&client, project, other.id).await;
+    client
+        .select_task_plan(
+            project,
+            other.id,
+            &types::SelectPlanInput {
+                document_revision_id: other_rev.id,
+            },
+            &keyed().if_match(rev),
+        )
+        .await
+        .unwrap();
+    client
+        .report_claim(
+            project,
+            grant.claim.id,
+            &types::ReportInput::new(
+                vec![other_rev.id.to_string()],
+                Vec::new(),
+                types::ReportInputOutcome::Succeeded,
+                "plan drafted".into(),
+            ),
+            &keyed().lease_token(Secret::new(grant.lease_token.clone())),
+        )
+        .await
+        .unwrap();
+    let pending = client
+        .list_submissions(
+            project,
+            &ListSubmissionsQuery {
+                task_id: Some(other.id),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .items
+        .remove(0);
+    let withdrawn = client
+        .withdraw_submission(
+            project,
+            pending.id,
+            &reason("superseded"),
+            &keyed().if_match(pending.revision as u64),
+        )
+        .await
+        .unwrap();
+    assert_eq!(withdrawn.status, types::SubmissionStatus::Withdrawn);
+
+    // Release the remaining plan claim rather than reporting it.
+    let fresh = client
+        .create_task(
+            project,
+            &types::TaskCreate::new(h.epic.id, "T4".into(), "code".into()),
+            &keyed(),
+        )
+        .await
+        .unwrap();
+    let grant = client
+        .claim_task(
+            project,
+            fresh.id,
+            &types::ClaimInput::new(types::ClaimInputPhase::Plan),
+            &keyed().if_match(fresh.revision as u64),
+        )
+        .await
+        .unwrap();
+    let released = client
+        .release_claim(
+            project,
+            grant.claim.id,
+            &keyed().lease_token(Secret::new(grant.lease_token.clone())),
+        )
+        .await
+        .unwrap();
+    assert_eq!(released.status, types::ClaimStatus::Released);
+}
+
+#[tokio::test]
+async fn live_catalog_agents_and_browser_sessions() {
+    let server = live_server().await;
+    let owner = server.client();
+    seed_hierarchy(&owner).await;
+
+    let issued = owner
+        .create_agent(&types::AgentCreate {
+            label: "sweeper".into(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        !owner
+            .list_agents(&Default::default())
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+
+    let agent = Client::new(&server.base_url, Secret::new(issued.token)).unwrap();
+    agent.get_principal().await.unwrap();
+
+    let ack = owner
+        .revoke_agent(issued.actor.id, &reason("rotation"), &keyed())
+        .await
+        .unwrap();
+    assert!(ack.ok);
+    let err = agent.get_principal().await.unwrap_err();
+    assert_eq!(err.status(), Some(401));
+    assert_eq!(err.code(), "unauthenticated");
+
+    // Browser session issuance works over the wire; the session cookie is a
+    // browser concern, so the bearer client cannot read it back.
+    let raw_token = std::fs::read_to_string(&server.token_path)
+        .unwrap()
+        .trim_end()
+        .to_string();
+    let session = owner
+        .create_browser_session(&types::SessionLogin {
+            owner_token: raw_token,
+        })
+        .await
+        .unwrap();
+    assert!(!session.csrf_token.is_empty());
+    let err = owner.get_browser_session().await.unwrap_err();
+    assert_eq!(err.status(), Some(404));
+    let err = owner.delete_browser_session().await.unwrap_err();
+    assert_eq!(err.status(), Some(404));
 }
