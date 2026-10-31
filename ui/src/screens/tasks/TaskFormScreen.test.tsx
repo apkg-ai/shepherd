@@ -252,4 +252,43 @@ describe("TaskFormScreen — edit mode", () => {
 
     expect(await screen.findByText("Project Error")).toBeInTheDocument();
   });
+
+  it("reuses the idempotency key after a non-422 edit failure", async () => {
+    const user = userEvent.setup();
+    const keys: Array<string | null> = [];
+    server.use(
+      http.patch("/api/v1/projects/p1/tasks/t1", ({ request }) => {
+        keys.push(request.headers.get("idempotency-key"));
+        return problemResponse(500, "internal-error", { title: "Server Error" });
+      }),
+    );
+
+    renderRoute("/projects/p1/tasks/t1/edit", { handlers: editHandlers });
+
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original task"));
+    await user.type(screen.getByLabelText("Title"), " x");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Server Error")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(keys).toHaveLength(2));
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("shows generic form error on unexpected edit failure", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.patch("/api/v1/projects/p1/tasks/t1", () =>
+        problemResponse(500, "internal-error", { title: "Server exploded" }),
+      ),
+    );
+
+    renderRoute("/projects/p1/tasks/t1/edit", { handlers: editHandlers });
+
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original task"));
+    await user.type(screen.getByLabelText("Title"), " x");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Server exploded")).toBeInTheDocument();
+  });
 });

@@ -146,4 +146,57 @@ describe("TaskDetailScreen", () => {
 
     await waitFor(() => expect(screen.getByText("No actions available")).toBeInTheDocument());
   });
+
+  it("shows block reason when task has blocks", async () => {
+    const blockedTask = makeTask({
+      ...task,
+      blocks: [
+        { actor_id: "a1", reason: "Waiting on auth service", created_at: "2026-10-30T12:00:00Z" },
+      ],
+    });
+
+    renderRoute("/projects/p1/tasks/t1", { handlers: baseHandlers });
+    server.use(
+      http.get("/api/v1/projects/:projectId/tasks/t1", () => HttpResponse.json(blockedTask)),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("Reason: Waiting on auth service")).toBeInTheDocument(),
+    );
+  });
+
+  it("shows waiver reason when task has waivers", async () => {
+    const waivedTask = makeTask({
+      ...task,
+      status: "cancelled",
+      waivers: [
+        { actor_id: "a1", reason: "Covered by platform team", created_at: "2026-10-30T12:00:00Z" },
+      ],
+    });
+
+    renderRoute("/projects/p1/tasks/t1", { handlers: baseHandlers });
+    server.use(
+      http.get("/api/v1/projects/:projectId/tasks/t1", () => HttpResponse.json(waivedTask)),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("Reason: Covered by platform team")).toBeInTheDocument(),
+    );
+  });
+
+  it("shows task type label from loaded types", async () => {
+    renderRoute("/projects/p1/tasks/t1", { handlers: baseHandlers });
+
+    const metadata = await screen.findByRole("region", { name: "Task metadata" });
+    expect(metadata).toHaveTextContent("Code");
+    expect(metadata).not.toHaveTextContent("code_change");
+  });
+
+  it("shows capitalized review policy labels", async () => {
+    renderRoute("/projects/p1/tasks/t1", { handlers: baseHandlers });
+
+    const metadata = await screen.findByRole("region", { name: "Task metadata" });
+    expect(metadata).toHaveTextContent("Agent");
+    expect(metadata).toHaveTextContent("Human");
+  });
 });

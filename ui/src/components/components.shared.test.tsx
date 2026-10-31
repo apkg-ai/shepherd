@@ -9,6 +9,7 @@ import { ProgressCounts } from "./ProgressCounts";
 import { EligibilityPanel } from "./EligibilityPanel";
 import { ConflictView } from "./ConflictView";
 import { ReasonDialog } from "./ReasonDialog";
+import { StatusFilter } from "./StatusFilter";
 import type { Eligibility } from "../api/generated/model/eligibility";
 
 // Reuse the app's configured i18next instance
@@ -245,5 +246,44 @@ describe("ReasonDialog", () => {
     wrap(<ReasonDialog open={false} title="Block task" onSubmit={vi.fn()} onCancel={vi.fn()} />);
 
     expect(screen.queryByLabelText("Reason")).not.toBeInTheDocument();
+  });
+});
+
+describe("StatusFilter", () => {
+  it("renders three buttons with counts", () => {
+    wrap(
+      <StatusFilter value="active" onChange={vi.fn()} counts={{ active: 5, done: 2, total: 7 }} />,
+    );
+
+    expect(screen.getByRole("button", { name: /Active/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Done/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /All/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Active/ })).toHaveTextContent("5");
+    expect(screen.getByRole("button", { name: /Done/ })).toHaveTextContent("2");
+    expect(screen.getByRole("button", { name: /All/ })).toHaveTextContent("7");
+  });
+
+  it("calls onChange when a button is clicked", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    wrap(
+      <StatusFilter value="active" onChange={onChange} counts={{ active: 3, done: 1, total: 4 }} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Done/ }));
+    expect(onChange).toHaveBeenCalledWith("done");
+
+    await user.click(screen.getByRole("button", { name: /All/ }));
+    expect(onChange).toHaveBeenCalledWith("all");
+  });
+
+  it("marks the active button with aria-pressed", () => {
+    wrap(
+      <StatusFilter value="done" onChange={vi.fn()} counts={{ active: 1, done: 2, total: 3 }} />,
+    );
+
+    expect(screen.getByRole("button", { name: /Active/ })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: /Done/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /All/ })).toHaveAttribute("aria-pressed", "false");
   });
 });

@@ -1,5 +1,6 @@
 import { http } from "msw";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import {
   sessionHandler,
@@ -183,5 +184,113 @@ describe("EpicDetailScreen", () => {
     });
 
     expect(await screen.findByText("Project Error")).toBeInTheDocument();
+  });
+
+  it("default filter hides done/cancelled tasks", async () => {
+    const tasks = [
+      makeTask({ id: "t1", project_id: "p1", epic_id: "e1", title: "Active task", status: "open" }),
+      makeTask({
+        id: "t2",
+        project_id: "p1",
+        epic_id: "e1",
+        title: "Cancelled task",
+        status: "cancelled",
+      }),
+    ];
+
+    renderRoute("/projects/p1/epics/e1", {
+      handlers: [
+        sessionHandler(),
+        projectHandler(project),
+        goalHandler(goal),
+        epicHandler(epic),
+        taskListHandler(tasks),
+      ],
+    });
+
+    expect(await screen.findByText("Active task")).toBeInTheDocument();
+    expect(screen.queryByText("Cancelled task")).not.toBeInTheDocument();
+  });
+
+  it("Done filter shows only done/cancelled tasks", async () => {
+    const user = userEvent.setup();
+    const tasks = [
+      makeTask({ id: "t1", project_id: "p1", epic_id: "e1", title: "Active task", status: "open" }),
+      makeTask({
+        id: "t2",
+        project_id: "p1",
+        epic_id: "e1",
+        title: "Done task",
+        status: "done",
+      }),
+    ];
+
+    renderRoute("/projects/p1/epics/e1", {
+      handlers: [
+        sessionHandler(),
+        projectHandler(project),
+        goalHandler(goal),
+        epicHandler(epic),
+        taskListHandler(tasks),
+      ],
+    });
+
+    await screen.findByText("Active task");
+    await user.click(screen.getByRole("button", { name: /Done/ }));
+
+    expect(await screen.findByText("Done task")).toBeInTheDocument();
+    expect(screen.queryByText("Active task")).not.toBeInTheDocument();
+  });
+
+  it("All filter shows everything", async () => {
+    const user = userEvent.setup();
+    const tasks = [
+      makeTask({ id: "t1", project_id: "p1", epic_id: "e1", title: "Active task", status: "open" }),
+      makeTask({
+        id: "t2",
+        project_id: "p1",
+        epic_id: "e1",
+        title: "Done task",
+        status: "done",
+      }),
+    ];
+
+    renderRoute("/projects/p1/epics/e1", {
+      handlers: [
+        sessionHandler(),
+        projectHandler(project),
+        goalHandler(goal),
+        epicHandler(epic),
+        taskListHandler(tasks),
+      ],
+    });
+
+    await screen.findByText("Active task");
+    await user.click(screen.getByRole("button", { name: /All/ }));
+
+    expect(await screen.findByText("Active task")).toBeInTheDocument();
+    expect(screen.getByText("Done task")).toBeInTheDocument();
+  });
+
+  it("shows no-results message when filter matches nothing", async () => {
+    const user = userEvent.setup();
+    const tasks = [
+      makeTask({ id: "t1", project_id: "p1", epic_id: "e1", title: "Active task", status: "open" }),
+    ];
+
+    renderRoute("/projects/p1/epics/e1", {
+      handlers: [
+        sessionHandler(),
+        projectHandler(project),
+        goalHandler(goal),
+        epicHandler(epic),
+        taskListHandler(tasks),
+      ],
+    });
+
+    await screen.findByText("Active task");
+    await user.click(screen.getByRole("button", { name: /Done/ }));
+
+    expect(await screen.findByText("No items match this filter.")).toBeInTheDocument();
   });
 });

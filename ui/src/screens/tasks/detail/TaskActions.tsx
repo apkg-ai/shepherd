@@ -16,13 +16,16 @@ import { Button } from "../../../components/Button";
 import { ReasonDialog } from "../../../components/ReasonDialog";
 import styles from "./TaskActions.module.css";
 
-/** Only render actions present in allowed_actions — never derive from status. */
+/**
+ * Only render actions present in allowed_actions — never derive from status.
+ * release / report_success / report_failure are excluded: they require a
+ * lease token from the claim response, and the browser claim flow does not
+ * yet persist the token across navigation. They will be added when the
+ * in-memory lease store is wired (step 017 follow-up).
+ */
 const ACTION_DEFS = [
   { key: "claim_plan", i18n: "task.action.claimPlan" },
   { key: "claim_execute", i18n: "task.action.claimExecute" },
-  { key: "release", i18n: "task.action.release" },
-  { key: "report_success", i18n: "task.action.reportSuccess" },
-  { key: "report_failure", i18n: "task.action.reportFailure" },
   { key: "accept", i18n: "task.action.accept" },
   { key: "block", i18n: "task.action.block" },
   { key: "unblock", i18n: "task.action.unblock" },
