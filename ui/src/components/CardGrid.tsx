@@ -15,11 +15,13 @@ interface CardProps {
   badge?: ReactNode;
   /** Tag row above the title (multiple badges, always on its own line). */
   tags?: ReactNode;
+  /** Sets data-status on the card for status-colored left border. */
+  status?: string;
 }
 
-export function Card({ to, title, description, meta, badge, tags }: CardProps) {
+export function Card({ to, title, description, meta, badge, tags, status }: CardProps) {
   return (
-    <li className={styles.card}>
+    <li className={styles.card} data-status={status}>
       <Link to={to} className={styles.cardLink}>
         {tags ? <div className={styles.cardTags}>{tags}</div> : null}
         <div className={styles.cardHeader}>

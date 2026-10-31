@@ -55,6 +55,11 @@
       "done": "Done",
       "open": "Open",
       "proposed": "Proposed"
+    },
+    "review": {
+      "agent": "Agent",
+      "human": "Human",
+      "none": "None"
     }
   },
   "conflict": {
@@ -64,6 +69,15 @@
       "retry": "Save anyway",
       "theirs": "Current version",
       "yours": "Your version"
+    }
+  },
+  "filter": {
+    "status": {
+      "active": "Active",
+      "all": "All",
+      "done": "Done",
+      "label": "Filter by status",
+      "noResults": "No items match this filter."
     }
   },
   "counts": {
@@ -185,8 +199,18 @@
       "planningRequired": "Planning required",
       "planningRequiredNo": "No",
       "planningRequiredYes": "Yes",
+      "blocked": "Blocked",
+      "blockedBy": "Blocked by {{actor}} on {{date}}",
+      "blockReason": "Reason: {{reason}}",
       "type": "Type",
+      "waived": "Waived",
+      "waivedBy": "Waived by {{actor}} on {{date}}",
+      "waiveReason": "Reason: {{reason}}",
       "workReview": "Work review"
+    },
+    "conflict": {
+      "description": "This task was updated since you started editing. Compare your changes with the current version.",
+      "title": "Edit conflict"
     },
     "form": {
       "conflictPreviousSubmission": "A previous submission may already have created this task. Check the epic tasks before submitting again.",

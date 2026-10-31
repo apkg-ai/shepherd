@@ -23,3 +23,9 @@
   font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
+
+.noResults {
+  margin: var(--space-4) 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}

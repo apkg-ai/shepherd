@@ -1,8 +1,14 @@
 import { http, HttpResponse } from "msw";
 import { screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { sessionHandler, projectHandler, problemResponse } from "../../../test/msw";
-import { makeProject, makeGoal, makeEpic, makeTask } from "../../../test/fixtures";
+import {
+  sessionHandler,
+  projectHandler,
+  problemResponse,
+  taskTypeListHandler,
+  server,
+} from "../../../test/msw";
+import { makeProject, makeGoal, makeEpic, makeTask, makeTaskType } from "../../../test/fixtures";
 import { renderRoute } from "../../../test/test-utils";
 
 const project = makeProject({ id: "p1", name: "Space Game" });
@@ -46,6 +52,7 @@ const baseHandlers = [
   http.get("/api/v1/projects/:projectId/goals/g1", () => HttpResponse.json(goal)),
   http.get("/api/v1/projects/:projectId/epics/e1", () => HttpResponse.json(epic)),
   http.get("/api/v1/projects/:projectId/tasks/t1", () => HttpResponse.json(task)),
+  taskTypeListHandler([makeTaskType({ key: "code", label: "Code", project_id: "p1" })]),
 ];
 
 describe("TaskDetailScreen", () => {
@@ -67,10 +74,10 @@ describe("TaskDetailScreen", () => {
     renderRoute("/projects/p1/tasks/t1", { handlers: baseHandlers });
 
     const metadata = await screen.findByRole("region", { name: "Task metadata" });
-    expect(metadata).toHaveTextContent("code");
+    expect(metadata).toHaveTextContent("Code");
     expect(metadata).toHaveTextContent("Yes");
-    expect(metadata).toHaveTextContent("agent");
-    expect(metadata).toHaveTextContent("human");
+    expect(metadata).toHaveTextContent("Agent");
+    expect(metadata).toHaveTextContent("Human");
   });
 
   it("shows eligibility panel with gate reasons", async () => {
@@ -131,11 +138,11 @@ describe("TaskDetailScreen", () => {
     });
 
     renderRoute("/projects/p1/tasks/t1", {
-      handlers: [
-        ...baseHandlers.slice(0, -1),
-        http.get("/api/v1/projects/:projectId/tasks/t1", () => HttpResponse.json(taskNoActions)),
-      ],
+      handlers: [...baseHandlers],
     });
+    server.use(
+      http.get("/api/v1/projects/:projectId/tasks/t1", () => HttpResponse.json(taskNoActions)),
+    );
 
     await waitFor(() => expect(screen.getByText("No actions available")).toBeInTheDocument());
   });

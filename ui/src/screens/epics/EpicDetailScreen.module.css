@@ -24,8 +24,8 @@
   color: var(--color-text-muted);
 }
 
-.badges {
-  display: flex;
-  gap: var(--space-1);
-  flex-wrap: wrap;
+.noResults {
+  margin: var(--space-4) 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
 }

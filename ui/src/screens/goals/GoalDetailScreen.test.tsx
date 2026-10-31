@@ -70,7 +70,8 @@ describe("GoalDetailScreen", () => {
 
     expect(await screen.findByText("Damage model")).toBeInTheDocument();
     expect(screen.getByText("Targeting")).toBeInTheDocument();
-    expect(screen.getByText("Active")).toBeInTheDocument();
+    // StatusBadge renders "Active" and StatusFilter has an "Active" button — check via role
+    expect(screen.getByRole("link", { name: /Damage model/ })).toBeInTheDocument();
     expect(screen.getByText("3 tasks")).toBeInTheDocument();
   });
 

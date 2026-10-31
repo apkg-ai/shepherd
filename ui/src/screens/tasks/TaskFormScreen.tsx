@@ -207,7 +207,7 @@ function TaskForm({
     return (
       <>
         <Breadcrumbs items={breadcrumbItems} />
-        <PageHeader title={t("goal.conflict.title")} description={t("goal.conflict.description")} />
+        <PageHeader title={t("task.conflict.title")} description={t("task.conflict.description")} />
         <ConflictView
           fields={[
             {

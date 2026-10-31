@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useGetProject } from "../../api/generated/projects/projects";
 import { useGetGoal } from "../../api/generated/goals/goals";
 import { useGetEpic } from "../../api/generated/epics/epics";
 import { useListTasks } from "../../api/generated/tasks/tasks";
+import type { Task } from "../../api/generated/model/task";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { Card, CardGrid } from "../../components/CardGrid";
 import { EligibilityPanel } from "../../components/EligibilityPanel";
@@ -12,8 +14,18 @@ import { PageHeader } from "../../components/PageHeader";
 import { PhaseBadge } from "../../components/PhaseBadge";
 import { ProgressCounts } from "../../components/ProgressCounts";
 import { StatusBadge } from "../../components/StatusBadge";
+import { StatusFilter } from "../../components/StatusFilter";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import styles from "./EpicDetailScreen.module.css";
+
+const ACTIVE_STATUSES = new Set(["proposed", "open", "active"]);
+const DONE_STATUSES = new Set(["done", "cancelled"]);
+
+function splitTasks(tasks: Task[]) {
+  const active = tasks.filter((t) => ACTIVE_STATUSES.has(t.status));
+  const done = tasks.filter((t) => DONE_STATUSES.has(t.status));
+  return { active, done };
+}
 
 export function EpicDetailScreen() {
   const { t } = useTranslation();
@@ -24,8 +36,8 @@ export function EpicDetailScreen() {
     query: { enabled: Boolean(epic.data?.goal_id) },
   });
   const tasks = useListTasks(projectId!, { epic_id: epicId! });
+  const [filter, setFilter] = useState<"active" | "done" | "all">("active");
 
-  // Check errors on independent queries before gated ones (goal depends on epic)
   if (project.isError) {
     return <ErrorState error={project.error} onRetry={() => void project.refetch()} />;
   }
@@ -43,6 +55,8 @@ export function EpicDetailScreen() {
   }
 
   const allTasks = tasks.data.items;
+  const { active, done } = splitTasks(allTasks);
+  const visible = filter === "active" ? active : filter === "done" ? done : allTasks;
 
   return (
     <>
@@ -81,17 +95,29 @@ export function EpicDetailScreen() {
             {t("epic.detail.newTask")}
           </LinkButton>
         </div>
+
+        {allTasks.length > 0 ? (
+          <StatusFilter
+            value={filter}
+            onChange={setFilter}
+            counts={{ active: active.length, done: done.length, total: allTasks.length }}
+          />
+        ) : null}
+
         {allTasks.length === 0 ? (
           <EmptyState title={t("epic.detail.emptyTasksTitle")} icon="📋">
             <p className={styles.emptyHint}>{t("epic.detail.emptyTasksCta")}</p>
           </EmptyState>
+        ) : visible.length === 0 ? (
+          <p className={styles.noResults}>{t("filter.status.noResults")}</p>
         ) : (
           <CardGrid>
-            {allTasks.map((task) => (
+            {visible.map((task) => (
               <Card
                 key={task.id}
                 to={`/projects/${projectId}/tasks/${task.id}`}
                 title={task.title}
+                status={task.status}
                 tags={
                   <>
                     <StatusBadge status={task.status} />

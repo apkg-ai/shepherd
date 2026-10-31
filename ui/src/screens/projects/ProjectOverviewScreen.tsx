@@ -1,21 +1,31 @@
+import { useState } from "react";
 import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useGetProject } from "../../api/generated/projects/projects";
 import { useListGoals } from "../../api/generated/goals/goals";
+import type { Goal } from "../../api/generated/model/goal";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { Card, CardGrid } from "../../components/CardGrid";
 import { LinkButton } from "../../components/LinkButton";
 import { PageHeader } from "../../components/PageHeader";
 import { ProgressCounts } from "../../components/ProgressCounts";
 import { StatusBadge } from "../../components/StatusBadge";
+import { StatusFilter } from "../../components/StatusFilter";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import styles from "./ProjectOverviewScreen.module.css";
+
+function splitGoals(goals: Goal[]) {
+  const active = goals.filter((g) => !g.completed);
+  const done = goals.filter((g) => g.completed);
+  return { active, done };
+}
 
 export function ProjectOverviewScreen() {
   const { t } = useTranslation();
   const { projectId } = useParams<{ projectId: string }>();
   const project = useGetProject(projectId!);
   const goals = useListGoals(projectId!);
+  const [filter, setFilter] = useState<"active" | "done" | "all">("active");
 
   if (project.isPending || goals.isPending) return <LoadingState />;
   if (project.isError) {
@@ -26,6 +36,8 @@ export function ProjectOverviewScreen() {
   }
 
   const allGoals = goals.data.items;
+  const { active, done } = splitGoals(allGoals);
+  const visible = filter === "active" ? active : filter === "done" ? done : allGoals;
 
   return (
     <>
@@ -63,22 +75,34 @@ export function ProjectOverviewScreen() {
           </LinkButton>
         </EmptyState>
       ) : (
-        <CardGrid>
-          {allGoals.map((goal) => (
-            <Card
-              key={goal.id}
-              to={`/projects/${projectId}/goals/${goal.id}`}
-              title={goal.title}
-              description={goal.description || undefined}
-              badge={goal.completed ? <StatusBadge status="done" /> : undefined}
-              meta={
-                goal.epic_counts.total > 0
-                  ? t("project.overview.epicCount", { count: goal.epic_counts.total })
-                  : undefined
-              }
-            />
-          ))}
-        </CardGrid>
+        <>
+          <StatusFilter
+            value={filter}
+            onChange={setFilter}
+            counts={{ active: active.length, done: done.length, total: allGoals.length }}
+          />
+          {visible.length === 0 ? (
+            <p className={styles.noResults}>{t("filter.status.noResults")}</p>
+          ) : (
+            <CardGrid>
+              {visible.map((goal) => (
+                <Card
+                  key={goal.id}
+                  to={`/projects/${projectId}/goals/${goal.id}`}
+                  title={goal.title}
+                  description={goal.description || undefined}
+                  status={goal.completed ? "done" : undefined}
+                  badge={goal.completed ? <StatusBadge status="done" /> : undefined}
+                  meta={
+                    goal.epic_counts.total > 0
+                      ? t("project.overview.epicCount", { count: goal.epic_counts.total })
+                      : undefined
+                  }
+                />
+              ))}
+            </CardGrid>
+          )}
+        </>
       )}
     </>
   );

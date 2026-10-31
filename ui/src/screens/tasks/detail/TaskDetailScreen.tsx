@@ -4,6 +4,7 @@ import { useGetProject } from "../../../api/generated/projects/projects";
 import { useGetEpic } from "../../../api/generated/epics/epics";
 import { useGetGoal } from "../../../api/generated/goals/goals";
 import { useGetTask } from "../../../api/generated/tasks/tasks";
+import { useListTaskTypes } from "../../../api/generated/task-types/task-types";
 import { Breadcrumbs } from "../../../components/Breadcrumbs";
 import { EligibilityPanel } from "../../../components/EligibilityPanel";
 import { LinkButton } from "../../../components/LinkButton";
@@ -13,6 +14,12 @@ import { StatusBadge } from "../../../components/StatusBadge";
 import { ErrorState, LoadingState } from "../../../components/states";
 import { TaskActions } from "./TaskActions";
 import styles from "./TaskDetailScreen.module.css";
+
+function reviewLabel(t: (key: string) => string, policy: string): string {
+  const key = `common.review.${policy}`;
+  const translated = t(key);
+  return translated === key ? policy : translated;
+}
 
 export function TaskDetailScreen() {
   const { t } = useTranslation();
@@ -26,6 +33,7 @@ export function TaskDetailScreen() {
   const goal = useGetGoal(projectId!, epic.data?.goal_id ?? "", {
     query: { enabled: Boolean(epic.data?.goal_id) },
   });
+  const taskTypes = useListTaskTypes(projectId!);
 
   if (project.isPending || task.isPending) return <LoadingState />;
   if (task.isError) {
@@ -36,6 +44,8 @@ export function TaskDetailScreen() {
   }
 
   const taskData = task.data;
+  const typeLabel =
+    taskTypes.data?.items.find((tt) => tt.key === taskData.type_key)?.label ?? taskData.type_key;
 
   return (
     <>
@@ -72,7 +82,7 @@ export function TaskDetailScreen() {
         <dl className={styles.metaList}>
           <div className={styles.metaItem}>
             <dt>{t("task.detail.type")}</dt>
-            <dd>{taskData.type_key}</dd>
+            <dd>{typeLabel}</dd>
           </div>
           <div className={styles.metaItem}>
             <dt>{t("task.detail.planningRequired")}</dt>
@@ -84,14 +94,36 @@ export function TaskDetailScreen() {
           </div>
           <div className={styles.metaItem}>
             <dt>{t("task.detail.planReview")}</dt>
-            <dd>{taskData.plan_review}</dd>
+            <dd>{reviewLabel(t, taskData.plan_review)}</dd>
           </div>
           <div className={styles.metaItem}>
             <dt>{t("task.detail.workReview")}</dt>
-            <dd>{taskData.work_review}</dd>
+            <dd>{reviewLabel(t, taskData.work_review)}</dd>
           </div>
         </dl>
       </section>
+
+      {taskData.blocks.length > 0 ? (
+        <section className={styles.lifecycle} aria-label={t("task.detail.blocked")}>
+          <h3 className={styles.lifecycleTitle}>{t("task.detail.blocked")}</h3>
+          {taskData.blocks.map((block, i) => (
+            <p key={i} className={styles.lifecycleReason}>
+              {t("task.detail.blockReason", { reason: block.reason })}
+            </p>
+          ))}
+        </section>
+      ) : null}
+
+      {taskData.waivers.length > 0 ? (
+        <section className={styles.lifecycle} aria-label={t("task.detail.waived")}>
+          <h3 className={styles.lifecycleTitle}>{t("task.detail.waived")}</h3>
+          {taskData.waivers.map((waiver, i) => (
+            <p key={i} className={styles.lifecycleReason}>
+              {t("task.detail.waiveReason", { reason: waiver.reason })}
+            </p>
+          ))}
+        </section>
+      ) : null}
 
       <EligibilityPanel eligibility={taskData.eligibility} projectId={projectId!} />
 
