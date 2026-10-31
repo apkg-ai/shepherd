@@ -5,9 +5,23 @@
   margin-bottom: var(--space-4);
 }
 
+.fieldInline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
 .label {
   font-size: var(--text-sm);
   font-weight: 600;
+}
+
+.labelInline {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
 }
 
 .hint {

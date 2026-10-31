@@ -260,81 +260,87 @@ function TaskForm({
                 form.setDescription(e.target.value);
                 form.setDirty();
               }}
-              rows={6}
+              rows={4}
             />
           )}
         </FormField>
 
-        <FormField label={t("task.form.typeLabel")} error={form.errors.type_key}>
-          {(props) => (
-            <select
-              {...props}
-              className={inputStyles.input}
-              value={typeKey}
-              onChange={(e) => {
-                setTypeKey(e.target.value);
-                form.setDirty();
-              }}
-            >
-              {taskTypes.map((tt) => (
-                <option key={tt.key} value={tt.key}>
-                  {tt.label}
-                </option>
-              ))}
-            </select>
-          )}
-        </FormField>
+        <fieldset className={styles.fieldset}>
+          <legend className={styles.legend}>{t("task.form.settingsLegend")}</legend>
 
-        <FormField label={t("task.form.planningRequiredLabel")}>
-          {(props) => (
-            <input
-              {...props}
-              type="checkbox"
-              className={inputStyles.checkbox}
-              checked={planningRequired}
-              onChange={(e) => {
-                setPlanningRequired(e.target.checked);
-                form.setDirty();
-              }}
-            />
-          )}
-        </FormField>
+          <div className={styles.settingsGrid}>
+            <FormField label={t("task.form.typeLabel")} error={form.errors.type_key}>
+              {(props) => (
+                <select
+                  {...props}
+                  className={inputStyles.select}
+                  value={typeKey}
+                  onChange={(e) => {
+                    setTypeKey(e.target.value);
+                    form.setDirty();
+                  }}
+                >
+                  {taskTypes.map((tt) => (
+                    <option key={tt.key} value={tt.key}>
+                      {tt.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </FormField>
 
-        <FormField label={t("task.form.planReviewLabel")} error={form.errors.plan_review}>
-          {(props) => (
-            <select
-              {...props}
-              className={inputStyles.input}
-              value={planReview}
-              onChange={(e) => {
-                setPlanReview(e.target.value as ReviewPolicy);
-                form.setDirty();
-              }}
-            >
-              <option value="human">Human</option>
-              <option value="agent">Agent</option>
-              <option value="none">None</option>
-            </select>
-          )}
-        </FormField>
+            <FormField label={t("task.form.planReviewLabel")} error={form.errors.plan_review}>
+              {(props) => (
+                <select
+                  {...props}
+                  className={inputStyles.select}
+                  value={planReview}
+                  onChange={(e) => {
+                    setPlanReview(e.target.value as ReviewPolicy);
+                    form.setDirty();
+                  }}
+                >
+                  <option value="human">{t("common.review.human")}</option>
+                  <option value="agent">{t("common.review.agent")}</option>
+                  <option value="none">{t("common.review.none")}</option>
+                </select>
+              )}
+            </FormField>
 
-        <FormField label={t("task.form.workReviewLabel")} error={form.errors.work_review}>
-          {(props) => (
-            <select
-              {...props}
-              className={inputStyles.input}
-              value={workReview}
-              onChange={(e) => {
-                setWorkReview(e.target.value as ReviewPolicy);
-                form.setDirty();
-              }}
-            >
-              <option value="human">Human</option>
-              <option value="agent">Agent</option>
-              <option value="none">None</option>
-            </select>
-          )}
-        </FormField>
+            <FormField label={t("task.form.workReviewLabel")} error={form.errors.work_review}>
+              {(props) => (
+                <select
+                  {...props}
+                  className={inputStyles.select}
+                  value={workReview}
+                  onChange={(e) => {
+                    setWorkReview(e.target.value as ReviewPolicy);
+                    form.setDirty();
+                  }}
+                >
+                  <option value="human">{t("common.review.human")}</option>
+                  <option value="agent">{t("common.review.agent")}</option>
+                  <option value="none">{t("common.review.none")}</option>
+                </select>
+              )}
+            </FormField>
+          </div>
+
+          <FormField label={t("task.form.planningRequiredLabel")} inline>
+            {(props) => (
+              <input
+                {...props}
+                type="checkbox"
+                className={inputStyles.checkbox}
+                checked={planningRequired}
+                onChange={(e) => {
+                  setPlanningRequired(e.target.checked);
+                  form.setDirty();
+                }}
+              />
+            )}
+          </FormField>
+        </fieldset>
 
         {form.errors._form ? <p className={styles.formError}>{form.errors._form}</p> : null}
         {form.createConflict && form.conflictInspectPath ? (
