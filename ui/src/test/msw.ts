@@ -7,6 +7,8 @@ import { makeBrowserSession, makePage } from "./fixtures";
 import type { Project } from "../api/generated/model/project";
 import type { Goal } from "../api/generated/model/goal";
 import type { Epic } from "../api/generated/model/epic";
+import type { Task } from "../api/generated/model/task";
+import type { TaskType } from "../api/generated/model/taskType";
 
 export const server = setupServer(...getSystemMock());
 
@@ -54,4 +56,22 @@ export function goalHandler(goal: Goal) {
 
 export function epicListHandler(epics: Epic[]) {
   return http.get("/api/v1/projects/:projectId/epics", () => HttpResponse.json(makePage(epics)));
+}
+
+export function epicHandler(epic: Epic) {
+  return http.get(`/api/v1/projects/:projectId/epics/${epic.id}`, () => HttpResponse.json(epic));
+}
+
+export function taskListHandler(tasks: Task[]) {
+  return http.get("/api/v1/projects/:projectId/tasks", () => HttpResponse.json(makePage(tasks)));
+}
+
+export function taskHandler(task: Task) {
+  return http.get(`/api/v1/projects/:projectId/tasks/${task.id}`, () => HttpResponse.json(task));
+}
+
+export function taskTypeListHandler(taskTypes: TaskType[]) {
+  return http.get("/api/v1/projects/:projectId/task-types", () =>
+    HttpResponse.json(makePage(taskTypes)),
+  );
 }

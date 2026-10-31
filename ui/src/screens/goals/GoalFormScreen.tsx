@@ -1,7 +1,6 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useGetProject } from "../../api/generated/projects/projects";
 import {
   useGetGoal,
@@ -12,23 +11,17 @@ import {
   getListGoalsQueryKey,
 } from "../../api/generated/goals/goals";
 import type { Goal } from "../../api/generated/model/goal";
-import { errorSlug, isShepherdError, fieldErrors, type ShepherdError } from "../../api/problem";
-import { newIdempotencyKey } from "../../lib/idempotency";
+import { useEntityForm } from "../../lib/useEntityForm";
 import { Breadcrumbs, type BreadcrumbItem } from "../../components/Breadcrumbs";
 import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { ConflictView } from "../../components/ConflictView";
 import { FormField } from "../../components/FormField";
 import inputStyles from "../../components/Input.module.css";
 import { LinkButton } from "../../components/LinkButton";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, LoadingState } from "../../components/states";
 import styles from "./GoalFormScreen.module.css";
-
-// The REST contract: on 409 idempotency_conflict, refetch and explain;
-// never repeat automatically with a new key.
-function isIdempotencyConflict(error: ShepherdError): boolean {
-  return error.status === 409 && errorSlug(error) === "idempotency_conflict";
-}
 
 export function GoalFormScreen() {
   const { t } = useTranslation();
@@ -73,14 +66,6 @@ export function GoalFormScreen() {
   );
 }
 
-type ConflictState = {
-  localTitle: string;
-  localDescription: string;
-  remoteTitle: string;
-  remoteDescription: string;
-  remoteRevision: number;
-};
-
 function GoalForm({
   projectId,
   goalId,
@@ -100,165 +85,67 @@ function GoalForm({
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
-  const [title, setTitle] = useState(initialTitle);
-  const [description, setDescription] = useState(initialDescription);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [createConflict, setCreateConflict] = useState(false);
-  const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey);
-  const [revision, setRevision] = useState(initialRevision);
-  const [dirty, setDirty] = useState(false);
-  const [conflict, setConflict] = useState<ConflictState | null>(null);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
-
-  const create = useMutation<Goal, unknown, { title: string; description?: string }>({
-    mutationFn: (vars) =>
-      createGoal(projectId, vars, {
-        headers: { "Idempotency-Key": idempotencyKey },
-      }),
-    meta: { silent: true },
-    onSuccess: (data) => {
-      void queryClient.invalidateQueries({ queryKey: getListGoalsQueryKey(projectId) });
+  const form = useEntityForm<Goal>({
+    entityId: goalId,
+    initialTitle,
+    initialDescription,
+    initialRevision,
+    createFn: (data, opts) =>
+      createGoal(projectId, data as { title: string; description?: string }, opts),
+    onCreateSuccess: (data) => {
       void navigate(`/projects/${projectId}/goals/${data.id}`, { replace: true });
     },
-    onError: (error) => {
-      if (isShepherdError(error) && error.status === 422) {
-        // The payload must change, so the next attempt needs a fresh key; other
-        // failures reuse it so the server can replay a committed request.
-        setIdempotencyKey(newIdempotencyKey());
-        setCreateConflict(false);
-        setErrors(fieldErrors(error));
-      } else if (isShepherdError(error) && isIdempotencyConflict(error)) {
-        // The stored request has a different payload: an earlier attempt may
-        // have committed. Keep the key so the user can reconcile, not repeat.
-        void queryClient.invalidateQueries({ queryKey: getListGoalsQueryKey(projectId) });
-        setCreateConflict(true);
-        setErrors({ _form: t("goal.form.conflictPreviousSubmission") });
-      } else {
-        setCreateConflict(false);
-        setErrors({ _form: isShepherdError(error) ? error.title : t("common.error.unexpected") });
-      }
-    },
-  });
-
-  const update = useMutation<Goal, unknown, { title: string; description: string; rev: number }>({
-    mutationFn: (vars) =>
-      updateGoal(
-        projectId,
-        goalId!,
-        { title: vars.title, description: vars.description },
-        {
-          headers: {
-            "If-Match": `"${vars.rev}"`,
-            "Idempotency-Key": idempotencyKey,
-          },
-        },
-      ),
-    meta: { silent: true },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: getGetGoalQueryKey(projectId, goalId!) });
-      void queryClient.invalidateQueries({ queryKey: getListGoalsQueryKey(projectId) });
+    updateFn: (data, opts) =>
+      updateGoal(projectId, goalId!, data as { title?: string; description?: string }, opts),
+    refetchFn: () => getGoal(projectId, goalId!),
+    onUpdateSuccess: () => {
       void navigate(`/projects/${projectId}/goals/${goalId}`, { replace: true });
     },
-    onError: async (error) => {
-      if (isShepherdError(error) && (error.status === 412 || isIdempotencyConflict(error))) {
-        try {
-          // Direct call: a failed refetch must not poison the mounted goal query.
-          const fresh = await getGoal(projectId, goalId!);
-          queryClient.setQueryData(getGetGoalQueryKey(projectId, goalId!), fresh);
-          setConflict({
-            localTitle: title,
-            localDescription: description,
-            remoteTitle: fresh.title,
-            remoteDescription: fresh.description,
-            remoteRevision: fresh.revision,
-          });
-        } catch {
-          setErrors({ _form: t("common.error.unexpected") });
-        }
-      } else if (isShepherdError(error) && error.status === 422) {
-        setIdempotencyKey(newIdempotencyKey());
-        setErrors(fieldErrors(error));
-      } else {
-        setErrors({ _form: isShepherdError(error) ? error.title : t("common.error.unexpected") });
-      }
-    },
+    getTitle: (g) => g.title,
+    getDescription: (g) => g.description,
+    getRevision: (g) => g.revision,
+    listQueryKey: getListGoalsQueryKey(projectId),
+    detailQueryKey: getGetGoalQueryKey(projectId, goalId!),
+    createBackPath: `/projects/${projectId}`,
+    editBackPath: `/projects/${projectId}/goals/${goalId}`,
+    conflictInspectKey: "goal.form.conflictPreviousSubmission",
+    conflictInspectPath: `/projects/${projectId}`,
   });
-
-  const isPending = create.isPending || update.isPending;
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    setErrors({});
     if (isEdit) {
-      update.mutate({ title: title.trim(), description: description.trim(), rev: revision });
+      form.submitUpdate({ title: form.title.trim(), description: form.description.trim() });
     } else {
-      create.mutate({ title: title.trim(), description: description.trim() || undefined });
+      form.submitCreate({
+        title: form.title.trim(),
+        description: form.description.trim() || undefined,
+      });
     }
   };
 
-  const handleConflictRetry = () => {
-    if (!conflict) return;
-    // The resubmission carries a different revision or payload, so it needs a
-    // fresh key — but only on the user's explicit decision, never automatically.
-    setIdempotencyKey(newIdempotencyKey());
-    setRevision(conflict.remoteRevision);
-    setConflict(null);
-  };
-
-  const handleConflictDiscard = () => {
-    setConflict(null);
-    void navigate(`/projects/${projectId}/goals/${goalId}`, { replace: true });
-  };
-
-  const handleCancel = () => {
-    if (dirty) {
-      setConfirmDiscard(true);
-    } else {
-      navigateBack();
-    }
-  };
-
-  const navigateBack = () => {
-    if (isEdit) {
-      void navigate(`/projects/${projectId}/goals/${goalId}`);
-    } else {
-      void navigate(`/projects/${projectId}`);
-    }
-  };
-
-  if (conflict) {
+  if (form.conflict) {
     return (
       <>
         <Breadcrumbs items={breadcrumbItems} />
         <PageHeader title={t("goal.conflict.title")} description={t("goal.conflict.description")} />
-        <div className={styles.conflictGrid}>
-          <div className={styles.conflictPane}>
-            <h3 className={styles.conflictLabel}>{t("goal.conflict.yours")}</h3>
-            <dl className={styles.conflictFields}>
-              <dt>{t("goal.form.titleLabel")}</dt>
-              <dd>{conflict.localTitle}</dd>
-              <dt>{t("goal.form.descriptionLabel")}</dt>
-              <dd>{conflict.localDescription || t("goal.conflict.none")}</dd>
-            </dl>
-          </div>
-          <div className={styles.conflictPane}>
-            <h3 className={styles.conflictLabel}>{t("goal.conflict.theirs")}</h3>
-            <dl className={styles.conflictFields}>
-              <dt>{t("goal.form.titleLabel")}</dt>
-              <dd>{conflict.remoteTitle}</dd>
-              <dt>{t("goal.form.descriptionLabel")}</dt>
-              <dd>{conflict.remoteDescription || t("goal.conflict.none")}</dd>
-            </dl>
-          </div>
-        </div>
-        <div className={styles.conflictActions}>
-          <Button onClick={handleConflictDiscard}>{t("goal.conflict.discard")}</Button>
-          <Button variant="primary" onClick={handleConflictRetry}>
-            {t("goal.conflict.retry")}
-          </Button>
-        </div>
+        <ConflictView
+          fields={[
+            {
+              label: t("goal.form.titleLabel"),
+              local: form.conflict.localTitle,
+              remote: form.conflict.remoteTitle,
+            },
+            {
+              label: t("goal.form.descriptionLabel"),
+              local: form.conflict.localDescription,
+              remote: form.conflict.remoteDescription,
+            },
+          ]}
+          onRetry={form.handleConflictRetry}
+          onDiscard={form.handleConflictDiscard}
+        />
       </>
     );
   }
@@ -269,57 +156,62 @@ function GoalForm({
       <PageHeader title={isEdit ? t("goal.form.editTitle") : t("goal.form.newTitle")} />
 
       <form className={styles.form} onSubmit={handleSubmit} noValidate>
-        <FormField label={t("goal.form.titleLabel")} error={errors.title}>
+        <FormField label={t("goal.form.titleLabel")} error={form.errors.title}>
           {(props) => (
             <input
               {...props}
               type="text"
               className={inputStyles.input}
-              value={title}
+              value={form.title}
               onChange={(e) => {
-                setTitle(e.target.value);
-                setDirty(true);
+                form.setTitle(e.target.value);
+                form.setDirty();
               }}
               required
             />
           )}
         </FormField>
-        <FormField label={t("goal.form.descriptionLabel")} error={errors.description}>
+        <FormField label={t("goal.form.descriptionLabel")} error={form.errors.description}>
           {(props) => (
             <textarea
               {...props}
               className={inputStyles.textarea}
-              value={description}
+              value={form.description}
               onChange={(e) => {
-                setDescription(e.target.value);
-                setDirty(true);
+                form.setDescription(e.target.value);
+                form.setDirty();
               }}
               rows={6}
             />
           )}
         </FormField>
-        {errors._form ? <p className={styles.formError}>{errors._form}</p> : null}
-        {createConflict ? (
+        {form.errors._form ? <p className={styles.formError}>{form.errors._form}</p> : null}
+        {form.createConflict && form.conflictInspectPath ? (
           <p className={styles.formLink}>
-            <LinkButton to={`/projects/${projectId}`}>{t("goal.form.inspectGoals")}</LinkButton>
+            <LinkButton to={form.conflictInspectPath}>{t("goal.form.inspectGoals")}</LinkButton>
           </p>
         ) : null}
         <div className={styles.actions}>
-          <Button type="button" onClick={handleCancel}>
+          <Button type="button" onClick={form.handleCancel}>
             {t("common.action.cancel")}
           </Button>
-          <Button type="submit" variant="primary" busy={isPending} disabled={!title.trim()}>
+          <Button
+            type="submit"
+            variant="primary"
+            busy={form.isPending}
+            disabled={!form.title.trim()}
+          >
             {isEdit ? t("goal.form.updateSubmit") : t("goal.form.createSubmit")}
           </Button>
         </div>
       </form>
 
       <ConfirmDialog
-        open={confirmDiscard}
+        open={form.confirmDiscard}
         title={t("goal.form.discardTitle")}
         confirmLabel={t("goal.form.discardConfirm")}
-        onConfirm={navigateBack}
-        onCancel={() => setConfirmDiscard(false)}
+        onConfirm={form.navigateBack}
+        onCancel={() => form.setConfirmDiscard(false)}
       >
         <p>{t("goal.form.discardDescription")}</p>
       </ConfirmDialog>

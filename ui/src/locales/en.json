@@ -39,6 +39,13 @@
       "breadcrumb": "Breadcrumb",
       "projects": "Projects"
     },
+    "phase": {
+      "planning": "Planning",
+      "planReview": "Plan review",
+      "execution": "Execution",
+      "workReview": "Work review",
+      "complete": "Complete"
+    },
     "state": {
       "loading": "Loading…"
     },
@@ -48,6 +55,63 @@
       "done": "Done",
       "open": "Open",
       "proposed": "Proposed"
+    }
+  },
+  "conflict": {
+    "view": {
+      "discard": "Discard my changes",
+      "none": "—",
+      "retry": "Save anyway",
+      "theirs": "Current version",
+      "yours": "Your version"
+    }
+  },
+  "counts": {
+    "progress": {
+      "done": "{{count}} done",
+      "cancelled": "{{count}} cancelled",
+      "waived": "{{count}} waived",
+      "total_one": "{{count}} total",
+      "total_other": "{{count}} total",
+      "of": "of"
+    }
+  },
+  "eligibility": {
+    "panel": {
+      "title": "Eligibility",
+      "canPlan": "Can plan",
+      "canExecute": "Can execute",
+      "canReview": "Can review",
+      "blocked": "Blocked",
+      "noReasons": "No blockers"
+    }
+  },
+  "epic": {
+    "conflict": {
+      "description": "This epic was updated since you started editing. Compare your changes with the current version.",
+      "title": "Edit conflict"
+    },
+    "detail": {
+      "edit": "Edit",
+      "emptyTasksCta": "Tasks will appear here once created.",
+      "emptyTasksTitle": "No tasks yet",
+      "newTask": "New task",
+      "taskCount_one": "{{count}} task",
+      "taskCount_other": "{{count}} tasks",
+      "tasksTitle": "Tasks"
+    },
+    "form": {
+      "conflictPreviousSubmission": "A previous submission may already have created this epic. Check the goal epics before submitting again.",
+      "createSubmit": "Create epic",
+      "descriptionLabel": "Description",
+      "discardConfirm": "Discard changes",
+      "discardDescription": "You have unsaved changes. Are you sure you want to discard them?",
+      "discardTitle": "Discard changes?",
+      "editTitle": "Edit epic",
+      "inspectEpics": "Check goal epics",
+      "newTitle": "New epic",
+      "titleLabel": "Title",
+      "updateSubmit": "Save changes"
     }
   },
   "goal": {
@@ -87,6 +151,58 @@
   "not-found": {
     "screen": {
       "title": "Page not found"
+    }
+  },
+  "reason": {
+    "dialog": {
+      "label": "Reason",
+      "placeholder": "Explain why…",
+      "submit": "Submit"
+    }
+  },
+  "task": {
+    "action": {
+      "accept": "Accept",
+      "block": "Block",
+      "blockTitle": "Block task",
+      "cancel": "Cancel task",
+      "cancelTitle": "Cancel task",
+      "claimExecute": "Claim execution",
+      "claimPlan": "Claim planning",
+      "noActions": "No actions available",
+      "release": "Release",
+      "reportFailure": "Report failure",
+      "reportSuccess": "Report success",
+      "unblock": "Unblock",
+      "waive": "Waive task",
+      "waiveTitle": "Waive task"
+    },
+    "detail": {
+      "edit": "Edit",
+      "metadata": "Task metadata",
+      "planReview": "Plan review",
+      "planningRequired": "Planning required",
+      "planningRequiredNo": "No",
+      "planningRequiredYes": "Yes",
+      "type": "Type",
+      "workReview": "Work review"
+    },
+    "form": {
+      "conflictPreviousSubmission": "A previous submission may already have created this task. Check the epic tasks before submitting again.",
+      "createSubmit": "Create task",
+      "descriptionLabel": "Description",
+      "discardConfirm": "Discard changes",
+      "discardDescription": "You have unsaved changes. Are you sure you want to discard them?",
+      "discardTitle": "Discard changes?",
+      "editTitle": "Edit task",
+      "inspectTasks": "Check epic tasks",
+      "newTitle": "New task",
+      "planReviewLabel": "Plan review",
+      "planningRequiredLabel": "Planning required",
+      "titleLabel": "Title",
+      "typeLabel": "Type",
+      "updateSubmit": "Save changes",
+      "workReviewLabel": "Work review"
     }
   },
   "project": {
