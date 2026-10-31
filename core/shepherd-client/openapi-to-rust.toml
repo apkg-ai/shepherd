@@ -1,0 +1,11 @@
+[generator]
+spec_path = "../../openapi/shepherd.yaml"
+output_dir = "src/generated"
+module_name = "shepherd"
+
+[features]
+enable_async_client = false
+
+[generator.types]
+date_time = "chrono"
+uuid = "uuid"
