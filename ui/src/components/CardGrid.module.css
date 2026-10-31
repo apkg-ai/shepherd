@@ -60,6 +60,10 @@
   color: inherit;
 }
 
+.cardLink:hover {
+  text-decoration: none;
+}
+
 .cardContent {
   display: flex;
   flex-direction: column;
