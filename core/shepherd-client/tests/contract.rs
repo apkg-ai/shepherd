@@ -1581,3 +1581,50 @@ async fn live_catalog_agents_and_browser_sessions() {
     let err = owner.delete_browser_session().await.unwrap_err();
     assert_eq!(err.status(), Some(404));
 }
+
+#[tokio::test]
+async fn events_frame_split_mid_utf8_character_decodes() {
+    let event = serde_json::json!({
+        "id": "42",
+        "type": "task.changed",
+        "action": "updated",
+        "actor_id": "00000000-0000-0000-0000-000000000001",
+        "command_id": "00000000-0000-0000-0000-000000000002",
+        "project_id": "00000000-0000-0000-0000-000000000003",
+        "resource_id": "00000000-0000-0000-0000-000000000004",
+        "resource_revision": 2,
+        "affected_ids": [],
+        "reason": "naïve 🦀 reason",
+        "occurred_at": "2026-09-14T00:00:00Z",
+    });
+    let body = format!("event: change\nid: 42\ndata: {event}\n\n");
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{body}"
+    );
+    let bytes = response.into_bytes();
+    // Split inside the four-byte crab so the first chunk ends mid-character.
+    let crab = bytes.windows(4).position(|w| w == "🦀".as_bytes()).unwrap();
+    let (first, second) = bytes.split_at(crab + 2);
+    let (first, second) = (first.to_vec(), second.to_vec());
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    tokio::spawn(async move {
+        use tokio::io::AsyncWriteExt;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let _ = read_request(&mut socket).await;
+        socket.write_all(&first).await.unwrap();
+        socket.flush().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        socket.write_all(&second).await.unwrap();
+        let _ = socket.shutdown().await;
+    });
+
+    let client = capture_client(&base_url);
+    let mut stream = client.get_events(Uuid::now_v7(), None).await.unwrap();
+    match stream.next().await.unwrap().unwrap() {
+        EventStreamItem::Change(event) => assert_eq!(event.reason, "naïve 🦀 reason"),
+        other => panic!("expected change event, got {other:?}"),
+    }
+    assert!(stream.next().await.is_none());
+}

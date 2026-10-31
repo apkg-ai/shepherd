@@ -39,7 +39,7 @@ pub struct EventStream {
     initial_after: Option<String>,
     last_event_id: Option<String>,
     response: reqwest::Response,
-    buffer: String,
+    buffer: Vec<u8>,
     ended: bool,
 }
 
@@ -68,7 +68,7 @@ impl EventStream {
             initial_after: after,
             last_event_id: None,
             response,
-            buffer: String::new(),
+            buffer: Vec::new(),
             ended: false,
         })
     }
@@ -101,9 +101,21 @@ impl EventStream {
             return None;
         }
         loop {
-            while let Some(end) = self.buffer.find("\n\n") {
-                let raw: String = self.buffer.drain(..end + 2).collect();
-                match self.handle_frame(&raw) {
+            // Chunks split at arbitrary byte boundaries, so UTF-8 is only
+            // validated once a complete frame has been accumulated.
+            while let Some(end) = self.buffer.windows(2).position(|w| w == b"\n\n") {
+                let raw: Vec<u8> = self.buffer.drain(..end + 2).collect();
+                let frame = match std::str::from_utf8(&raw) {
+                    Ok(frame) => frame,
+                    Err(err) => {
+                        self.ended = true;
+                        return Some(Err(Error::Decode {
+                            status: 200,
+                            message: format!("event frame is not valid UTF-8: {err}"),
+                        }));
+                    }
+                };
+                match self.handle_frame(frame) {
                     Ok(Some(item)) => return Some(Ok(item)),
                     Ok(None) => {}
                     Err(err) => {
@@ -113,16 +125,7 @@ impl EventStream {
                 }
             }
             match self.response.chunk().await {
-                Ok(Some(chunk)) => match std::str::from_utf8(&chunk) {
-                    Ok(text) => self.buffer.push_str(text),
-                    Err(err) => {
-                        self.ended = true;
-                        return Some(Err(Error::Decode {
-                            status: 200,
-                            message: format!("event stream is not valid UTF-8: {err}"),
-                        }));
-                    }
-                },
+                Ok(Some(chunk)) => self.buffer.extend_from_slice(&chunk),
                 Ok(None) => {
                     self.ended = true;
                     return None;
