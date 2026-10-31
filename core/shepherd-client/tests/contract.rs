@@ -1628,3 +1628,35 @@ async fn events_frame_split_mid_utf8_character_decodes() {
     }
     assert!(stream.next().await.is_none());
 }
+
+#[tokio::test]
+async fn events_unterminated_frame_is_bounded() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    tokio::spawn(async move {
+        use tokio::io::AsyncWriteExt;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let _ = read_request(&mut socket).await;
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        // Never sends the "\n\n" frame delimiter.
+        let flood = vec![b'x'; 3 * 1024 * 1024];
+        let _ = socket.write_all(&flood).await;
+        let _ = socket.shutdown().await;
+    });
+
+    let client = capture_client(&base_url);
+    let mut stream = client.get_events(Uuid::now_v7(), None).await.unwrap();
+    let err = stream.next().await.unwrap().unwrap_err();
+    match err {
+        Error::Decode { message, .. } => {
+            assert!(message.contains("exceeds"), "{message}")
+        }
+        other => panic!("expected Decode, got {other:?}"),
+    }
+    assert!(stream.next().await.is_none());
+}

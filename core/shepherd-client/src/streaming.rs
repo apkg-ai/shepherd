@@ -4,6 +4,9 @@ use crate::error::Error;
 use crate::generated::types::Event;
 use crate::transport::Transport;
 
+// Matches the contract's 2 MiB body bound; valid event frames are far smaller.
+const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
+
 /// One item from the project event stream.
 #[derive(Debug)]
 pub enum EventStreamItem {
@@ -125,7 +128,18 @@ impl EventStream {
                 }
             }
             match self.response.chunk().await {
-                Ok(Some(chunk)) => self.buffer.extend_from_slice(&chunk),
+                Ok(Some(chunk)) => {
+                    if self.buffer.len() + chunk.len() > MAX_FRAME_BYTES {
+                        self.ended = true;
+                        return Some(Err(Error::Decode {
+                            status: 200,
+                            message: format!(
+                                "event frame exceeds {MAX_FRAME_BYTES} bytes without terminating"
+                            ),
+                        }));
+                    }
+                    self.buffer.extend_from_slice(&chunk);
+                }
                 Ok(None) => {
                     self.ended = true;
                     return None;
