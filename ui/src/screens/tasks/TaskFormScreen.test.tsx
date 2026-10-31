@@ -99,6 +99,53 @@ describe("TaskFormScreen — create mode", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1/tasks/new-t"));
   });
 
+  it("submits create with settings fields (type, reviews, planning)", async () => {
+    const user = userEvent.setup();
+    let capturedBody: unknown;
+    const createdTask = makeTask({
+      id: "new-t2",
+      project_id: "p1",
+      epic_id: "e1",
+      title: "With settings",
+      type_key: "research",
+      planning_required: false,
+      plan_review: "agent",
+      work_review: "none",
+    });
+
+    server.use(
+      http.post("/api/v1/projects/p1/tasks", async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json(createdTask, { status: 201 });
+      }),
+      http.get("/api/v1/projects/:projectId/tasks/new-t2", () => HttpResponse.json(createdTask)),
+      http.get("/api/v1/projects/:projectId/epics/:epicId", () => HttpResponse.json(epic)),
+      http.get("/api/v1/projects/:projectId/goals/:goalId", () => HttpResponse.json(goal)),
+    );
+
+    renderRoute("/projects/p1/epics/e1/tasks/new", { handlers: baseHandlers });
+
+    await screen.findByLabelText("Title");
+    await user.type(screen.getByLabelText("Title"), "With settings");
+    await user.selectOptions(screen.getByLabelText("Type"), "research");
+    await user.selectOptions(screen.getByLabelText("Plan review"), "agent");
+    await user.selectOptions(screen.getByLabelText("Work review"), "none");
+    // Planning required is checked by default (from project settings), uncheck it
+    await user.click(screen.getByLabelText("Planning required"));
+    await user.click(screen.getByRole("button", { name: "Create task" }));
+
+    await waitFor(() => {
+      expect(capturedBody).toMatchObject({
+        epic_id: "e1",
+        title: "With settings",
+        type_key: "research",
+        planning_required: false,
+        plan_review: "agent",
+        work_review: "none",
+      });
+    });
+  });
+
   it("shows field errors on 422", async () => {
     const user = userEvent.setup();
 
@@ -290,5 +337,39 @@ describe("TaskFormScreen — edit mode", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByText("Server exploded")).toBeInTheDocument();
+  });
+
+  it("submits edit with all fields including settings", async () => {
+    const user = userEvent.setup();
+    let capturedBody: unknown;
+    const updatedTask = makeTask({ ...existingTask, title: "Updated", revision: 2 });
+
+    server.use(
+      http.patch("/api/v1/projects/p1/tasks/t1", async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json(updatedTask);
+      }),
+      http.get("/api/v1/projects/:projectId/epics/:epicId", () => HttpResponse.json(epic)),
+      http.get("/api/v1/projects/:projectId/goals/:goalId", () => HttpResponse.json(goal)),
+    );
+
+    const { router } = renderRoute("/projects/p1/tasks/t1/edit", { handlers: editHandlers });
+
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original task"));
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "Updated");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1/tasks/t1"));
+    expect(capturedBody).toMatchObject({ title: "Updated" });
+  });
+
+  it("cancel navigates back to task detail in edit mode when clean", async () => {
+    const { router } = renderRoute("/projects/p1/tasks/t1/edit", { handlers: editHandlers });
+
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original task"));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1/tasks/t1"));
   });
 });

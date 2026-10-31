@@ -188,6 +188,91 @@ describe("TaskActions", () => {
     });
   });
 
+  it("unblock action sends request", async () => {
+    const user = userEvent.setup();
+    let called = false;
+
+    server.use(
+      http.post("/api/v1/projects/p1/tasks/t1/unblock", () => {
+        called = true;
+        return HttpResponse.json(taskResponse);
+      }),
+      taskGetHandler(),
+    );
+
+    renderActions({ ...noEligibility, allowed_actions: ["unblock"] });
+
+    await user.click(screen.getByRole("button", { name: "Unblock" }));
+    await waitFor(() => expect(called).toBe(true));
+  });
+
+  it("submits cancel reason to API", async () => {
+    const user = userEvent.setup();
+    let capturedBody: unknown;
+
+    server.use(
+      http.post("/api/v1/projects/p1/tasks/t1/cancel", async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json(taskResponse);
+      }),
+      taskGetHandler(),
+    );
+
+    renderActions({ ...noEligibility, allowed_actions: ["cancel"] });
+
+    await user.click(screen.getByRole("button", { name: "Cancel task" }));
+    await user.type(screen.getByLabelText("Reason"), "No longer needed");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => {
+      expect(capturedBody).toEqual({ reason: "No longer needed" });
+    });
+  });
+
+  it("submits waive reason to API", async () => {
+    const user = userEvent.setup();
+    let capturedBody: unknown;
+
+    server.use(
+      http.post("/api/v1/projects/p1/tasks/t1/waive", async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json(taskResponse);
+      }),
+      taskGetHandler(),
+    );
+
+    renderActions({ ...noEligibility, allowed_actions: ["waive"] });
+
+    await user.click(screen.getByRole("button", { name: "Waive task" }));
+    await user.type(screen.getByLabelText("Reason"), "Handled elsewhere");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => {
+      expect(capturedBody).toEqual({ reason: "Handled elsewhere" });
+    });
+  });
+
+  it("disables other buttons while one action is busy", async () => {
+    const user = userEvent.setup();
+
+    server.use(
+      http.post("/api/v1/projects/p1/tasks/t1/accept", async () => {
+        await new Promise((r) => setTimeout(r, 200));
+        return HttpResponse.json(taskResponse);
+      }),
+      taskGetHandler(),
+    );
+
+    renderActions({ ...noEligibility, allowed_actions: ["accept", "block"] });
+
+    await user.click(screen.getByRole("button", { name: "Accept" }));
+
+    expect(screen.getByRole("button", { name: "Accept" })).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "Block" })).toBeDisabled();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Block" })).not.toBeDisabled());
+  });
+
   it("renders all visible actions from allowed_actions", () => {
     renderActions({
       ...noEligibility,

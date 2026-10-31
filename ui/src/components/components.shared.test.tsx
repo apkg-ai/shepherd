@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 import { I18nextProvider } from "react-i18next";
 import i18next from "i18next";
+import { StaticCard } from "./CardGrid";
 import { PhaseBadge } from "./PhaseBadge";
 import { ProgressCounts } from "./ProgressCounts";
 import { EligibilityPanel } from "./EligibilityPanel";
@@ -246,6 +247,39 @@ describe("ReasonDialog", () => {
     wrap(<ReasonDialog open={false} title="Block task" onSubmit={vi.fn()} onCancel={vi.fn()} />);
 
     expect(screen.queryByLabelText("Reason")).not.toBeInTheDocument();
+  });
+
+  it("calls onCancel and clears textarea on cancel", async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    wrap(<ReasonDialog open title="Block task" onSubmit={vi.fn()} onCancel={onCancel} />);
+
+    await user.type(screen.getByLabelText("Reason"), "Some text");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+});
+
+describe("StaticCard", () => {
+  it("renders title and meta", () => {
+    wrap(
+      <ul>
+        <StaticCard title="Test card" meta="some info" />
+      </ul>,
+    );
+
+    expect(screen.getByText("Test card")).toBeInTheDocument();
+    expect(screen.getByText("some info")).toBeInTheDocument();
+  });
+
+  it("renders badge when provided", () => {
+    wrap(
+      <ul>
+        <StaticCard title="With badge" badge={<span>tag</span>} />
+      </ul>,
+    );
+
+    expect(screen.getByText("tag")).toBeInTheDocument();
   });
 });
 

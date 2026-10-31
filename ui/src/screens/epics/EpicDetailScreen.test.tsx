@@ -293,4 +293,36 @@ describe("EpicDetailScreen", () => {
 
     expect(await screen.findByText("No items match this filter.")).toBeInTheDocument();
   });
+
+  it("shows error when goal fails to load", async () => {
+    renderRoute("/projects/p1/epics/e1", {
+      handlers: [
+        sessionHandler(),
+        projectHandler(project),
+        epicHandler(epic),
+        http.get("/api/v1/projects/:projectId/goals/g1", () =>
+          problemResponse(500, "internal-error", { title: "Goal Error" }),
+        ),
+        taskListHandler([]),
+      ],
+    });
+
+    expect(await screen.findByText("Goal Error")).toBeInTheDocument();
+  });
+
+  it("shows error when tasks fail to load", async () => {
+    renderRoute("/projects/p1/epics/e1", {
+      handlers: [
+        sessionHandler(),
+        projectHandler(project),
+        goalHandler(goal),
+        epicHandler(epic),
+        http.get("/api/v1/projects/:projectId/tasks", () =>
+          problemResponse(500, "internal-error", { title: "Tasks Error" }),
+        ),
+      ],
+    });
+
+    expect(await screen.findByText("Tasks Error")).toBeInTheDocument();
+  });
 });
