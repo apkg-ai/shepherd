@@ -28,7 +28,7 @@ describe("GoalDetailScreen", () => {
     });
 
     expect(await screen.findByRole("heading", { name: "Combat system" })).toBeInTheDocument();
-    expect(screen.getByText("2 epics")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Space Game" })).toHaveAttribute(
       "href",
       "/projects/p1",

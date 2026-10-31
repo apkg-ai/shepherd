@@ -9,6 +9,7 @@ import { Card, CardGrid } from "../../components/CardGrid";
 import { EligibilityPanel } from "../../components/EligibilityPanel";
 import { LinkButton } from "../../components/LinkButton";
 import { PageHeader } from "../../components/PageHeader";
+import { PhaseBadge } from "../../components/PhaseBadge";
 import { ProgressCounts } from "../../components/ProgressCounts";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
@@ -91,7 +92,13 @@ export function EpicDetailScreen() {
                 key={task.id}
                 to={`/projects/${projectId}/tasks/${task.id}`}
                 title={task.title}
-                badge={<StatusBadge status={task.status} />}
+                badge={
+                  <span className={styles.badges}>
+                    <StatusBadge status={task.status} />
+                    <PhaseBadge phase={task.phase} />
+                  </span>
+                }
+                meta={task.type_key}
               />
             ))}
           </CardGrid>

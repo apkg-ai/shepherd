@@ -6,6 +6,7 @@ import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { Card, CardGrid } from "../../components/CardGrid";
 import { LinkButton } from "../../components/LinkButton";
 import { PageHeader } from "../../components/PageHeader";
+import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 
 export function ProjectOverviewScreen() {
@@ -53,6 +54,7 @@ export function ProjectOverviewScreen() {
               to={`/projects/${projectId}/goals/${goal.id}`}
               title={goal.title}
               description={goal.description || undefined}
+              badge={goal.completed ? <StatusBadge status="done" /> : undefined}
               meta={
                 goal.epic_counts.total > 0
                   ? t("project.overview.epicCount", { count: goal.epic_counts.total })

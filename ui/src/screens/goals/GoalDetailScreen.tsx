@@ -4,9 +4,10 @@ import { useGetProject } from "../../api/generated/projects/projects";
 import { useGetGoal } from "../../api/generated/goals/goals";
 import { useListEpics } from "../../api/generated/epics/epics";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
-import { CardGrid, StaticCard } from "../../components/CardGrid";
+import { Card, CardGrid } from "../../components/CardGrid";
 import { LinkButton } from "../../components/LinkButton";
 import { PageHeader } from "../../components/PageHeader";
+import { ProgressCounts } from "../../components/ProgressCounts";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import styles from "./GoalDetailScreen.module.css";
@@ -52,15 +53,21 @@ export function GoalDetailScreen() {
           </LinkButton>
         }
       >
-        {goal.data.epic_counts.total > 0 ? (
-          <span className={styles.counts}>
-            {t("goal.detail.epicCount", { count: goal.data.epic_counts.total })}
-          </span>
-        ) : null}
+        <div className={styles.meta}>
+          {goal.data.completed ? <StatusBadge status="done" /> : null}
+          {goal.data.epic_counts.total > 0 ? (
+            <ProgressCounts counts={goal.data.epic_counts} />
+          ) : null}
+        </div>
       </PageHeader>
 
       <section aria-label={t("goal.detail.epicsTitle")}>
-        <h3 className={styles.sectionTitle}>{t("goal.detail.epicsTitle")}</h3>
+        <div className={styles.sectionHeader}>
+          <h3 className={styles.sectionTitle}>{t("goal.detail.epicsTitle")}</h3>
+          <LinkButton to={`/projects/${projectId}/goals/${goalId}/epics/new`} variant="primary">
+            {t("goal.detail.newEpic")}
+          </LinkButton>
+        </div>
         {allEpics.length === 0 ? (
           <EmptyState title={t("goal.detail.emptyEpicsTitle")} icon="🏗️">
             <p className={styles.emptyHint}>{t("goal.detail.emptyEpicsCta")}</p>
@@ -68,8 +75,9 @@ export function GoalDetailScreen() {
         ) : (
           <CardGrid>
             {allEpics.map((epic) => (
-              <StaticCard
+              <Card
                 key={epic.id}
+                to={`/projects/${projectId}/epics/${epic.id}`}
                 title={epic.title}
                 badge={<StatusBadge status={epic.status} />}
                 meta={
