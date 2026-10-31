@@ -92,11 +92,11 @@ export function EpicDetailScreen() {
                 key={task.id}
                 to={`/projects/${projectId}/tasks/${task.id}`}
                 title={task.title}
-                badge={
-                  <span className={styles.badges}>
+                tags={
+                  <>
                     <StatusBadge status={task.status} />
                     <PhaseBadge phase={task.phase} />
-                  </span>
+                  </>
                 }
                 meta={task.type_key}
               />

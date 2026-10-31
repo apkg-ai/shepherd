@@ -11,13 +11,17 @@ interface CardProps {
   title: string;
   description?: string;
   meta?: string;
+  /** Inline badge next to the title (single badge, short content). */
   badge?: ReactNode;
+  /** Tag row above the title (multiple badges, always on its own line). */
+  tags?: ReactNode;
 }
 
-export function Card({ to, title, description, meta, badge }: CardProps) {
+export function Card({ to, title, description, meta, badge, tags }: CardProps) {
   return (
     <li className={styles.card}>
       <Link to={to} className={styles.cardLink}>
+        {tags ? <div className={styles.cardTags}>{tags}</div> : null}
         <div className={styles.cardHeader}>
           <span className={styles.cardTitle}>{title}</span>
           {badge ? <span className={styles.cardBadge}>{badge}</span> : null}

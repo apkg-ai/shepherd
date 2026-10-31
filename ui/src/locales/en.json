@@ -226,6 +226,8 @@
       "emptyGoalsTitle": "No goals yet",
       "epicCount_one": "{{count}} epic",
       "epicCount_other": "{{count}} epics",
+      "goalCount_one": "{{count}} goal",
+      "goalCount_other": "{{count}} goals",
       "newGoal": "New goal"
     }
   },

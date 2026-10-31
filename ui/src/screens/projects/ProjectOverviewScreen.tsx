@@ -6,8 +6,10 @@ import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { Card, CardGrid } from "../../components/CardGrid";
 import { LinkButton } from "../../components/LinkButton";
 import { PageHeader } from "../../components/PageHeader";
+import { ProgressCounts } from "../../components/ProgressCounts";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
+import styles from "./ProjectOverviewScreen.module.css";
 
 export function ProjectOverviewScreen() {
   const { t } = useTranslation();
@@ -38,7 +40,21 @@ export function ProjectOverviewScreen() {
             {t("project.overview.newGoal")}
           </LinkButton>
         }
-      />
+      >
+        {allGoals.length > 0 || project.data.epic_counts.total > 0 ? (
+          <div className={styles.summary}>
+            <span className={styles.summaryItem}>
+              {t("project.overview.goalCount", { count: allGoals.length })}
+            </span>
+            {project.data.epic_counts.total > 0 ? (
+              <>
+                <span className={styles.summaryDot}>·</span>
+                <ProgressCounts counts={project.data.epic_counts} />
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </PageHeader>
 
       {allGoals.length === 0 ? (
         <EmptyState title={t("project.overview.emptyGoalsTitle")} icon="🎯">
