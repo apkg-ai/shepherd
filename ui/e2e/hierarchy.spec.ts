@@ -40,10 +40,16 @@ test.describe("hierarchy flow", () => {
     await expect(page.getByRole("heading", { name: "E2E Task" })).toBeVisible();
 
     // Verify task detail renders badges and metadata
-    await expect(page.getByText("Execution")).toBeVisible();
+    await expect(page.getByText("Execution", { exact: true })).toBeVisible();
     await expect(page.getByText("Open", { exact: true }).first()).toBeVisible();
     await expect(page.getByRole("region", { name: "Task metadata" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Eligibility" })).toBeVisible();
+
+    // Action panel renders from the server's allowed_actions vocabulary
+    // (REST operationIds), not a client-side fabrication.
+    await expect(page.getByText("No actions available")).toBeHidden();
+    await expect(page.getByRole("button", { name: "Block" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Cancel task" })).toBeVisible();
 
     // Navigate back via breadcrumbs
     await page.getByRole("link", { name: "E2E Epic" }).click();

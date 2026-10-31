@@ -18,22 +18,29 @@ import styles from "./TaskActions.module.css";
 
 /**
  * Only render actions present in allowed_actions — never derive from status.
+ * allowed_actions carries the REST operationIds emitted by the core
+ * eligibility evaluator, so the keys must match that vocabulary exactly.
+ * claimTask is phase-agnostic: the server gates it on can_plan/can_execute,
+ * and the buttons split the claimed phase on those flags.
  * release / report_success / report_failure are excluded: they require a
  * lease token from the claim response, and the browser claim flow does not
  * yet persist the token across navigation. They will be added when the
  * in-memory lease store is wired (step 017 follow-up).
  */
 const ACTION_DEFS = [
-  { key: "claim_plan", i18n: "task.action.claimPlan" },
-  { key: "claim_execute", i18n: "task.action.claimExecute" },
-  { key: "accept", i18n: "task.action.accept" },
-  { key: "block", i18n: "task.action.block" },
-  { key: "unblock", i18n: "task.action.unblock" },
-  { key: "cancel", i18n: "task.action.cancel" },
-  { key: "waive", i18n: "task.action.waive" },
+  { key: "acceptTask", i18n: "task.action.accept" },
+  { key: "blockTask", i18n: "task.action.block" },
+  { key: "unblockTask", i18n: "task.action.unblock" },
+  { key: "cancelTask", i18n: "task.action.cancel" },
+  { key: "waiveTask", i18n: "task.action.waive" },
 ] as const;
 
-type ReasonAction = "block" | "cancel" | "waive";
+const CLAIM_PHASES = [
+  { phase: "plan", busyKey: "claim_plan", i18n: "task.action.claimPlan" },
+  { phase: "execute", busyKey: "claim_execute", i18n: "task.action.claimExecute" },
+] as const;
+
+type ReasonAction = "blockTask" | "cancelTask" | "waiveTask";
 
 interface TaskActionsProps {
   projectId: string;
@@ -66,7 +73,6 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
           },
         },
       ),
-    meta: { silent: true },
     onSettled: () => {
       setBusyAction(null);
       void invalidateTask();
@@ -86,7 +92,6 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
           },
         },
       ),
-    meta: { silent: true },
     onSettled: () => {
       setBusyAction(null);
       void invalidateTask();
@@ -106,7 +111,6 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
           },
         },
       ),
-    meta: { silent: true },
     onSettled: () => {
       setBusyAction(null);
       void invalidateTask();
@@ -126,7 +130,6 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
           },
         },
       ),
-    meta: { silent: true },
     onSettled: () => {
       setBusyAction(null);
       setReasonDialog(null);
@@ -147,7 +150,6 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
           },
         },
       ),
-    meta: { silent: true },
     onSettled: () => {
       setBusyAction(null);
       setReasonDialog(null);
@@ -168,7 +170,6 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
           },
         },
       ),
-    meta: { silent: true },
     onSettled: () => {
       setBusyAction(null);
       setReasonDialog(null);
@@ -187,23 +188,23 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
       case "claim_execute":
         claim.mutate("execute");
         break;
-      case "accept":
+      case "acceptTask":
         accept.mutate();
         break;
-      case "unblock":
+      case "unblockTask":
         unblock.mutate();
         break;
-      case "block":
+      case "blockTask":
         setBusyAction(null);
-        setReasonDialog("block");
+        setReasonDialog("blockTask");
         break;
-      case "cancel":
+      case "cancelTask":
         setBusyAction(null);
-        setReasonDialog("cancel");
+        setReasonDialog("cancelTask");
         break;
-      case "waive":
+      case "waiveTask":
         setBusyAction(null);
-        setReasonDialog("waive");
+        setReasonDialog("waiveTask");
         break;
       default:
         setBusyAction(null);
@@ -214,21 +215,26 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
     if (!reasonDialog) return;
     setBusyAction(reasonDialog);
     switch (reasonDialog) {
-      case "block":
+      case "blockTask":
         block.mutate(reason);
         break;
-      case "cancel":
+      case "cancelTask":
         cancel.mutate(reason);
         break;
-      case "waive":
+      case "waiveTask":
         waive.mutate(reason);
         break;
     }
   };
 
+  const visibleClaims = allowed.has("claimTask")
+    ? CLAIM_PHASES.filter((c) =>
+        c.phase === "plan" ? eligibility.can_plan : eligibility.can_execute,
+      )
+    : [];
   const visibleActions = ACTION_DEFS.filter((a) => allowed.has(a.key));
 
-  if (visibleActions.length === 0) {
+  if (visibleActions.length === 0 && visibleClaims.length === 0) {
     return (
       <section className={styles.panel} aria-label={t("task.action.noActions")}>
         <p className={styles.empty}>{t("task.action.noActions")}</p>
@@ -237,19 +243,32 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
   }
 
   const reasonTitles: Record<ReasonAction, string> = {
-    block: t("task.action.blockTitle"),
-    cancel: t("task.action.cancelTitle"),
-    waive: t("task.action.waiveTitle"),
+    blockTask: t("task.action.blockTitle"),
+    cancelTask: t("task.action.cancelTitle"),
+    waiveTask: t("task.action.waiveTitle"),
   };
 
   return (
     <>
       <section className={styles.panel}>
         <div className={styles.actions}>
+          {visibleClaims.map((claimPhase) => (
+            <Button
+              key={claimPhase.busyKey}
+              variant="secondary"
+              busy={busyAction === claimPhase.busyKey}
+              disabled={busyAction !== null && busyAction !== claimPhase.busyKey}
+              onClick={() => handleAction(claimPhase.busyKey)}
+            >
+              {t(claimPhase.i18n)}
+            </Button>
+          ))}
           {visibleActions.map((action) => (
             <Button
               key={action.key}
-              variant={action.key === "cancel" || action.key === "waive" ? "danger" : "secondary"}
+              variant={
+                action.key === "cancelTask" || action.key === "waiveTask" ? "danger" : "secondary"
+              }
               busy={busyAction === action.key}
               disabled={busyAction !== null && busyAction !== action.key}
               onClick={() => handleAction(action.key)}

@@ -1,13 +1,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import { I18nextProvider } from "react-i18next";
 import i18next from "i18next";
 import { http, HttpResponse } from "msw";
 import { TaskActions } from "./TaskActions";
-import { server } from "../../../test/msw";
+import { problemResponse, server } from "../../../test/msw";
 import { makeTask } from "../../../test/fixtures";
 import { createQueryClient } from "../../../lib/queryClient";
 import type { Eligibility } from "../../../api/generated/model/eligibility";
@@ -36,8 +36,11 @@ function taskGetHandler() {
   return http.get("/api/v1/projects/p1/tasks/t1", () => HttpResponse.json(taskResponse));
 }
 
-function renderActions(eligibility: Eligibility) {
-  const client = createQueryClient({ onMutationError: noop });
+function renderActions(
+  eligibility: Eligibility,
+  onMutationError: (message: string) => void = noop,
+) {
+  const client = createQueryClient({ onMutationError });
   client.setDefaultOptions({
     queries: { retry: false, gcTime: 0 },
     mutations: { retry: false },
@@ -57,7 +60,8 @@ describe("TaskActions", () => {
   it("renders only allowed_actions buttons — no inference from status", () => {
     renderActions({
       ...noEligibility,
-      allowed_actions: ["claim_plan", "block"],
+      can_plan: true,
+      allowed_actions: ["claimTask", "blockTask"],
     });
 
     expect(screen.getByRole("button", { name: "Claim planning" })).toBeInTheDocument();
@@ -66,8 +70,25 @@ describe("TaskActions", () => {
     expect(screen.queryByRole("button", { name: "Claim execution" })).not.toBeInTheDocument();
   });
 
+  it("splits claimTask into both phases when both flags are set", () => {
+    renderActions({
+      ...noEligibility,
+      can_plan: true,
+      can_execute: true,
+      allowed_actions: ["claimTask"],
+    });
+
+    expect(screen.getByRole("button", { name: "Claim planning" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Claim execution" })).toBeInTheDocument();
+  });
+
   it("shows no actions message when allowed_actions is empty", () => {
     renderActions(noEligibility);
+    expect(screen.getByText("No actions available")).toBeInTheDocument();
+  });
+
+  it("shows no actions when claimTask is allowed but no claim flag is set", () => {
+    renderActions({ ...noEligibility, allowed_actions: ["claimTask"] });
     expect(screen.getByText("No actions available")).toBeInTheDocument();
   });
 
@@ -104,7 +125,7 @@ describe("TaskActions", () => {
       taskGetHandler(),
     );
 
-    renderActions({ ...noEligibility, allowed_actions: ["claim_plan"] });
+    renderActions({ ...noEligibility, can_plan: true, allowed_actions: ["claimTask"] });
 
     await user.click(screen.getByRole("button", { name: "Claim planning" }));
 
@@ -127,7 +148,7 @@ describe("TaskActions", () => {
       taskGetHandler(),
     );
 
-    renderActions({ ...noEligibility, allowed_actions: ["accept"] });
+    renderActions({ ...noEligibility, allowed_actions: ["acceptTask"] });
 
     const button = screen.getByRole("button", { name: "Accept" });
     await user.click(button);
@@ -137,9 +158,29 @@ describe("TaskActions", () => {
     await waitFor(() => expect(callCount).toBe(1));
   });
 
+  it("surfaces a failed action through the global mutation-error handler", async () => {
+    const user = userEvent.setup();
+    const onMutationError = vi.fn();
+
+    server.use(
+      http.post("/api/v1/projects/p1/tasks/t1/accept", () =>
+        problemResponse(409, "wrong_phase", { title: "Wrong phase", detail: "Task is complete." }),
+      ),
+      taskGetHandler(),
+    );
+
+    renderActions({ ...noEligibility, allowed_actions: ["acceptTask"] }, onMutationError);
+
+    const button = screen.getByRole("button", { name: "Accept" });
+    await user.click(button);
+
+    await waitFor(() => expect(onMutationError).toHaveBeenCalledWith("Task is complete."));
+    await waitFor(() => expect(button).not.toBeDisabled());
+  });
+
   it("opens reason dialog for block action", async () => {
     const user = userEvent.setup();
-    renderActions({ ...noEligibility, allowed_actions: ["block"] });
+    renderActions({ ...noEligibility, allowed_actions: ["blockTask"] });
 
     await user.click(screen.getByRole("button", { name: "Block" }));
 
@@ -149,7 +190,7 @@ describe("TaskActions", () => {
 
   it("opens reason dialog for cancel action", async () => {
     const user = userEvent.setup();
-    renderActions({ ...noEligibility, allowed_actions: ["cancel"] });
+    renderActions({ ...noEligibility, allowed_actions: ["cancelTask"] });
 
     await user.click(screen.getByRole("button", { name: "Cancel task" }));
 
@@ -158,7 +199,7 @@ describe("TaskActions", () => {
 
   it("opens reason dialog for waive action", async () => {
     const user = userEvent.setup();
-    renderActions({ ...noEligibility, allowed_actions: ["waive"] });
+    renderActions({ ...noEligibility, allowed_actions: ["waiveTask"] });
 
     await user.click(screen.getByRole("button", { name: "Waive task" }));
 
@@ -177,7 +218,7 @@ describe("TaskActions", () => {
       taskGetHandler(),
     );
 
-    renderActions({ ...noEligibility, allowed_actions: ["block"] });
+    renderActions({ ...noEligibility, allowed_actions: ["blockTask"] });
 
     await user.click(screen.getByRole("button", { name: "Block" }));
     await user.type(screen.getByLabelText("Reason"), "Waiting on dep");
@@ -200,7 +241,7 @@ describe("TaskActions", () => {
       taskGetHandler(),
     );
 
-    renderActions({ ...noEligibility, allowed_actions: ["unblock"] });
+    renderActions({ ...noEligibility, allowed_actions: ["unblockTask"] });
 
     await user.click(screen.getByRole("button", { name: "Unblock" }));
     await waitFor(() => expect(called).toBe(true));
@@ -218,7 +259,7 @@ describe("TaskActions", () => {
       taskGetHandler(),
     );
 
-    renderActions({ ...noEligibility, allowed_actions: ["cancel"] });
+    renderActions({ ...noEligibility, allowed_actions: ["cancelTask"] });
 
     await user.click(screen.getByRole("button", { name: "Cancel task" }));
     await user.type(screen.getByLabelText("Reason"), "No longer needed");
@@ -241,7 +282,7 @@ describe("TaskActions", () => {
       taskGetHandler(),
     );
 
-    renderActions({ ...noEligibility, allowed_actions: ["waive"] });
+    renderActions({ ...noEligibility, allowed_actions: ["waiveTask"] });
 
     await user.click(screen.getByRole("button", { name: "Waive task" }));
     await user.type(screen.getByLabelText("Reason"), "Handled elsewhere");
@@ -263,7 +304,7 @@ describe("TaskActions", () => {
       taskGetHandler(),
     );
 
-    renderActions({ ...noEligibility, allowed_actions: ["accept", "block"] });
+    renderActions({ ...noEligibility, allowed_actions: ["acceptTask", "blockTask"] });
 
     await user.click(screen.getByRole("button", { name: "Accept" }));
 
@@ -276,7 +317,7 @@ describe("TaskActions", () => {
   it("renders all visible actions from allowed_actions", () => {
     renderActions({
       ...noEligibility,
-      allowed_actions: ["cancel", "waive", "accept"],
+      allowed_actions: ["cancelTask", "waiveTask", "acceptTask"],
     });
 
     expect(screen.getByRole("button", { name: "Cancel task" })).toBeInTheDocument();

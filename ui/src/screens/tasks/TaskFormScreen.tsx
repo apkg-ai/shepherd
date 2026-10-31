@@ -76,6 +76,21 @@ export function TaskFormScreen() {
   }
 
   const activeTypes = taskTypes.data.items.filter((tt) => !tt.archived);
+  // The list query excludes archived types, so an edited task's current type
+  // can be missing from the options; keep it selectable so the select shows
+  // the stored value instead of rendering blank.
+  const currentTypeKey = isEdit ? task.data?.type_key : undefined;
+  const typeOptions =
+    currentTypeKey !== undefined && !activeTypes.some((tt) => tt.key === currentTypeKey)
+      ? [
+          {
+            key: currentTypeKey,
+            label:
+              taskTypes.data.items.find((tt) => tt.key === currentTypeKey)?.label ?? currentTypeKey,
+          },
+          ...activeTypes,
+        ]
+      : activeTypes;
 
   const breadcrumbItems: BreadcrumbItem[] = isEdit
     ? [
@@ -104,13 +119,13 @@ export function TaskFormScreen() {
       initialTitle={isEdit ? task.data!.title : ""}
       initialDescription={isEdit ? task.data!.description : ""}
       initialRevision={isEdit ? task.data!.revision : 0}
-      initialTypeKey={isEdit ? task.data!.type_key : (activeTypes[0]?.key ?? "")}
+      initialTypeKey={isEdit ? task.data!.type_key : (typeOptions[0]?.key ?? "")}
       initialPlanningRequired={
         isEdit ? task.data!.planning_required : project.data.settings.planning_required
       }
       initialPlanReview={isEdit ? task.data!.plan_review : project.data.settings.plan_review}
       initialWorkReview={isEdit ? task.data!.work_review : project.data.settings.work_review}
-      taskTypes={activeTypes}
+      taskTypes={typeOptions}
       key={`${projectId}:${taskId ?? "new"}`}
     />
   );

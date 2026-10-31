@@ -42,7 +42,7 @@ const task = makeTask({
         message: "Blocked by damage model",
       },
     ],
-    allowed_actions: ["claim_execute"],
+    allowed_actions: ["claimTask"],
   },
 });
 

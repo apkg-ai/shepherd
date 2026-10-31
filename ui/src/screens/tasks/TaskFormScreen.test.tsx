@@ -241,6 +241,18 @@ describe("TaskFormScreen — edit mode", () => {
     expect(screen.getByLabelText("Description")).toHaveValue("Original desc");
   });
 
+  it("keeps an unlisted (archived) task type selected in edit mode", async () => {
+    const legacyTask = makeTask({ ...existingTask, type_key: "legacy" });
+    renderRoute("/projects/p1/tasks/t1/edit", {
+      handlers: [
+        ...baseHandlers,
+        http.get("/api/v1/projects/:projectId/tasks/t1", () => HttpResponse.json(legacyTask)),
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Type")).toHaveValue("legacy"));
+  });
+
   it("shows conflict comparison on 412", async () => {
     const user = userEvent.setup();
     const updated = makeTask({

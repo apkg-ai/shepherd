@@ -84,6 +84,18 @@ const PAIRS: Pair[] = [
   { fg: "danger", bg: "danger-soft", min: AA_TEXT, note: "danger accents on soft fill" },
   { fg: "success", bg: "bg", min: AA_TEXT, note: "healthy status text" },
   { fg: "success", bg: "success-soft", min: AA_TEXT, note: "success accents on soft fill" },
+  // Status/phase badge text on subtle fills
+  { fg: "info", bg: "info-subtle", min: AA_TEXT, note: "open status, planning phase badge" },
+  {
+    fg: "warning",
+    bg: "warning-subtle",
+    min: AA_TEXT,
+    note: "proposed status, review phase badge",
+  },
+  { fg: "accent", bg: "accent-subtle", min: AA_TEXT, note: "active status, execution phase badge" },
+  { fg: "success", bg: "success-subtle", min: AA_TEXT, note: "done status, complete phase badge" },
+  // Eligibility panel active flag
+  { fg: "success", bg: "surface-raised", min: AA_TEXT, note: "eligibility active flag" },
   // Toast messages inherit --color-text over soft fills
   { fg: "text", bg: "success-soft", min: AA_TEXT, note: "toast success message" },
   { fg: "text", bg: "danger-soft", min: AA_TEXT, note: "toast error message" },
