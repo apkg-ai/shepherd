@@ -71,16 +71,12 @@ describe("GraphNode", () => {
   });
 
   it("applies selected state", () => {
-    const props = nodeProps({ selected: true });
-    render(<GraphNode {...props} />);
-    const node = screen.getByTestId(`graph-node-${props.id}`);
-    expect(node).toHaveAttribute("data-selected", "true");
+    render(<GraphNode {...nodeProps({ selected: true })} />);
+    expect(document.querySelector('[data-selected="true"]')).toBeInTheDocument();
   });
 
   it("applies dimmed state", () => {
-    const props = nodeProps({ dimmed: true });
-    render(<GraphNode {...props} />);
-    const node = screen.getByTestId(`graph-node-${props.id}`);
-    expect(node).toHaveAttribute("data-dimmed", "true");
+    render(<GraphNode {...nodeProps({ dimmed: true })} />);
+    expect(document.querySelector('[data-dimmed="true"]')).toBeInTheDocument();
   });
 });

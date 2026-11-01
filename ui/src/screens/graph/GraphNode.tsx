@@ -1,11 +1,9 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { useTranslation } from "react-i18next";
 import type { Counts } from "../../api/generated/model/counts";
 import type { Eligibility } from "../../api/generated/model/eligibility";
 import type { EntityStatus } from "../../api/generated/model/entityStatus";
-import { ProgressCounts } from "../../components/ProgressCounts";
-import { StatusBadge } from "../../components/StatusBadge";
+import { NodeContent } from "./NodeContent";
 import styles from "./GraphNode.module.css";
 
 export type GraphNodeData = {
@@ -27,8 +25,6 @@ export type GraphNodeData = {
 export type GraphNodeType = Node<GraphNodeData, "graphNode">;
 
 export function GraphNode({ id, data }: NodeProps<GraphNodeType>) {
-  const { t } = useTranslation();
-
   /* v8 ignore next 4 -- expand click only fires in React Flow canvas; covered by E2E */
   const handleExpandClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -36,34 +32,18 @@ export function GraphNode({ id, data }: NodeProps<GraphNodeType>) {
   };
 
   return (
-    <div
-      className={styles.node}
-      data-testid={`graph-node-${id}`}
-      data-status={data.status}
-      data-selected={data.selected || false}
-      data-dimmed={data.dimmed || false}
-      data-expanded={data.expanded || false}
-    >
+    <div className={styles.wrapper} data-testid={`graph-node-${id}`}>
       <Handle type="target" position={Position.Top} className={styles.handle} />
-      <div className={styles.content}>
-        <div className={styles.title}>{data.title}</div>
-        <div className={styles.tags}>
-          <StatusBadge status={data.status} />
-          {data.counts.total > 0 && <ProgressCounts counts={data.counts} />}
-        </div>
-      </div>
-      {data.expandable && (
-        <button
-          type="button"
-          className={styles.expandToggle}
-          onClick={handleExpandClick}
-          aria-label={
-            data.expanded ? t("graph.action.collapseTasks") : t("graph.action.expandTasks")
-          }
-        >
-          {data.expanded ? "▲" : "▼"}
-        </button>
-      )}
+      <NodeContent
+        title={data.title}
+        status={data.status}
+        counts={data.counts}
+        expandable={data.expandable}
+        expanded={data.expanded}
+        selected={data.selected}
+        dimmed={data.dimmed}
+        onExpandClick={handleExpandClick}
+      />
       <Handle type="source" position={Position.Bottom} className={styles.handle} />
     </div>
   );
