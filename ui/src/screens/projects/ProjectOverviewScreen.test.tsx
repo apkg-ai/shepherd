@@ -27,7 +27,7 @@ describe("ProjectOverviewScreen", () => {
     expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/");
   });
 
-  it("shows goal cards with epic counts in list view", async () => {
+  it("shows goals in table view", async () => {
     const user = userEvent.setup();
     const goals = [
       makeGoal({
@@ -48,12 +48,10 @@ describe("ProjectOverviewScreen", () => {
     });
 
     await screen.findByRole("heading", { name: "Space Game" });
-    await user.click(screen.getByRole("button", { name: /List view/ }));
+    await user.click(screen.getByRole("button", { name: /Table view/ }));
 
     expect(await screen.findByText("Combat system")).toBeInTheDocument();
     expect(screen.getByText("Economy")).toBeInTheDocument();
-    expect(screen.getByText("3 epics")).toBeInTheDocument();
-    expect(screen.getByText("1 epic")).toBeInTheDocument();
   });
 
   it("shows empty state with CTA when no goals", async () => {
@@ -65,7 +63,7 @@ describe("ProjectOverviewScreen", () => {
     expect(screen.getByRole("link", { name: /Create your first goal/ })).toBeInTheDocument();
   });
 
-  it("goal card links to goal detail in list view", async () => {
+  it("goal links to goal detail in table view", async () => {
     const user = userEvent.setup();
     const goal = makeGoal({ id: "g1", project_id: "p1", title: "Combat" });
     renderRoute("/projects/p1", {
@@ -73,7 +71,7 @@ describe("ProjectOverviewScreen", () => {
     });
 
     await screen.findByRole("heading", { name: "Space Game" });
-    await user.click(screen.getByRole("button", { name: /List view/ }));
+    await user.click(screen.getByRole("button", { name: /Table view/ }));
 
     const link = await screen.findByRole("link", { name: /Combat/ });
     expect(link).toHaveAttribute("href", "/projects/p1/goals/g1");

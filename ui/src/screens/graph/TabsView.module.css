@@ -1,0 +1,97 @@
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  cursor: default;
+}
+
+.row:hover {
+  background: var(--color-surface);
+}
+
+.goalRow {
+  composes: row;
+  font-weight: 600;
+  font-size: var(--text-lg);
+}
+
+.epicRow {
+  composes: row;
+  padding-left: var(--space-6);
+  font-size: var(--text-md);
+}
+
+.taskRow {
+  composes: row;
+  padding-left: calc(var(--space-6) * 2);
+  font-size: var(--text-sm);
+}
+
+.completed {
+  opacity: 0.6;
+}
+
+.toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  line-height: 1;
+  width: 1.2em;
+  flex-shrink: 0;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titleLink {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.titleLink:hover {
+  text-decoration: underline;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.loadingRow {
+  composes: row;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.loadingEpic {
+  composes: loadingRow;
+  padding-left: var(--space-6);
+}
+
+.loadingTask {
+  composes: loadingRow;
+  padding-left: calc(var(--space-6) * 2);
+}
+
+.typeKey {
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+}

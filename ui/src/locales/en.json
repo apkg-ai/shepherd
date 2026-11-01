@@ -163,6 +163,7 @@
       "fit": "Fit to view",
       "graphView": "Graph view",
       "listView": "List view",
+      "tabsView": "Table view",
       "removeDependency": "Remove dependency",
       "removeDependencyArrow": "is required by",
       "removeDependencyConfirm": "Remove",
@@ -172,7 +173,9 @@
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out",
       "expandTasks": "Show tasks",
-      "collapseTasks": "Hide tasks"
+      "collapseTasks": "Hide tasks",
+      "hideCompleted": "Hide completed",
+      "showCompleted": "Show completed"
     },
     "canvas": {
       "label": "Dependency graph"
@@ -201,6 +204,16 @@
     },
     "toolbar": {
       "label": "Graph controls"
+    }
+  },
+  "tabs": {
+    "view": {
+      "label": "Table view",
+      "expandGoal": "Expand goal",
+      "collapseGoal": "Collapse goal",
+      "expandEpic": "Expand epic",
+      "collapseEpic": "Collapse epic",
+      "loading": "Loading…"
     }
   },
   "not-found": {

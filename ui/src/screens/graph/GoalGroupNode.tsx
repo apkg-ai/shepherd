@@ -9,6 +9,9 @@ interface GoalGroupData extends Record<string, unknown> {
   title: string;
   completed: boolean;
   epicCounts: Counts;
+  expanded: boolean;
+  onToggleExpand?: (goalId: string) => void;
+  goalId: string;
 }
 
 export type GoalGroupNodeType = Node<GoalGroupData, "goalGroup">;
@@ -16,14 +19,30 @@ export type GoalGroupNodeType = Node<GoalGroupData, "goalGroup">;
 export function GoalGroupNode({ id, data }: NodeProps<GoalGroupNodeType>) {
   const { t } = useTranslation();
 
+  const handleExpandClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    data.onToggleExpand?.(data.goalId);
+  };
+
   return (
     <div
       className={styles.group}
       data-testid={`goal-group-${id}`}
       data-completed={data.completed}
+      data-expanded={data.expanded}
       aria-label={t("graph.group.label", { title: data.title })}
     >
       <div className={styles.header}>
+        <button
+          type="button"
+          className={styles.expandToggle}
+          onClick={handleExpandClick}
+          aria-label={
+            data.expanded ? t("graph.action.collapseTasks") : t("graph.action.expandTasks")
+          }
+        >
+          {data.expanded ? "▲" : "▼"}
+        </button>
         <span className={styles.title}>{data.title}</span>
         {data.completed && <StatusBadge status="done" />}
         {data.epicCounts.total > 0 && <ProgressCounts counts={data.epicCounts} />}
