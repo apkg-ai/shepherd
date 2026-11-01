@@ -55,7 +55,7 @@ describe("GraphScreen", () => {
       handlers: [...baseHandlers, epicListHandler(epics), goalGraphHandler(graphWithNodes)],
     });
 
-    const toolbar = await screen.findByRole("toolbar", { name: "Graph controls" });
+    const toolbar = await screen.findByRole("group", { name: "Graph controls" });
     expect(toolbar).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "List view" })).toBeInTheDocument();
   });
@@ -74,7 +74,7 @@ describe("GraphScreen", () => {
       handlers: [...baseHandlers, epicListHandler(epics), goalGraphHandler(graphWithNodes)],
     });
 
-    const toolbar = await screen.findByRole("toolbar", { name: "Graph controls" });
+    const toolbar = await screen.findByRole("group", { name: "Graph controls" });
     expect(toolbar).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Fit to view" })).toBeInTheDocument();
 
@@ -148,7 +148,7 @@ describe("GraphScreen", () => {
       handlers: [...baseHandlers, epicListHandler(epics), goalGraphHandler(graphWithNodes)],
     });
 
-    await screen.findByRole("toolbar", { name: "Graph controls" });
+    await screen.findByRole("group", { name: "Graph controls" });
     await user.click(screen.getByRole("button", { name: "List view" }));
 
     expect(await screen.findByRole("group", { name: "Filter by status" })).toBeInTheDocument();

@@ -26,7 +26,7 @@ export function GraphToolbar({
   const { t } = useTranslation();
 
   return (
-    <div role="toolbar" aria-label={t("graph.toolbar.label")} className={styles.toolbar}>
+    <div role="group" aria-label={t("graph.toolbar.label")} className={styles.toolbar}>
       {viewMode === "graph" && (
         <>
           <Button variant="ghost" onClick={onFit}>

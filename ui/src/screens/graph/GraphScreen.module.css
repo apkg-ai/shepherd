@@ -12,7 +12,6 @@
   min-height: 400px;
 }
 
-/* Map React Flow internals to design tokens */
 .flow :global(.react-flow__background) {
   background: var(--color-surface);
 }

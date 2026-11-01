@@ -23,7 +23,7 @@ describe("GraphToolbar", () => {
   it("renders all graph mode buttons", () => {
     renderToolbar();
 
-    expect(screen.getByRole("toolbar", { name: "Graph controls" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Graph controls" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Fit to view" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Zoom out" })).toBeInTheDocument();

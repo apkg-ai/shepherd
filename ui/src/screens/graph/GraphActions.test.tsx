@@ -152,7 +152,8 @@ describe("GraphActions — remove dependency", () => {
     expect(
       screen.getByText("Removing this dependency may unblock work that was waiting on it."),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Node B → Node A/)).toBeInTheDocument();
+    expect(screen.getByText(/Node B/)).toBeInTheDocument();
+    expect(screen.getByText(/Node A/)).toBeInTheDocument();
   });
 
   it("confirms deletion", async () => {

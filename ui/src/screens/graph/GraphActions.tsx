@@ -135,7 +135,12 @@ export function GraphActions({
         <p className={styles.warning}>{t("graph.action.removeDependencyWarning")}</p>
         {removeEdge && (
           <p className={styles.edgeInfo}>
-            {removeEdge.prerequisiteTitle} → {removeEdge.dependentTitle}
+            {removeEdge.prerequisiteTitle}
+            {" "}
+            <span aria-hidden="true">→</span>
+            <span className={styles.srOnly}>{t("graph.action.removeDependencyArrow")}</span>
+            {" "}
+            {removeEdge.dependentTitle}
           </p>
         )}
         <div className={styles.actions}>

@@ -1,4 +1,4 @@
-import { forwardRef } from "react";
+import { forwardRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { GraphNodesItem } from "../../api/generated/model/graphNodesItem";
 import { useGetTask } from "../../api/generated/tasks/tasks";
@@ -25,6 +25,15 @@ export const GraphSidePanel = forwardRef<HTMLElement, GraphSidePanelProps>(
       node?.id ?? "",
       { query: { enabled: level === "task" && node?.id !== undefined } },
     );
+
+    useEffect(() => {
+      if (!node) return;
+      const handler = (e: globalThis.KeyboardEvent) => {
+        if (e.key === "Escape") onClose();
+      };
+      document.addEventListener("keydown", handler);
+      return () => document.removeEventListener("keydown", handler);
+    }, [node, onClose]);
 
     if (!node) return null;
 

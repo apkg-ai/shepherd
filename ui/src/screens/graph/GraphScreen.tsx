@@ -25,6 +25,7 @@ import type { ReactNode } from "react";
 
 const nodeTypes = { graphNode: GraphNode };
 
+const MAX_VIEWPORT_CACHE = 50;
 const viewportCache = new Map<string, Viewport>();
 
 interface GraphScreenProps {
@@ -56,6 +57,7 @@ function GraphScreenInner({
   const navigate = useNavigate();
   const { fitView, zoomIn, zoomOut } = useReactFlow();
   const sidePanelRef = useRef<HTMLElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
 
   const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -120,6 +122,7 @@ function GraphScreenInner({
 
   const onNodeClick: NodeMouseHandler<GraphNodeType> = useCallback(
     (_event, node) => {
+      openerRef.current = document.activeElement as HTMLElement | null;
       setSelectedNodeId(node.id);
       setTimeout(() => sidePanelRef.current?.focus(), 0);
     },
@@ -131,10 +134,22 @@ function GraphScreenInner({
     [navigate, detailPath],
   );
 
-  const onPaneClick = useCallback(() => setSelectedNodeId(null), []);
+  const handleClosePanel = useCallback(() => {
+    setSelectedNodeId(null);
+    openerRef.current?.focus();
+    openerRef.current = null;
+  }, []);
+
+  const onPaneClick = useCallback(() => handleClosePanel(), [handleClosePanel]);
 
   const onMoveEnd: OnMoveEnd = useCallback(
-    (_event, viewport) => viewportCache.set(cacheKey, viewport),
+    (_event, viewport) => {
+      viewportCache.set(cacheKey, viewport);
+      if (viewportCache.size > MAX_VIEWPORT_CACHE) {
+        const oldest = viewportCache.keys().next().value!;
+        viewportCache.delete(oldest);
+      }
+    },
     [cacheKey],
   );
 
@@ -170,7 +185,7 @@ function GraphScreenInner({
 
   const handleMutationSuccess = useCallback(() => {
     void graphQuery.refetch();
-  }, [graphQuery]);
+  }, [graphQuery.refetch]);
 
   const selectedNode = selectedNodeId
     ? nodes.find((n) => n.id === selectedNodeId) ?? null
@@ -253,7 +268,7 @@ function GraphScreenInner({
             node={selectedNode}
             level={level}
             projectId={projectId}
-            onClose={() => setSelectedNodeId(null)}
+            onClose={handleClosePanel}
           />
         </div>
       )}

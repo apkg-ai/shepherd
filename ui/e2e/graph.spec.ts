@@ -67,7 +67,7 @@ test.describe("dependency graph", () => {
     await login(page);
     await page.goto(`/#/projects/${projectId}/goals/${goalId}`);
 
-    const toolbar = page.getByRole("toolbar", { name: "Graph controls" });
+    const toolbar = page.getByRole("group", { name: "Graph controls" });
     await expect(toolbar).toBeVisible();
     await expect(page.getByRole("button", { name: "List view" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Fit to view" })).toBeVisible();
@@ -191,7 +191,7 @@ test.describe("dependency graph", () => {
     await page.goto(`/#/projects/${projectId}/goals/${goalId}`);
 
     // Interact with toolbar controls
-    await expect(page.getByRole("toolbar", { name: "Graph controls" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Graph controls" })).toBeVisible();
     await page.getByRole("button", { name: "Fit to view" }).click();
     await page.getByRole("button", { name: "Zoom in" }).click();
     await page.getByRole("button", { name: "Zoom out" }).click();

@@ -164,6 +164,7 @@
       "graphView": "Graph view",
       "listView": "List view",
       "removeDependency": "Remove dependency",
+      "removeDependencyArrow": "depends on",
       "removeDependencyConfirm": "Remove",
       "removeDependencyTitle": "Remove dependency",
       "removeDependencyWarning": "Removing this dependency may unblock work that was waiting on it.",
