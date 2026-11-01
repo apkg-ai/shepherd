@@ -1,26 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { ReactFlow, ReactFlowProvider, useReactFlow, type NodeMouseHandler } from "@xyflow/react";
+import { ReactFlow, ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQueries } from "@tanstack/react-query";
+import type { Node, Edge } from "@xyflow/react";
+import { MarkerType } from "@xyflow/react";
 import { useListGoals, getGetGoalGraphQueryOptions } from "../../api/generated/goals/goals";
+import { getGetEpicGraphQueryOptions } from "../../api/generated/epics/epics";
+import type { GraphNodesItem } from "../../api/generated/model/graphNodesItem";
 import {
-  computeProjectLayout,
-  classifyDagPosition,
+  computeLayout,
+  addDagEndpoints,
+  computeLayoutWithEndpoints,
   topologyKey,
-  type GoalCluster,
+  DAG_START_ID,
+  DAG_END_ID,
 } from "../../lib/graphLayout";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
-import { GraphNode, type GraphNodeType } from "./GraphNode";
-import { GoalGroupNode, type GoalGroupNodeType } from "./GoalGroupNode";
+import { GraphNode } from "./GraphNode";
+import { DagEndpointNode } from "./DagEndpointNode";
 import { GraphSidePanel } from "./GraphSidePanel";
 import { GraphToolbar } from "./GraphToolbar";
 import { GraphActions } from "./GraphActions";
 import styles from "./ProjectGraphView.module.css";
 import type { ReactNode } from "react";
 
-const nodeTypes = { graphNode: GraphNode, goalGroup: GoalGroupNode };
+const nodeTypes = { graphNode: GraphNode, dagEndpoint: DagEndpointNode };
 
 interface ProjectGraphViewProps {
   projectId: string;
@@ -44,6 +50,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
 
   const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [expandedEpics, setExpandedEpics] = useState<Set<string>>(new Set());
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [removeEdge, setRemoveEdge] = useState<{
     dependencyId: string;
@@ -54,118 +61,185 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   const goalsQuery = useListGoals(projectId);
   const goals = goalsQuery.data?.items;
 
+  // Fetch goal graphs for all goals
   const goalGraphQueries = useQueries({
     queries: (goals ?? []).map((goal) => getGetGoalGraphQueryOptions(projectId, goal.id)),
   });
 
-  const allGraphsLoaded =
+  // Fetch epic graphs for expanded epics
+  const expandedEpicIds = useMemo(() => [...expandedEpics], [expandedEpics]);
+  const epicGraphQueries = useQueries({
+    queries: expandedEpicIds.map((epicId) => getGetEpicGraphQueryOptions(projectId, epicId)),
+  });
+
+  const allGoalGraphsLoaded =
     goals !== undefined &&
     goalGraphQueries.length === goals.length &&
     goalGraphQueries.every((q) => q.isSuccess);
   const anyGraphLoading = goalGraphQueries.some((q) => q.isPending);
   const anyGraphError = goalGraphQueries.find((q) => q.isError);
 
+  // Merge all epic nodes and dependencies from all goal graphs
   const allEpicNodes = goalGraphQueries.flatMap((q) => q.data?.nodes ?? []);
-  const allDependencies = goalGraphQueries.flatMap((q) => q.data?.dependencies ?? []);
+  const allEpicDeps = goalGraphQueries.flatMap((q) => q.data?.dependencies ?? []);
 
-  const currentTopology =
-    allGraphsLoaded && goals
-      ? goals
-          .map((g, i) => {
-            const graph = goalGraphQueries[i].data!;
-            return `${g.id}:${topologyKey(graph.nodes, graph.dependencies)}`;
-          })
-          .join("|")
-      : "";
+  // Merge task nodes and dependencies from expanded epics
+  const expandedTaskNodes = epicGraphQueries.flatMap((q) => q.data?.nodes ?? []);
+  const expandedTaskDeps = epicGraphQueries.flatMap((q) => q.data?.dependencies ?? []);
+
+  // All nodes for the side panel lookup
+  const allNodes: GraphNodesItem[] = [...allEpicNodes, ...expandedTaskNodes];
+
+  const handleToggleExpand = useCallback((epicId: string) => {
+    setExpandedEpics((prev) => {
+      const next = new Set(prev);
+      if (next.has(epicId)) next.delete(epicId);
+      else next.add(epicId);
+      return next;
+    });
+  }, []);
+
+  // Build combined topology key including expanded task data
+  const currentTopology = useMemo(() => {
+    if (!allGoalGraphsLoaded || !goals) return "";
+    const epicKey = topologyKey(allEpicNodes, allEpicDeps);
+    const taskKey = expandedEpicIds
+      .map((id, i) => {
+        const data = epicGraphQueries[i]?.data;
+        return data ? `${id}:${topologyKey(data.nodes, data.dependencies)}` : "";
+      })
+      .join("|");
+    return `${epicKey}||${taskKey}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allGoalGraphsLoaded, allEpicNodes, allEpicDeps, expandedEpicIds, epicGraphQueries]);
 
   const layout = useMemo(() => {
-    if (!currentTopology || !goals) return { nodes: [], edges: [] };
+    if (!currentTopology) return { nodes: [] as Node[], edges: [] as Edge[] };
 
-    const clusters: GoalCluster[] = goals.map((goal, i) => ({
-      goalId: goal.id,
-      goalTitle: goal.title,
-      goalCompleted: goal.completed,
-      epicCounts: goal.epic_counts,
-      graph: goalGraphQueries[i].data!,
-    }));
+    // Start with epic layout
+    const epicLayout = computeLayout(allEpicNodes, allEpicDeps);
 
-    const result = computeProjectLayout(clusters);
+    // Add task nodes and edges for expanded epics
+    const taskNodes: Node[] = [];
+    const taskEdges: Edge[] = [];
+    const parentChildEdges: Edge[] = [];
 
-    return {
-      nodes: result.nodes.map((node) => {
-        if (node.type !== "graphNode") return node;
-        const cluster = clusters.find((c) => c.graph.nodes.some((n) => n.id === node.id));
-        if (!cluster) return node;
-        const pos = classifyDagPosition(node.id, cluster.graph.dependencies);
-        return { ...node, data: { ...node.data, ...pos } };
-      }),
-      edges: result.edges,
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- relayout only on topology change
+    for (let i = 0; i < expandedEpicIds.length; i++) {
+      const epicId = expandedEpicIds[i];
+      const epicGraph = epicGraphQueries[i]?.data;
+      if (!epicGraph) continue;
+
+      // Add task nodes
+      for (const task of epicGraph.nodes) {
+        taskNodes.push({
+          id: task.id,
+          type: "graphNode",
+          position: { x: 0, y: 0 },
+          data: task,
+        });
+      }
+
+      // Add task dependency edges
+      for (const dep of epicGraph.dependencies) {
+        taskEdges.push({
+          id: dep.id,
+          source: dep.prerequisite_id,
+          target: dep.dependent_id,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          data: dep as unknown as Record<string, unknown>,
+        });
+      }
+
+      // Parent-child edges: epic → each task (dashed style)
+      for (const task of epicGraph.nodes) {
+        parentChildEdges.push({
+          id: `__parent_${epicId}_${task.id}`,
+          source: epicId,
+          target: task.id,
+          style: { strokeDasharray: "5 3", opacity: 0.5 },
+          markerEnd: { type: MarkerType.ArrowClosed },
+        });
+      }
+    }
+
+    const combinedNodes = [...epicLayout.nodes, ...taskNodes];
+    const combinedEdges = [...epicLayout.edges, ...taskEdges, ...parentChildEdges];
+
+    // Add start/end endpoints and compute full layout
+    const withEndpoints = addDagEndpoints(combinedNodes, combinedEdges);
+    return computeLayoutWithEndpoints(withEndpoints.nodes, withEndpoints.edges);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTopology]);
 
   const neighbors = useMemo(() => {
     if (!selectedNodeId) return new Set<string>();
-    /* v8 ignore start -- selection requires React Flow canvas click; covered by E2E */
+    const allDeps = [...allEpicDeps, ...expandedTaskDeps];
     const ids = new Set<string>();
-    for (const dep of allDependencies) {
+    for (const dep of allDeps) {
       if (dep.prerequisite_id === selectedNodeId) ids.add(dep.dependent_id);
       if (dep.dependent_id === selectedNodeId) ids.add(dep.prerequisite_id);
     }
     return ids;
-    /* v8 ignore stop */
-  }, [selectedNodeId, allDependencies]);
+  }, [selectedNodeId, allEpicDeps, expandedTaskDeps]);
 
-  const rfNodes: (GraphNodeType | GoalGroupNodeType)[] = useMemo(() => {
-    const freshEpicData = new Map(allEpicNodes.map((n) => [n.id, n]));
-    const freshGoalData = goals ? new Map(goals.map((g) => [g.id, g])) : new Map();
-
+  const rfNodes = useMemo(() => {
+    const freshData = new Map(allNodes.map((n) => [n.id, n]));
     return layout.nodes.map((n) => {
-      if (n.type === "goalGroup") {
-        const goal = freshGoalData.get(n.id);
-        if (goal) {
-          return {
-            ...n,
-            data: { title: goal.title, completed: goal.completed, epicCounts: goal.epic_counts },
-          } as GoalGroupNodeType;
-        }
-        return n as GoalGroupNodeType;
-      }
-
-      const epicData = freshEpicData.get(n.id) ?? n.data;
+      if (n.type === "dagEndpoint") return n;
+      const data = freshData.get(n.id) ?? (n.data as GraphNodesItem);
+      const isEpic = allEpicNodes.some((e) => e.id === n.id);
       return {
         ...n,
         ariaLabel: t("graph.node.label", {
-          title: epicData.title,
-          status: t(`common.status.${epicData.status}`),
+          title: data.title,
+          status: t(`common.status.${data.status}`),
         }),
         data: {
-          ...epicData,
+          ...data,
           selected: n.id === selectedNodeId,
           dimmed: selectedNodeId !== null && n.id !== selectedNodeId && !neighbors.has(n.id),
-          root: n.data.root ?? false,
-          leaf: n.data.leaf ?? false,
+          root: false,
+          leaf: false,
+          expandable: isEpic && data.counts.total > 0,
+          expanded: expandedEpics.has(n.id),
+          onToggleExpand: handleToggleExpand,
+          nodeId: n.id,
         },
-      } as GraphNodeType;
+      };
     });
-  }, [layout.nodes, allEpicNodes, goals, selectedNodeId, neighbors, t]);
+  }, [
+    layout.nodes,
+    allNodes,
+    allEpicNodes,
+    selectedNodeId,
+    neighbors,
+    expandedEpics,
+    handleToggleExpand,
+    t,
+  ]);
 
   const rfEdges = layout.edges;
 
   /* v8 ignore start -- React Flow canvas callbacks; covered by E2E */
-  const onNodeClick: NodeMouseHandler = useCallback((_event, node) => {
-    if (node.type === "goalGroup") return;
+  const onNodeClick = useCallback((_event: React.MouseEvent, node: { id: string }) => {
+    if (node.id === DAG_START_ID || node.id === DAG_END_ID) return;
     openerRef.current = document.activeElement as HTMLElement | null;
     setSelectedNodeId(node.id);
     setTimeout(() => sidePanelRef.current?.focus(), 0);
   }, []);
 
-  const onNodeDoubleClick: NodeMouseHandler = useCallback(
-    (_event, node) => {
-      if (node.type === "goalGroup") return;
-      void navigate(`/projects/${projectId}/epics/${node.id}`);
+  const onNodeDoubleClick = useCallback(
+    (_event: React.MouseEvent, node: { id: string }) => {
+      if (node.id === DAG_START_ID || node.id === DAG_END_ID) return;
+      const isEpic = allEpicNodes.some((e) => e.id === node.id);
+      if (isEpic) {
+        void navigate(`/projects/${projectId}/epics/${node.id}`);
+      } else {
+        void navigate(`/projects/${projectId}/tasks/${node.id}`);
+      }
     },
-    [navigate, projectId],
+    [navigate, projectId, allEpicNodes],
   );
 
   const handleClosePanel = useCallback(() => {
@@ -180,6 +254,26 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   const handleZoomIn = useCallback(() => void zoomIn({ duration: 200 }), [zoomIn]);
   const handleZoomOut = useCallback(() => void zoomOut({ duration: 200 }), [zoomOut]);
   const handleResetLayout = useCallback(() => void fitView({ duration: 200 }), [fitView]);
+
+  const onEdgeClick = useCallback(
+    (_event: React.MouseEvent, edge: { id: string; source: string; target: string }) => {
+      if (edge.id.startsWith("__")) return;
+      const prereq = allNodes.find((n) => n.id === edge.source);
+      const dep = allNodes.find((n) => n.id === edge.target);
+      if (!prereq || !dep) return;
+      setRemoveEdge({
+        dependencyId: edge.id,
+        prerequisiteTitle: prereq.title,
+        dependentTitle: dep.title,
+      });
+    },
+    [allNodes],
+  );
+
+  const handleMutationSuccess = useCallback(() => {
+    for (const q of goalGraphQueries) void q.refetch();
+    for (const q of epicGraphQueries) void q.refetch();
+  }, [goalGraphQueries, epicGraphQueries]);
   /* v8 ignore stop */
 
   const handleToggleView = useCallback(
@@ -189,45 +283,21 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
 
   const handleAddDependency = useCallback(() => setAddDialogOpen(true), []);
 
-  /* v8 ignore start -- fires from React Flow canvas; covered by E2E */
-  const onEdgeClick = useCallback(
-    (_event: React.MouseEvent, edge: { id: string; source: string; target: string }) => {
-      const prereq = allEpicNodes.find((n) => n.id === edge.source);
-      const dep = allEpicNodes.find((n) => n.id === edge.target);
-      if (!prereq || !dep) return;
-      setRemoveEdge({
-        dependencyId: edge.id,
-        prerequisiteTitle: prereq.title,
-        dependentTitle: dep.title,
-      });
-    },
-    [allEpicNodes],
-  );
-  /* v8 ignore stop */
-
-  /* v8 ignore start -- mutation callback; covered by E2E */
-  const handleMutationSuccess = useCallback(() => {
-    for (const q of goalGraphQueries) {
-      void q.refetch();
-    }
-  }, [goalGraphQueries]);
-  /* v8 ignore stop */
-
   const selectedNode = selectedNodeId
-    ? (allEpicNodes.find((n) => n.id === selectedNodeId) ?? null)
+    ? (allNodes.find((n) => n.id === selectedNodeId) ?? null)
     : null;
 
-  /* v8 ignore start -- stale selection guard; covered by E2E */
+  const selectedLevel = selectedNode
+    ? allEpicNodes.some((e) => e.id === selectedNodeId)
+      ? ("epic" as const)
+      : ("task" as const)
+    : ("epic" as const);
+
   useEffect(() => {
-    if (
-      selectedNodeId &&
-      allEpicNodes.length > 0 &&
-      !allEpicNodes.some((n) => n.id === selectedNodeId)
-    ) {
+    if (selectedNodeId && allNodes.length > 0 && !allNodes.some((n) => n.id === selectedNodeId)) {
       setSelectedNodeId(null);
     }
-  }, [selectedNodeId, allEpicNodes]);
-  /* v8 ignore stop */
+  }, [selectedNodeId, allNodes]);
 
   if (goalsQuery.isPending && viewMode === "graph") {
     return <LoadingState />;
@@ -265,7 +335,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
         listContent
       ) : !goals || goals.length === 0 ? (
         <EmptyState title={t("graph.state.empty")} icon="🔗" />
-      ) : anyGraphLoading && !allGraphsLoaded ? (
+      ) : anyGraphLoading && !allGoalGraphsLoaded ? (
         <LoadingState />
       ) : allEpicNodes.length === 0 ? (
         <EmptyState title={t("graph.state.empty")} icon="🔗" />
@@ -292,7 +362,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
           <GraphSidePanel
             ref={sidePanelRef}
             node={selectedNode}
-            level="epic"
+            level={selectedLevel}
             projectId={projectId}
             onClose={handleClosePanel}
           />
@@ -305,11 +375,9 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
         nodes={allEpicNodes}
         selectedNodeId={selectedNodeId}
         addDialogOpen={addDialogOpen}
-        /* v8 ignore start -- dialog callbacks; covered by E2E */
         onAddDialogClose={() => setAddDialogOpen(false)}
         removeEdge={removeEdge}
         onRemoveDialogClose={() => setRemoveEdge(null)}
-        /* v8 ignore stop */
         onSuccess={handleMutationSuccess}
       />
     </>
