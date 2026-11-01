@@ -26,7 +26,7 @@ export function TabsView({ projectId, hideCompleted }: TabsViewProps) {
   const goals = (data?.items ?? []).filter((g) => !hideCompleted || !g.completed);
 
   return (
-    <div role="table" aria-label={t("tabs.view.label")}>
+    <div aria-label={t("tabs.view.label")}>
       {goals.map((goal) => (
         <GoalRow key={goal.id} goal={goal} projectId={projectId} hideCompleted={hideCompleted} />
       ))}
@@ -49,10 +49,7 @@ function GoalRow({
 
   return (
     <>
-      <div
-        role="row"
-        className={`${styles.goalRow}${goal.completed ? ` ${styles.completed}` : ""}`}
-      >
+      <div className={`${styles.goalRow}${goal.completed ? ` ${styles.completed}` : ""}`}>
         <button
           className={styles.toggle}
           onClick={() => setExpanded(!expanded)}
@@ -91,11 +88,7 @@ function EpicList({
   const { data, isLoading } = useListEpics(projectId, { goal_id: goalId });
 
   if (isLoading) {
-    return (
-      <div role="row" className={styles.loadingEpic}>
-        {t("tabs.view.loading")}
-      </div>
-    );
+    return <div className={styles.loadingEpic}>{t("tabs.view.loading")}</div>;
   }
 
   const epics = (data?.items ?? []).filter(
@@ -127,7 +120,7 @@ function EpicRow({
 
   return (
     <>
-      <div role="row" className={`${styles.epicRow}${isDone ? ` ${styles.completed}` : ""}`}>
+      <div className={`${styles.epicRow}${isDone ? ` ${styles.completed}` : ""}`}>
         <button
           className={styles.toggle}
           onClick={() => setExpanded(!expanded)}
@@ -166,11 +159,7 @@ function TaskList({
   const { data, isLoading } = useListTasks(projectId, { epic_id: epicId });
 
   if (isLoading) {
-    return (
-      <div role="row" className={styles.loadingTask}>
-        {t("tabs.view.loading")}
-      </div>
-    );
+    return <div className={styles.loadingTask}>{t("tabs.view.loading")}</div>;
   }
 
   const tasks = (data?.items ?? []).filter(
@@ -184,7 +173,7 @@ function TaskList({
         return (
           <div
             key={task.id}
-            role="row"
+
             className={`${styles.taskRow}${isDone ? ` ${styles.completed}` : ""}`}
           >
             <span className={styles.title}>

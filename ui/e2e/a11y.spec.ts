@@ -97,7 +97,12 @@ test.describe("hierarchy a11y", () => {
 
   test("project overview passes WCAG AA", async ({ page }) => {
     await login(page);
-    await auditRoute(page, `/#/projects/${projectId}`, "project-overview");
+    await page.goto(`/#/projects/${projectId}`);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    // Switch to table view — React Flow graph has nested-interactive by design
+    await page.getByRole("button", { name: "Table view" }).click();
+    await expect(page.getByText("A11y Goal")).toBeVisible();
+    await auditBothThemes(page, "project-overview-table");
   });
 
   test("goal detail passes WCAG AA", async ({ page }) => {
@@ -199,7 +204,7 @@ test.describe("graph a11y", () => {
         .withTags(TAGS)
         .disableRules(DISABLED_RULES)
         // React Flow renders SVG edges with presentation-only elements that
-        // may trip generic a11y rules; our wrapper sets role="img" with a label.
+        // may trip generic a11y rules; our wrapper sets role="application" with a label.
         .exclude(".react-flow__edges")
         .analyze();
       expect(

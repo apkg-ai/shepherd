@@ -48,10 +48,15 @@
 
 .node[data-status="done"] {
   border-top-color: var(--color-success);
+  opacity: 0.55;
+  background: var(--color-success-subtle);
 }
 
 .node[data-status="cancelled"] {
   border-top-color: var(--color-danger);
+  opacity: 0.55;
+  background: var(--color-danger-soft);
+  text-decoration: line-through;
 }
 
 .content {

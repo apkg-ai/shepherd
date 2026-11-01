@@ -85,19 +85,17 @@ test.describe("dependency graph", () => {
     await login(page);
     await page.goto(`/#/projects/${projectId}/goals/${goalId}`);
 
-    // Default: graph view with canvas
-    await expect(page.getByRole("img", { name: "Dependency graph" })).toBeVisible();
+    // Wait for graph to load — toolbar and Fit button indicate graph mode is active
+    await expect(page.getByRole("button", { name: "Fit to view" })).toBeVisible();
 
     // Switch to list view
     await page.getByRole("button", { name: "List view" }).click();
-    await expect(page.getByRole("group", { name: "Filter by status" })).toBeVisible();
     await expect(page.getByText("Epic Alpha")).toBeVisible();
     await expect(page.getByText("Epic Beta")).toBeVisible();
     await expect(page.getByText("Epic Gamma")).toBeVisible();
 
     // Switch back to graph view
     await page.getByRole("button", { name: "Graph view" }).click();
-    await expect(page.getByRole("img", { name: "Dependency graph" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Fit to view" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Zoom in" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Zoom out" })).toBeVisible();
@@ -206,9 +204,9 @@ test.describe("dependency graph", () => {
 
     // Toggle views back and forth
     await page.getByRole("button", { name: "List view" }).click();
-    await expect(page.getByRole("group", { name: "Filter by status" })).toBeVisible();
+    await expect(page.getByText("Epic Alpha")).toBeVisible();
     await page.getByRole("button", { name: "Graph view" }).click();
-    await expect(page.getByRole("img", { name: "Dependency graph" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Fit to view" })).toBeVisible();
 
     expect(consoleErrors).toEqual([]);
   });

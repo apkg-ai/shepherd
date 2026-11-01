@@ -79,6 +79,8 @@ test.describe("hierarchy flow", () => {
     await page.goto("/#/");
 
     await page.getByRole("link", { name: "E2E Test Project" }).click();
+    // Project overview defaults to graph — switch to table to click goal link
+    await page.getByRole("button", { name: "Table view" }).click();
     await page.getByRole("link", { name: "E2E Goal" }).click();
     await page.getByRole("link", { name: "Edit" }).click();
 
@@ -104,6 +106,8 @@ test.describe("hierarchy flow", () => {
     await page.goto("/#/");
 
     await page.getByRole("link", { name: "E2E Test Project" }).click();
+    // Project overview defaults to graph — switch to table to click goal link
+    await page.getByRole("button", { name: "Table view" }).click();
     await page.getByRole("link", { name: "Updated Goal" }).click();
     // Goal detail defaults to graph view — switch to list to click the epic link
     await page.getByRole("button", { name: "List view" }).click();
