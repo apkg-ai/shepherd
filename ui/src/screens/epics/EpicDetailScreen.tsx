@@ -3,7 +3,7 @@ import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useGetProject } from "../../api/generated/projects/projects";
 import { useGetGoal } from "../../api/generated/goals/goals";
-import { useGetEpic } from "../../api/generated/epics/epics";
+import { useGetEpic, useGetEpicGraph } from "../../api/generated/epics/epics";
 import { useListTasks } from "../../api/generated/tasks/tasks";
 import type { Task } from "../../api/generated/model/task";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
@@ -16,6 +16,7 @@ import { ProgressCounts } from "../../components/ProgressCounts";
 import { StatusBadge } from "../../components/StatusBadge";
 import { StatusFilter } from "../../components/StatusFilter";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
+import { GraphScreen } from "../graph";
 import styles from "./EpicDetailScreen.module.css";
 
 const ACTIVE_STATUSES = new Set(["proposed", "open", "active"]);
@@ -36,6 +37,7 @@ export function EpicDetailScreen() {
     query: { enabled: Boolean(epic.data?.goal_id) },
   });
   const tasks = useListTasks(projectId!, { epic_id: epicId! });
+  const graphQuery = useGetEpicGraph(projectId!, epicId!);
   const [filter, setFilter] = useState<"active" | "done" | "all">("active");
 
   if (project.isError) {
@@ -96,38 +98,51 @@ export function EpicDetailScreen() {
           </LinkButton>
         </div>
 
-        {allTasks.length > 0 ? (
-          <StatusFilter
-            value={filter}
-            onChange={setFilter}
-            counts={{ active: active.length, done: done.length, total: allTasks.length }}
-          />
-        ) : null}
-
         {allTasks.length === 0 ? (
           <EmptyState title={t("epic.detail.emptyTasksTitle")} icon="📋">
             <p className={styles.emptyHint}>{t("epic.detail.emptyTasksCta")}</p>
           </EmptyState>
-        ) : visible.length === 0 ? (
-          <p className={styles.noResults}>{t("filter.status.noResults")}</p>
         ) : (
-          <CardGrid>
-            {visible.map((task) => (
-              <Card
-                key={task.id}
-                to={`/projects/${projectId}/tasks/${task.id}`}
-                title={task.title}
-                status={task.status}
-                tags={
-                  <>
-                    <StatusBadge status={task.status} />
-                    <PhaseBadge phase={task.phase} />
-                  </>
-                }
-                meta={task.type_key}
-              />
-            ))}
-          </CardGrid>
+          <GraphScreen
+            projectId={projectId!}
+            level="task"
+            scopeId={epicId!}
+            graphQuery={graphQuery}
+            detailPath={(nodeId) => `/projects/${projectId}/tasks/${nodeId}`}
+            listContent={
+              <>
+                {allTasks.length > 0 ? (
+                <StatusFilter
+                  value={filter}
+                  onChange={setFilter}
+                  counts={{ active: active.length, done: done.length, total: allTasks.length }}
+                />
+              ) : null}
+
+              {visible.length === 0 ? (
+                <p className={styles.noResults}>{t("filter.status.noResults")}</p>
+              ) : (
+                <CardGrid>
+                  {visible.map((task) => (
+                    <Card
+                      key={task.id}
+                      to={`/projects/${projectId}/tasks/${task.id}`}
+                      title={task.title}
+                      status={task.status}
+                      tags={
+                        <>
+                          <StatusBadge status={task.status} />
+                          <PhaseBadge phase={task.phase} />
+                        </>
+                      }
+                      meta={task.type_key}
+                    />
+                  ))}
+                </CardGrid>
+              )}
+            </>
+            }
+          />
         )}
       </section>
     </>

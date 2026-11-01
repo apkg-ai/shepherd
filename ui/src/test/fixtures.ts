@@ -1,10 +1,13 @@
 import type { Actor } from "../api/generated/model/actor";
 import type { BrowserSession } from "../api/generated/model/browserSession";
 import type { Counts } from "../api/generated/model/counts";
+import type { Dependency } from "../api/generated/model/dependency";
 import type { Eligibility } from "../api/generated/model/eligibility";
 import type { Epic } from "../api/generated/model/epic";
 import type { EntityStatus } from "../api/generated/model/entityStatus";
 import type { Goal } from "../api/generated/model/goal";
+import type { Graph } from "../api/generated/model/graph";
+import type { GraphNodesItem } from "../api/generated/model/graphNodesItem";
 import type { Project } from "../api/generated/model/project";
 import type { ProjectSettings } from "../api/generated/model/projectSettings";
 import type { Task } from "../api/generated/model/task";
@@ -151,6 +154,47 @@ export function makeTaskType(overrides?: Partial<TaskType>): TaskType {
     label: "Code",
     archived: false,
     builtin: true,
+    ...overrides,
+  };
+}
+
+export function makeGraphNode(overrides?: Partial<GraphNodesItem>): GraphNodesItem {
+  return {
+    id: crypto.randomUUID(),
+    title: "Test node",
+    status: "open",
+    eligibility: {
+      can_plan: true,
+      can_execute: false,
+      can_review: false,
+      reasons: [],
+      allowed_actions: [],
+    },
+    counts: { total: 0, done: 0, cancelled: 0, waived: 0 },
+    ...overrides,
+  };
+}
+
+export function makeDependency(overrides?: Partial<Dependency>): Dependency {
+  return {
+    id: crypto.randomUUID(),
+    revision: 1,
+    created_at: "2026-10-01T00:00:00Z",
+    updated_at: "2026-10-01T00:00:00Z",
+    project_id: crypto.randomUUID(),
+    level: "epic",
+    dependent_id: crypto.randomUUID(),
+    prerequisite_id: crypto.randomUUID(),
+    ...overrides,
+  };
+}
+
+export function makeGraph(overrides?: Partial<Graph>): Graph {
+  return {
+    level: "epic",
+    scope_id: crypto.randomUUID(),
+    nodes: [],
+    dependencies: [],
     ...overrides,
   };
 }

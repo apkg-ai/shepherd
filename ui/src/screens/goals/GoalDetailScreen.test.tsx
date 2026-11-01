@@ -6,8 +6,10 @@ import {
   projectHandler,
   goalHandler,
   epicListHandler,
+  goalGraphHandler,
   problemResponse,
 } from "../../test/msw";
+import userEvent from "@testing-library/user-event";
 import { makeProject, makeGoal, makeEpic } from "../../test/fixtures";
 import { renderRoute } from "../../test/test-utils";
 
@@ -19,7 +21,7 @@ const goal = makeGoal({
   epic_counts: { total: 2, done: 1, cancelled: 0, waived: 0 },
 });
 
-const baseHandlers = [sessionHandler(), projectHandler(project), goalHandler(goal)];
+const baseHandlers = [sessionHandler(), projectHandler(project), goalHandler(goal), goalGraphHandler()];
 
 describe("GoalDetailScreen", () => {
   it("shows goal title, breadcrumbs, and epic count", async () => {
@@ -45,7 +47,8 @@ describe("GoalDetailScreen", () => {
     expect(screen.getByText("Epics will appear here once created.")).toBeInTheDocument();
   });
 
-  it("shows epic cards with status and task count", async () => {
+  it("shows epic cards with status and task count in list view", async () => {
+    const user = userEvent.setup();
     const epics = [
       makeEpic({
         id: "e1",
@@ -68,9 +71,11 @@ describe("GoalDetailScreen", () => {
       handlers: [...baseHandlers, epicListHandler(epics)],
     });
 
+    await screen.findByRole("heading", { name: "Combat system" });
+    await user.click(screen.getByRole("button", { name: /List view/ }));
+
     expect(await screen.findByText("Damage model")).toBeInTheDocument();
     expect(screen.getByText("Targeting")).toBeInTheDocument();
-    // StatusBadge renders "Active" and StatusFilter has an "Active" button — check via role
     expect(screen.getByRole("link", { name: /Damage model/ })).toBeInTheDocument();
     expect(screen.getByText("3 tasks")).toBeInTheDocument();
   });

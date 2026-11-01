@@ -1,0 +1,50 @@
+.canvas {
+  display: flex;
+  min-height: 400px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.flow {
+  flex: 1;
+  min-height: 400px;
+}
+
+/* Map React Flow internals to design tokens */
+.flow :global(.react-flow__background) {
+  background: var(--color-surface);
+}
+
+.flow :global(.react-flow__edge-path) {
+  stroke: var(--color-border-strong);
+  stroke-width: 2;
+}
+
+.flow :global(.react-flow__arrowhead) {
+  fill: var(--color-border-strong);
+}
+
+.flow :global(.react-flow__pane) {
+  cursor: grab;
+}
+
+.flow :global(.react-flow__pane):active {
+  cursor: grabbing;
+}
+
+.tooLarge {
+  padding: var(--space-4);
+  margin: var(--space-3) 0;
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  border-radius: var(--radius-2);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 768px) {
+  .canvas {
+    flex-direction: column;
+  }
+}

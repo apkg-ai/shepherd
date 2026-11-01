@@ -153,6 +153,41 @@
       "updateSubmit": "Save changes"
     }
   },
+  "graph": {
+    "action": {
+      "addDependency": "Add dependency",
+      "addDependencyDependent": "Depends on completing:",
+      "addDependencyPrompt": "This item requires:",
+      "addDependencySubmit": "Add",
+      "addDependencyTitle": "Add dependency",
+      "fit": "Fit to view",
+      "graphView": "Graph view",
+      "listView": "List view",
+      "removeDependency": "Remove dependency",
+      "removeDependencyConfirm": "Remove",
+      "removeDependencyTitle": "Remove dependency",
+      "removeDependencyWarning": "Removing this dependency may unblock work that was waiting on it.",
+      "resetLayout": "Reset layout",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out"
+    },
+    "node": {
+      "label": "{{title}} — {{status}}"
+    },
+    "panel": {
+      "close": "Close panel",
+      "label": "Selected item details",
+      "openDetails": "Open details",
+      "phase": "Phase"
+    },
+    "state": {
+      "empty": "No items to display",
+      "tooLarge": "This graph is too large to display. Use the list view instead."
+    },
+    "toolbar": {
+      "label": "Graph controls"
+    }
+  },
   "not-found": {
     "screen": {
       "title": "Page not found"

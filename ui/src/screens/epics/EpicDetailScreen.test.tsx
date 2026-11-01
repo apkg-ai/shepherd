@@ -9,6 +9,7 @@ import {
   goalHandler,
   epicHandler,
   taskListHandler,
+  epicGraphHandler,
 } from "../../test/msw";
 import { makeProject, makeGoal, makeEpic, makeTask } from "../../test/fixtures";
 import { renderRoute } from "../../test/test-utils";
@@ -31,6 +32,7 @@ const baseHandlers = [
   goalHandler(goal),
   epicHandler(epic),
   taskListHandler([]),
+  epicGraphHandler(),
 ];
 
 describe("EpicDetailScreen", () => {
@@ -92,7 +94,8 @@ describe("EpicDetailScreen", () => {
     expect(screen.getByText("Tasks will appear here once created.")).toBeInTheDocument();
   });
 
-  it("shows task cards with status badges", async () => {
+  it("shows task cards with status badges in list view", async () => {
+    const user = userEvent.setup();
     const tasks = [
       makeTask({
         id: "t1",
@@ -117,8 +120,12 @@ describe("EpicDetailScreen", () => {
         goalHandler(goal),
         epicHandler(epic),
         taskListHandler(tasks),
+        epicGraphHandler(),
       ],
     });
+
+    await screen.findByRole("heading", { name: "Combat rules" });
+    await user.click(screen.getByRole("button", { name: /List view/ }));
 
     expect(await screen.findByText("Implement targeting")).toBeInTheDocument();
     expect(screen.getByText("Add damage model")).toBeInTheDocument();
@@ -149,6 +156,7 @@ describe("EpicDetailScreen", () => {
         goalHandler(goal),
         epicHandler(epicWithReasons),
         taskListHandler([]),
+        epicGraphHandler(),
       ],
     });
 
@@ -186,7 +194,8 @@ describe("EpicDetailScreen", () => {
     expect(await screen.findByText("Project Error")).toBeInTheDocument();
   });
 
-  it("default filter hides done/cancelled tasks", async () => {
+  it("default filter hides done/cancelled tasks in list view", async () => {
+    const user = userEvent.setup();
     const tasks = [
       makeTask({ id: "t1", project_id: "p1", epic_id: "e1", title: "Active task", status: "open" }),
       makeTask({
@@ -205,8 +214,12 @@ describe("EpicDetailScreen", () => {
         goalHandler(goal),
         epicHandler(epic),
         taskListHandler(tasks),
+        epicGraphHandler(),
       ],
     });
+
+    await screen.findByRole("heading", { name: "Combat rules" });
+    await user.click(screen.getByRole("button", { name: /List view/ }));
 
     expect(await screen.findByText("Active task")).toBeInTheDocument();
     expect(screen.queryByText("Cancelled task")).not.toBeInTheDocument();
@@ -232,9 +245,12 @@ describe("EpicDetailScreen", () => {
         goalHandler(goal),
         epicHandler(epic),
         taskListHandler(tasks),
+        epicGraphHandler(),
       ],
     });
 
+    await screen.findByRole("heading", { name: "Combat rules" });
+    await user.click(screen.getByRole("button", { name: /List view/ }));
     await screen.findByText("Active task");
     await user.click(screen.getByRole("button", { name: /Done/ }));
 
@@ -262,9 +278,12 @@ describe("EpicDetailScreen", () => {
         goalHandler(goal),
         epicHandler(epic),
         taskListHandler(tasks),
+        epicGraphHandler(),
       ],
     });
 
+    await screen.findByRole("heading", { name: "Combat rules" });
+    await user.click(screen.getByRole("button", { name: /List view/ }));
     await screen.findByText("Active task");
     await user.click(screen.getByRole("button", { name: /All/ }));
 
@@ -285,9 +304,12 @@ describe("EpicDetailScreen", () => {
         goalHandler(goal),
         epicHandler(epic),
         taskListHandler(tasks),
+        epicGraphHandler(),
       ],
     });
 
+    await screen.findByRole("heading", { name: "Combat rules" });
+    await user.click(screen.getByRole("button", { name: /List view/ }));
     await screen.findByText("Active task");
     await user.click(screen.getByRole("button", { name: /Done/ }));
 
