@@ -1,5 +1,6 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
+import { useTranslation } from "react-i18next";
 import type { Counts } from "../../api/generated/model/counts";
 import { NodeContent } from "./NodeContent";
 import styles from "./GoalGroupNode.module.css";
@@ -17,6 +18,7 @@ export type GoalGroupNodeType = Node<GoalGroupData, "goalGroup">;
 
 /* v8 ignore start -- rendered inside React Flow; covered by E2E */
 export function GoalGroupNode({ id, data }: NodeProps<GoalGroupNodeType>) {
+  const { t } = useTranslation();
   const handleExpandClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     data.onToggleExpand?.(data.goalId);
@@ -35,6 +37,9 @@ export function GoalGroupNode({ id, data }: NodeProps<GoalGroupNodeType>) {
         selected={false}
         dimmed={false}
         onExpandClick={handleExpandClick}
+        expandAriaLabel={
+          data.expanded ? t("graph.action.collapseEpics") : t("graph.action.expandEpics")
+        }
       />
       <Handle type="source" position={Position.Bottom} className={styles.handle} />
     </div>

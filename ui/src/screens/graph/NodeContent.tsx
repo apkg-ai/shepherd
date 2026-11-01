@@ -14,6 +14,7 @@ export interface NodeContentProps {
   selected: boolean;
   dimmed: boolean;
   onExpandClick?: (e: React.MouseEvent) => void;
+  expandAriaLabel?: string;
 }
 
 /* v8 ignore start -- rendered inside React Flow; covered by E2E */
@@ -27,6 +28,7 @@ export function NodeContent({
   selected,
   dimmed,
   onExpandClick,
+  expandAriaLabel,
 }: NodeContentProps) {
   const { t } = useTranslation();
 
@@ -53,7 +55,10 @@ export function NodeContent({
           type="button"
           className={styles.expandToggle}
           onClick={onExpandClick}
-          aria-label={expanded ? t("graph.action.collapseTasks") : t("graph.action.expandTasks")}
+          aria-label={
+            expandAriaLabel ??
+            (expanded ? t("graph.action.collapseTasks") : t("graph.action.expandTasks"))
+          }
         >
           {expanded ? "▲" : "▼"}
         </button>

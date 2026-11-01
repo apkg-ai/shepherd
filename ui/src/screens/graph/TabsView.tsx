@@ -19,14 +19,15 @@ interface TabsViewProps {
 
 export function TabsView({ projectId, hideCompleted }: TabsViewProps) {
   const { t } = useTranslation();
-  const { data, isLoading } = useListGoals(projectId);
+  const { data, isLoading, isError } = useListGoals(projectId);
 
   if (isLoading) return <LoadingState />;
+  if (isError) return <div role="alert">{t("tabs.view.error")}</div>;
 
   const goals = (data?.items ?? []).filter((g) => !hideCompleted || !g.completed);
 
   return (
-    <div aria-label={t("tabs.view.label")}>
+    <div role="group" aria-label={t("tabs.view.label")}>
       {goals.map((goal) => (
         <GoalRow key={goal.id} goal={goal} projectId={projectId} hideCompleted={hideCompleted} />
       ))}
@@ -85,10 +86,13 @@ function EpicList({
   hideCompleted: boolean;
 }) {
   const { t } = useTranslation();
-  const { data, isLoading } = useListEpics(projectId, { goal_id: goalId });
+  const { data, isLoading, isError } = useListEpics(projectId, { goal_id: goalId });
 
   if (isLoading) {
     return <div className={styles.loadingEpic}>{t("tabs.view.loading")}</div>;
+  }
+  if (isError) {
+    return <div role="alert">{t("tabs.view.error")}</div>;
   }
 
   const epics = (data?.items ?? []).filter(
@@ -156,10 +160,13 @@ function TaskList({
   hideCompleted: boolean;
 }) {
   const { t } = useTranslation();
-  const { data, isLoading } = useListTasks(projectId, { epic_id: epicId });
+  const { data, isLoading, isError } = useListTasks(projectId, { epic_id: epicId });
 
   if (isLoading) {
     return <div className={styles.loadingTask}>{t("tabs.view.loading")}</div>;
+  }
+  if (isError) {
+    return <div role="alert">{t("tabs.view.error")}</div>;
   }
 
   const tasks = (data?.items ?? []).filter(

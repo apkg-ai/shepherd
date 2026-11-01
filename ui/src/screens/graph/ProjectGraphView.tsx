@@ -278,6 +278,22 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   }, [selectedNodeId, allEpicNodes]);
 
   useEffect(() => {
+    if (expandedGoalGraphQuery.isError) {
+      setExpandedGoalId(null);
+    }
+  }, [expandedGoalGraphQuery.isError]);
+
+  useEffect(() => {
+    if (hideCompleted && expandedGoalId) {
+      const goal = goals?.find((g) => g.id === expandedGoalId);
+      if (goal?.completed) {
+        setExpandedGoalId(null);
+        setSelectedNodeId(null);
+      }
+    }
+  }, [hideCompleted, expandedGoalId, goals]);
+
+  useEffect(() => {
     if (expandedGoalId !== null) {
       setTimeout(() => fitView({ duration: 200 }), 50);
     }
@@ -289,7 +305,12 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   }
 
   if (goalsQuery.isError && viewMode === "graph") {
-    return <ErrorState error={goalsQuery.error} onRetry={() => void goalsQuery.refetch()} />;
+    return (
+      <>
+        <ErrorState error={goalsQuery.error} onRetry={() => void goalsQuery.refetch()} />
+        {listContent}
+      </>
+    );
   }
 
   const toolbarProps = {

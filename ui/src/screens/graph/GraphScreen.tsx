@@ -272,7 +272,12 @@ function GraphScreenInner({
   }
 
   if (graphQuery.isError && viewMode === "graph") {
-    return <ErrorState error={graphQuery.error} onRetry={() => void graphQuery.refetch()} />;
+    return (
+      <>
+        <ErrorState error={graphQuery.error} onRetry={() => void graphQuery.refetch()} />
+        {listContent}
+      </>
+    );
   }
 
   const toolbarProps = {
