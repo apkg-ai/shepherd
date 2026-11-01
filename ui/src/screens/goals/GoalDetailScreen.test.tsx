@@ -21,7 +21,12 @@ const goal = makeGoal({
   epic_counts: { total: 2, done: 1, cancelled: 0, waived: 0 },
 });
 
-const baseHandlers = [sessionHandler(), projectHandler(project), goalHandler(goal), goalGraphHandler()];
+const baseHandlers = [
+  sessionHandler(),
+  projectHandler(project),
+  goalHandler(goal),
+  goalGraphHandler(),
+];
 
 describe("GoalDetailScreen", () => {
   it("shows goal title, breadcrumbs, and epic count", async () => {

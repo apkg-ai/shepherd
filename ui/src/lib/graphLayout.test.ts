@@ -18,11 +18,7 @@ const node = (id: string, title = "Node"): GraphNodesItem => ({
   counts: { total: 0, done: 0, cancelled: 0, waived: 0 },
 });
 
-const dep = (
-  id: string,
-  prerequisite_id: string,
-  dependent_id: string,
-): Dependency => ({
+const dep = (id: string, prerequisite_id: string, dependent_id: string): Dependency => ({
   id,
   revision: 1,
   created_at: "2026-01-01T00:00:00Z",
@@ -40,10 +36,7 @@ describe("computeLayout", () => {
   });
 
   it("assigns positions to nodes", () => {
-    const result = computeLayout(
-      [node("a"), node("b")],
-      [dep("d1", "a", "b")],
-    );
+    const result = computeLayout([node("a"), node("b")], [dep("d1", "a", "b")]);
     expect(result.nodes).toHaveLength(2);
     for (const n of result.nodes) {
       expect(n.position.x).toEqual(expect.any(Number));
@@ -55,20 +48,14 @@ describe("computeLayout", () => {
   });
 
   it("creates left-to-right layout", () => {
-    const result = computeLayout(
-      [node("a"), node("b")],
-      [dep("d1", "a", "b")],
-    );
+    const result = computeLayout([node("a"), node("b")], [dep("d1", "a", "b")]);
     const prerequisite = result.nodes.find((n) => n.id === "a")!;
     const dependent = result.nodes.find((n) => n.id === "b")!;
     expect(prerequisite.position.x).toBeLessThan(dependent.position.x);
   });
 
   it("handles disconnected nodes", () => {
-    const result = computeLayout(
-      [node("a"), node("b"), node("c")],
-      [],
-    );
+    const result = computeLayout([node("a"), node("b"), node("c")], []);
     expect(result.nodes).toHaveLength(3);
     for (const n of result.nodes) {
       expect(Number.isFinite(n.position.x)).toBe(true);
@@ -85,10 +72,7 @@ describe("computeLayout", () => {
   });
 
   it("creates edges with arrowhead markers", () => {
-    const result = computeLayout(
-      [node("a"), node("b")],
-      [dep("d1", "a", "b")],
-    );
+    const result = computeLayout([node("a"), node("b")], [dep("d1", "a", "b")]);
     expect(result.edges[0].markerEnd).toEqual({
       type: MarkerType.ArrowClosed,
     });
@@ -103,9 +87,7 @@ describe("topologyKey", () => {
     const nodesReordered = [node("c"), node("a"), node("b")];
     const depsReordered = [dep("d1", "a", "b"), dep("d2", "b", "c")];
 
-    expect(topologyKey(nodes, deps)).toBe(
-      topologyKey(nodesReordered, depsReordered),
-    );
+    expect(topologyKey(nodes, deps)).toBe(topologyKey(nodesReordered, depsReordered));
   });
 
   it("differs when node added", () => {

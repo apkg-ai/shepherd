@@ -14,9 +14,7 @@ vi.mock("@xyflow/react", async () => {
   };
 });
 
-function nodeProps(
-  overrides?: Partial<GraphNodeData>,
-): NodeProps<GraphNodeType> {
+function nodeProps(overrides?: Partial<GraphNodeData>): NodeProps<GraphNodeType> {
   const node = makeGraphNode(overrides);
   return {
     id: node.id,
@@ -55,18 +53,14 @@ describe("GraphNode", () => {
 
   it("renders progress counts when total > 0", () => {
     render(
-      <GraphNode
-        {...nodeProps({ counts: { total: 5, done: 2, cancelled: 0, waived: 0 } })}
-      />,
+      <GraphNode {...nodeProps({ counts: { total: 5, done: 2, cancelled: 0, waived: 0 } })} />,
     );
     expect(screen.getByText("2 of 5")).toBeInTheDocument();
   });
 
   it("does not render progress counts when total is 0", () => {
     render(
-      <GraphNode
-        {...nodeProps({ counts: { total: 0, done: 0, cancelled: 0, waived: 0 } })}
-      />,
+      <GraphNode {...nodeProps({ counts: { total: 0, done: 0, cancelled: 0, waived: 0 } })} />,
     );
     expect(screen.queryByText(/of/)).not.toBeInTheDocument();
   });

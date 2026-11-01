@@ -154,8 +154,8 @@ test.describe("dependency graph", () => {
     await expect(node).toBeVisible();
     await node.dblclick();
 
+    await expect(page).toHaveURL(new RegExp(`#/projects/${projectId}/epics/${epicIds[0]}$`));
     await expect(page.getByRole("heading", { name: "Epic Alpha" })).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`#/projects/${projectId}/epics/${epicIds[0]}`));
 
     expect(consoleErrors).toEqual([]);
   });

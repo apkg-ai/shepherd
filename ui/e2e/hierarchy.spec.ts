@@ -54,6 +54,7 @@ test.describe("hierarchy flow", () => {
     // Navigate back via breadcrumbs
     await page.getByRole("link", { name: "E2E Epic" }).click();
     await expect(page.getByRole("heading", { name: "E2E Epic" })).toBeVisible();
+    await page.getByRole("button", { name: "List view" }).click();
     await expect(page.getByText("E2E Task")).toBeVisible();
 
     await page.getByRole("link", { name: "E2E Goal" }).click();
@@ -105,6 +106,9 @@ test.describe("hierarchy flow", () => {
     await page.getByRole("link", { name: "E2E Test Project" }).click();
     await page.getByRole("link", { name: "Updated Goal" }).click();
     await page.getByRole("link", { name: "E2E Epic" }).click();
+
+    // Switch to list view to see task cards
+    await page.getByRole("button", { name: "List view" }).click();
 
     // Default Active filter shows the task
     await expect(page.getByText("E2E Task")).toBeVisible();

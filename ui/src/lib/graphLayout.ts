@@ -50,13 +50,8 @@ export function computeLayout(
   return { nodes: rfNodes, edges: rfEdges };
 }
 
-export function topologyKey(
-  nodes: GraphNodesItem[],
-  dependencies: Dependency[],
-): string {
+export function topologyKey(nodes: GraphNodesItem[], dependencies: Dependency[]): string {
   const sortedIds = nodes.map((n) => n.id).toSorted();
-  const sortedDeps = dependencies
-    .map((d) => `${d.prerequisite_id}>${d.dependent_id}`)
-    .toSorted();
+  const sortedDeps = dependencies.map((d) => `${d.prerequisite_id}>${d.dependent_id}`).toSorted();
   return `${sortedIds.join(",")}|${sortedDeps.join(",")}`;
 }

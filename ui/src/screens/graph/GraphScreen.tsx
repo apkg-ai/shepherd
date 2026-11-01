@@ -79,10 +79,7 @@ function GraphScreenInner({
   const nodes = useMemo(() => graphData?.nodes ?? [], [graphData]);
   const dependencies = useMemo(() => graphData?.dependencies ?? [], [graphData]);
 
-  const currentTopology = useMemo(
-    () => topologyKey(nodes, dependencies),
-    [nodes, dependencies],
-  );
+  const currentTopology = useMemo(() => topologyKey(nodes, dependencies), [nodes, dependencies]);
 
   const layout = useMemo(
     () => computeLayout(nodes, dependencies),
@@ -109,10 +106,7 @@ function GraphScreenInner({
         data: {
           ...data,
           selected: n.id === selectedNodeId,
-          dimmed:
-            selectedNodeId !== null &&
-            n.id !== selectedNodeId &&
-            !neighbors.has(n.id),
+          dimmed: selectedNodeId !== null && n.id !== selectedNodeId && !neighbors.has(n.id),
         },
       };
     }) as GraphNodeType[];
@@ -127,14 +121,11 @@ function GraphScreenInner({
     viewportCache.set(cacheKey, cachedViewport);
   }
 
-  const onNodeClick: NodeMouseHandler<GraphNodeType> = useCallback(
-    (_event, node) => {
-      openerRef.current = document.activeElement as HTMLElement | null;
-      setSelectedNodeId(node.id);
-      setTimeout(() => sidePanelRef.current?.focus(), 0);
-    },
-    [],
-  );
+  const onNodeClick: NodeMouseHandler<GraphNodeType> = useCallback((_event, node) => {
+    openerRef.current = document.activeElement as HTMLElement | null;
+    setSelectedNodeId(node.id);
+    setTimeout(() => sidePanelRef.current?.focus(), 0);
+  }, []);
 
   const onNodeDoubleClick: NodeMouseHandler<GraphNodeType> = useCallback(
     (_event, node) => void navigate(detailPath(node.id)),
@@ -194,9 +185,7 @@ function GraphScreenInner({
     void graphQuery.refetch();
   }, [graphQuery.refetch]);
 
-  const selectedNode = selectedNodeId
-    ? nodes.find((n) => n.id === selectedNodeId) ?? null
-    : null;
+  const selectedNode = selectedNodeId ? (nodes.find((n) => n.id === selectedNodeId) ?? null) : null;
 
   useEffect(() => {
     if (selectedNodeId && nodes.length > 0 && !nodes.some((n) => n.id === selectedNodeId)) {
@@ -230,12 +219,7 @@ function GraphScreenInner({
   }
 
   if (graphQuery.isError && viewMode === "graph") {
-    return (
-      <ErrorState
-        error={graphQuery.error}
-        onRetry={() => void graphQuery.refetch()}
-      />
-    );
+    return <ErrorState error={graphQuery.error} onRetry={() => void graphQuery.refetch()} />;
   }
 
   return (
@@ -271,6 +255,7 @@ function GraphScreenInner({
               fitView={!cachedViewport}
               nodesDraggable={false}
               nodesConnectable={false}
+              zoomOnDoubleClick={false}
               minZoom={0.1}
               maxZoom={2}
               proOptions={{ hideAttribution: true }}

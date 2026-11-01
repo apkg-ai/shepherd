@@ -16,7 +16,9 @@
 
 .node[data-selected="true"] {
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 1px var(--color-accent), var(--shadow-1);
+  box-shadow:
+    0 0 0 1px var(--color-accent),
+    var(--shadow-1);
 }
 
 .node[data-dimmed="true"] {

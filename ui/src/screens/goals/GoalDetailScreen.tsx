@@ -98,41 +98,41 @@ export function GoalDetailScreen() {
             graphQuery={graphQuery}
             detailPath={(nodeId) => `/projects/${projectId}/epics/${nodeId}`}
             listContent={
-            <>
-              <StatusFilter
-                value={filter}
-                onChange={setFilter}
-                counts={{ active: active.length, done: done.length, total: allEpics.length }}
-              />
+              <>
+                <StatusFilter
+                  value={filter}
+                  onChange={setFilter}
+                  counts={{ active: active.length, done: done.length, total: allEpics.length }}
+                />
 
-              {visible.length === 0 ? (
-                <p className={styles.noResults}>{t("filter.status.noResults")}</p>
-              ) : (
-                <CardGrid>
-                  {visible.map((epic) => (
-                    <Card
-                      key={epic.id}
-                      to={`/projects/${projectId}/epics/${epic.id}`}
-                      title={epic.title}
-                      status={epic.status}
-                      tags={
-                        <>
-                          <StatusBadge status={epic.status} />
-                          {epic.task_counts.total > 0 ? (
-                            <ProgressCounts counts={epic.task_counts} />
-                          ) : null}
-                        </>
-                      }
-                      meta={
-                        epic.task_counts.total > 0
-                          ? t("goal.detail.taskCount", { count: epic.task_counts.total })
-                          : undefined
-                      }
-                    />
-                  ))}
-                </CardGrid>
-              )}
-            </>
+                {visible.length === 0 ? (
+                  <p className={styles.noResults}>{t("filter.status.noResults")}</p>
+                ) : (
+                  <CardGrid>
+                    {visible.map((epic) => (
+                      <Card
+                        key={epic.id}
+                        to={`/projects/${projectId}/epics/${epic.id}`}
+                        title={epic.title}
+                        status={epic.status}
+                        tags={
+                          <>
+                            <StatusBadge status={epic.status} />
+                            {epic.task_counts.total > 0 ? (
+                              <ProgressCounts counts={epic.task_counts} />
+                            ) : null}
+                          </>
+                        }
+                        meta={
+                          epic.task_counts.total > 0
+                            ? t("goal.detail.taskCount", { count: epic.task_counts.total })
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </CardGrid>
+                )}
+              </>
             }
           />
         )}

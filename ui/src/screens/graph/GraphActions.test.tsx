@@ -7,7 +7,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "../../lib/queryClient";
 import { ToastProvider } from "../../components/Toast";
 import { makeGraphNode } from "../../test/fixtures";
-import { createDependencyHandler, deleteDependencyHandler, problemResponse, server } from "../../test/msw";
+import {
+  createDependencyHandler,
+  deleteDependencyHandler,
+  problemResponse,
+  server,
+} from "../../test/msw";
 import { http } from "msw";
 import { GraphActions } from "./GraphActions";
 
@@ -91,7 +96,19 @@ describe("GraphActions — add dependency", () => {
     server.use(
       http.post("*/api/v1/projects/p1/dependencies", async ({ request }) => {
         capturedBody = await request.json();
-        return new Response(JSON.stringify({ id: "d1", revision: 1, created_at: "", updated_at: "", project_id: "p1", level: "epic", dependent_id: "a1", prerequisite_id: "b1" }), { status: 201, headers: { "Content-Type": "application/json" } });
+        return new Response(
+          JSON.stringify({
+            id: "d1",
+            revision: 1,
+            created_at: "",
+            updated_at: "",
+            project_id: "p1",
+            level: "epic",
+            dependent_id: "a1",
+            prerequisite_id: "b1",
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        );
       }),
     );
 

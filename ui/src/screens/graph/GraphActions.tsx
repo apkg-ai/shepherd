@@ -106,7 +106,9 @@ export function GraphActions({
               value={prerequisiteId}
               onChange={(e) => setPrerequisiteId(e.target.value)}
             >
-              <option value="" disabled>—</option>
+              <option value="" disabled>
+                —
+              </option>
               {candidates.map((node) => (
                 <option key={node.id} value={node.id}>
                   {node.title}
@@ -135,11 +137,8 @@ export function GraphActions({
         <p className={styles.warning}>{t("graph.action.removeDependencyWarning")}</p>
         {removeEdge && (
           <p className={styles.edgeInfo}>
-            {removeEdge.prerequisiteTitle}
-            {" "}
-            <span aria-hidden="true">→</span>
-            <span className={styles.srOnly}>{t("graph.action.removeDependencyArrow")}</span>
-            {" "}
+            {removeEdge.prerequisiteTitle} <span aria-hidden="true">→</span>
+            <span className={styles.srOnly}>{t("graph.action.removeDependencyArrow")}</span>{" "}
             {removeEdge.dependentTitle}
           </p>
         )}

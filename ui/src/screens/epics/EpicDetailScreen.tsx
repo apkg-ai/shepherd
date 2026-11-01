@@ -117,28 +117,28 @@ export function EpicDetailScreen() {
                   counts={{ active: active.length, done: done.length, total: allTasks.length }}
                 />
 
-              {visible.length === 0 ? (
-                <p className={styles.noResults}>{t("filter.status.noResults")}</p>
-              ) : (
-                <CardGrid>
-                  {visible.map((task) => (
-                    <Card
-                      key={task.id}
-                      to={`/projects/${projectId}/tasks/${task.id}`}
-                      title={task.title}
-                      status={task.status}
-                      tags={
-                        <>
-                          <StatusBadge status={task.status} />
-                          <PhaseBadge phase={task.phase} />
-                        </>
-                      }
-                      meta={task.type_key}
-                    />
-                  ))}
-                </CardGrid>
-              )}
-            </>
+                {visible.length === 0 ? (
+                  <p className={styles.noResults}>{t("filter.status.noResults")}</p>
+                ) : (
+                  <CardGrid>
+                    {visible.map((task) => (
+                      <Card
+                        key={task.id}
+                        to={`/projects/${projectId}/tasks/${task.id}`}
+                        title={task.title}
+                        status={task.status}
+                        tags={
+                          <>
+                            <StatusBadge status={task.status} />
+                            <PhaseBadge phase={task.phase} />
+                          </>
+                        }
+                        meta={task.type_key}
+                      />
+                    ))}
+                  </CardGrid>
+                )}
+              </>
             }
           />
         )}
