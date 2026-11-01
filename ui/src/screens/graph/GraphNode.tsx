@@ -29,6 +29,7 @@ export type GraphNodeType = Node<GraphNodeData, "graphNode">;
 export function GraphNode({ id, data }: NodeProps<GraphNodeType>) {
   const { t } = useTranslation();
 
+  /* v8 ignore next 4 -- expand click only fires in React Flow canvas; covered by E2E */
   const handleExpandClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     data.onToggleExpand?.(data.nodeId);

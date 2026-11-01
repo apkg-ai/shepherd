@@ -77,6 +77,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   });
   const expandedGraph = expandedGoalGraphQuery.data;
 
+  /* v8 ignore start -- layout and callbacks only exercised with React Flow; covered by E2E */
   const handleToggleGoal = useCallback((goalId: string) => {
     setExpandedGoalId((prev) => (prev === goalId ? null : goalId));
     setSelectedNodeId(null);
@@ -307,6 +308,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
       setSelectedNodeId(null);
     }
   }, [selectedNodeId, allEpicNodes]);
+  /* v8 ignore stop */
 
   if (goalsQuery.isPending && viewMode === "graph") {
     return <LoadingState />;
