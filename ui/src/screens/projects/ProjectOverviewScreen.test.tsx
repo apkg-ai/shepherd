@@ -17,13 +17,12 @@ const project = makeProject({ id: "p1", name: "Space Game", description: "A gala
 const baseHandlers = [sessionHandler(), projectHandler(project)];
 
 describe("ProjectOverviewScreen", () => {
-  it("shows project title, description, and breadcrumbs", async () => {
+  it("shows project title and breadcrumbs", async () => {
     renderRoute("/projects/p1", {
       handlers: [...baseHandlers, goalListHandler([])],
     });
 
     expect(await screen.findByRole("heading", { name: "Space Game" })).toBeInTheDocument();
-    expect(screen.getByText("A galactic adventure")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/");
   });
 

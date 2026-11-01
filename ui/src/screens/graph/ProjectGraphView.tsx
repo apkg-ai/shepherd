@@ -15,6 +15,7 @@ import {
   DAG_START_ID,
   DAG_END_ID,
 } from "../../lib/graphLayout";
+import { Button } from "../../components/Button";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import { GraphNode } from "./GraphNode";
 import { GoalGroupNode } from "./GoalGroupNode";
@@ -253,11 +254,6 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   }, [expandedGoalGraphQuery.refetch]);
   /* v8 ignore stop */
 
-  const handleToggleView = useCallback(
-    () => setViewMode((v) => (v === "graph" ? "list" : "graph")),
-    [],
-  );
-
   const handleToggleTable = useCallback(
     () => setViewMode((v) => (v === "graph" ? "table" : "graph")),
     [],
@@ -292,19 +288,14 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
 
   return (
     <>
-      <GraphToolbar
-        viewMode={viewMode}
-        hasSelection={selectedNodeId !== null}
-        hideCompleted={hideCompleted}
-        onFit={handleFit}
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        onResetLayout={handleResetLayout}
-        onToggleView={handleToggleView}
-        onToggleTable={handleToggleTable}
-        onAddDependency={handleAddDependency}
-        onToggleHideCompleted={handleToggleHideCompleted}
-      />
+      <div className={styles.viewControls}>
+        <Button variant="ghost" onClick={handleToggleTable}>
+          {viewMode === "graph" ? t("graph.action.tabsView") : t("graph.action.graphView")}
+        </Button>
+        <Button variant="ghost" onClick={handleToggleHideCompleted} aria-pressed={hideCompleted}>
+          {hideCompleted ? t("graph.action.showCompleted") : t("graph.action.hideCompleted")}
+        </Button>
+      </div>
 
       {viewMode === "table" ? (
         <TabsView projectId={projectId} hideCompleted={hideCompleted} />
@@ -314,6 +305,14 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
         <EmptyState title={t("graph.state.empty")} icon="🔗" />
       ) : (
         <div className={styles.canvas}>
+          <GraphToolbar
+            hasSelection={selectedNodeId !== null}
+            onFit={handleFit}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onResetLayout={handleResetLayout}
+            onAddDependency={handleAddDependency}
+          />
           <div className={styles.flow} data-testid="graph-canvas">
             <ReactFlow
               nodes={rfNodes}

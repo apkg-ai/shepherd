@@ -5,13 +5,11 @@ import { GraphToolbar } from "./GraphToolbar";
 
 function renderToolbar(overrides: Partial<Parameters<typeof GraphToolbar>[0]> = {}) {
   const props = {
-    viewMode: "graph" as const,
     hasSelection: false,
     onFit: vi.fn(),
     onZoomIn: vi.fn(),
     onZoomOut: vi.fn(),
     onResetLayout: vi.fn(),
-    onToggleView: vi.fn(),
     onAddDependency: vi.fn(),
     ...overrides,
   };
@@ -20,7 +18,7 @@ function renderToolbar(overrides: Partial<Parameters<typeof GraphToolbar>[0]> = 
 }
 
 describe("GraphToolbar", () => {
-  it("renders all graph mode buttons", () => {
+  it("renders all icon buttons", () => {
     renderToolbar();
 
     expect(screen.getByRole("group", { name: "Graph controls" })).toBeInTheDocument();
@@ -43,28 +41,6 @@ describe("GraphToolbar", () => {
     expect(screen.getByRole("button", { name: "Add dependency" })).toBeEnabled();
   });
 
-  it("toggle shows List view in graph mode", () => {
-    renderToolbar({ viewMode: "graph" });
-
-    expect(screen.getByRole("button", { name: "List view" })).toBeInTheDocument();
-  });
-
-  it("toggle shows Graph view in list mode", () => {
-    renderToolbar({ viewMode: "list" });
-
-    expect(screen.getByRole("button", { name: "Graph view" })).toBeInTheDocument();
-  });
-
-  it("hides graph controls in list mode", () => {
-    renderToolbar({ viewMode: "list" });
-
-    expect(screen.queryByRole("button", { name: "Fit to view" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reset layout" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add dependency" })).not.toBeInTheDocument();
-  });
-
   it("fires callbacks", async () => {
     const user = userEvent.setup();
     const props = renderToolbar({ hasSelection: true });
@@ -83,8 +59,5 @@ describe("GraphToolbar", () => {
 
     await user.click(screen.getByRole("button", { name: "Add dependency" }));
     expect(props.onAddDependency).toHaveBeenCalledOnce();
-
-    await user.click(screen.getByRole("button", { name: "List view" }));
-    expect(props.onToggleView).toHaveBeenCalledOnce();
   });
 });

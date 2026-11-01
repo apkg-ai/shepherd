@@ -8,7 +8,6 @@ import { useListTasks } from "../../api/generated/tasks/tasks";
 import type { Task } from "../../api/generated/model/task";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { Card, CardGrid } from "../../components/CardGrid";
-import { EligibilityPanel } from "../../components/EligibilityPanel";
 import { LinkButton } from "../../components/LinkButton";
 import { PageHeader } from "../../components/PageHeader";
 import { PhaseBadge } from "../../components/PhaseBadge";
@@ -73,11 +72,15 @@ export function EpicDetailScreen() {
 
       <PageHeader
         title={epic.data.title}
-        description={epic.data.description || undefined}
         actions={
-          <LinkButton to={`/projects/${projectId}/epics/${epicId}/edit`}>
-            {t("epic.detail.edit")}
-          </LinkButton>
+          <>
+            <LinkButton to={`/projects/${projectId}/epics/${epicId}/tasks/new`} variant="primary">
+              {t("epic.detail.newTask")}
+            </LinkButton>
+            <LinkButton to={`/projects/${projectId}/epics/${epicId}/edit`}>
+              {t("epic.detail.edit")}
+            </LinkButton>
+          </>
         }
       >
         <div className={styles.meta}>
@@ -88,61 +91,50 @@ export function EpicDetailScreen() {
         </div>
       </PageHeader>
 
-      <EligibilityPanel eligibility={epic.data.eligibility} projectId={projectId!} />
+      {allTasks.length === 0 ? (
+        <EmptyState title={t("epic.detail.emptyTasksTitle")} icon="📋">
+          <p className={styles.emptyHint}>{t("epic.detail.emptyTasksCta")}</p>
+        </EmptyState>
+      ) : (
+        <GraphScreen
+          projectId={projectId!}
+          level="task"
+          scopeId={epicId!}
+          graphQuery={graphQuery}
+          detailPath={(nodeId) => `/projects/${projectId}/tasks/${nodeId}`}
+          listContent={
+            <>
+              <StatusFilter
+                value={filter}
+                onChange={setFilter}
+                counts={{ active: active.length, done: done.length, total: allTasks.length }}
+              />
 
-      <section aria-label={t("epic.detail.tasksTitle")}>
-        <div className={styles.sectionHeader}>
-          <h3 className={styles.sectionTitle}>{t("epic.detail.tasksTitle")}</h3>
-          <LinkButton to={`/projects/${projectId}/epics/${epicId}/tasks/new`} variant="primary">
-            {t("epic.detail.newTask")}
-          </LinkButton>
-        </div>
-
-        {allTasks.length === 0 ? (
-          <EmptyState title={t("epic.detail.emptyTasksTitle")} icon="📋">
-            <p className={styles.emptyHint}>{t("epic.detail.emptyTasksCta")}</p>
-          </EmptyState>
-        ) : (
-          <GraphScreen
-            projectId={projectId!}
-            level="task"
-            scopeId={epicId!}
-            graphQuery={graphQuery}
-            detailPath={(nodeId) => `/projects/${projectId}/tasks/${nodeId}`}
-            listContent={
-              <>
-                <StatusFilter
-                  value={filter}
-                  onChange={setFilter}
-                  counts={{ active: active.length, done: done.length, total: allTasks.length }}
-                />
-
-                {visible.length === 0 ? (
-                  <p className={styles.noResults}>{t("filter.status.noResults")}</p>
-                ) : (
-                  <CardGrid>
-                    {visible.map((task) => (
-                      <Card
-                        key={task.id}
-                        to={`/projects/${projectId}/tasks/${task.id}`}
-                        title={task.title}
-                        status={task.status}
-                        tags={
-                          <>
-                            <StatusBadge status={task.status} />
-                            <PhaseBadge phase={task.phase} />
-                          </>
-                        }
-                        meta={task.type_key}
-                      />
-                    ))}
-                  </CardGrid>
-                )}
-              </>
-            }
-          />
-        )}
-      </section>
+              {visible.length === 0 ? (
+                <p className={styles.noResults}>{t("filter.status.noResults")}</p>
+              ) : (
+                <CardGrid>
+                  {visible.map((task) => (
+                    <Card
+                      key={task.id}
+                      to={`/projects/${projectId}/tasks/${task.id}`}
+                      title={task.title}
+                      status={task.status}
+                      tags={
+                        <>
+                          <StatusBadge status={task.status} />
+                          <PhaseBadge phase={task.phase} />
+                        </>
+                      }
+                      meta={task.type_key}
+                    />
+                  ))}
+                </CardGrid>
+              )}
+            </>
+          }
+        />
+      )}
     </>
   );
 }

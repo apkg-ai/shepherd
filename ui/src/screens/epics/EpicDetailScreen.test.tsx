@@ -51,12 +51,6 @@ describe("EpicDetailScreen", () => {
     );
   });
 
-  it("shows description", async () => {
-    renderRoute("/projects/p1/epics/e1", { handlers: baseHandlers });
-
-    expect(await screen.findByText("All combat rule logic")).toBeInTheDocument();
-  });
-
   it("shows status badge", async () => {
     renderRoute("/projects/p1/epics/e1", { handlers: baseHandlers });
 
@@ -69,19 +63,15 @@ describe("EpicDetailScreen", () => {
     expect(await screen.findByText(/1 of 3/)).toBeInTheDocument();
   });
 
-  it("shows edit link", async () => {
+  it("shows edit and new task links in the page header", async () => {
     renderRoute("/projects/p1/epics/e1", { handlers: baseHandlers });
 
     expect(await screen.findByRole("link", { name: "Edit" })).toHaveAttribute(
       "href",
       "/projects/p1/epics/e1/edit",
     );
-  });
 
-  it("shows new task link", async () => {
-    renderRoute("/projects/p1/epics/e1", { handlers: baseHandlers });
-
-    expect(await screen.findByRole("link", { name: "New task" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "New task" })).toHaveAttribute(
       "href",
       "/projects/p1/epics/e1/tasks/new",
     );
@@ -129,40 +119,6 @@ describe("EpicDetailScreen", () => {
 
     expect(await screen.findByText("Implement targeting")).toBeInTheDocument();
     expect(screen.getByText("Add damage model")).toBeInTheDocument();
-  });
-
-  it("shows eligibility panel", async () => {
-    const epicWithReasons = makeEpic({
-      ...epic,
-      eligibility: {
-        can_plan: true,
-        can_execute: false,
-        can_review: false,
-        reasons: [
-          {
-            code: "epic_prerequisite",
-            resource_id: "e2",
-            message: "Prerequisite epic not complete",
-          },
-        ],
-        allowed_actions: [],
-      },
-    });
-
-    renderRoute("/projects/p1/epics/e1", {
-      handlers: [
-        sessionHandler(),
-        projectHandler(project),
-        goalHandler(goal),
-        epicHandler(epicWithReasons),
-        taskListHandler([]),
-        epicGraphHandler(),
-      ],
-    });
-
-    expect(await screen.findByText("Eligibility")).toBeInTheDocument();
-    expect(screen.getByText("Can plan: Yes")).toBeInTheDocument();
-    expect(screen.getByText("Prerequisite epic not complete")).toBeInTheDocument();
   });
 
   it("shows error when epic fails to load", async () => {

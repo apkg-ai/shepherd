@@ -24,6 +24,7 @@ import {
   DAG_START_ID,
   DAG_END_ID,
 } from "../../lib/graphLayout";
+import { Button } from "../../components/Button";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import { GraphNode, type GraphNodeType } from "./GraphNode";
 import { DagEndpointNode } from "./DagEndpointNode";
@@ -270,16 +271,11 @@ function GraphScreenInner({
 
   return (
     <>
-      <GraphToolbar
-        viewMode={viewMode}
-        hasSelection={selectedNodeId !== null}
-        onFit={handleFit}
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        onResetLayout={handleResetLayout}
-        onToggleView={handleToggleView}
-        onAddDependency={handleAddDependency}
-      />
+      <div className={styles.viewControls}>
+        <Button variant="ghost" onClick={handleToggleView}>
+          {viewMode === "graph" ? t("graph.action.listView") : t("graph.action.graphView")}
+        </Button>
+      </div>
 
       {viewMode === "list" ? (
         listContent
@@ -287,6 +283,14 @@ function GraphScreenInner({
         <EmptyState title={t("graph.state.empty")} icon="🔗" />
       ) : (
         <div className={styles.canvas}>
+          <GraphToolbar
+            hasSelection={selectedNodeId !== null}
+            onFit={handleFit}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onResetLayout={handleResetLayout}
+            onAddDependency={handleAddDependency}
+          />
           <div className={styles.flow} data-testid="graph-canvas">
             <ReactFlow
               nodes={rfNodes}

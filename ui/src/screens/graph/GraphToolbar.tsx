@@ -1,73 +1,69 @@
 import { useTranslation } from "react-i18next";
-import { Button } from "../../components/Button";
 import styles from "./GraphToolbar.module.css";
 
 interface GraphToolbarProps {
-  viewMode: "graph" | "list" | "table";
-  hasSelection: boolean;
-  hideCompleted?: boolean;
   onFit: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onResetLayout: () => void;
-  onToggleView: () => void;
-  onToggleTable?: () => void;
   onAddDependency: () => void;
-  onToggleHideCompleted?: () => void;
+  hasSelection: boolean;
 }
 
 export function GraphToolbar({
-  viewMode,
-  hasSelection,
-  hideCompleted,
   onFit,
   onZoomIn,
   onZoomOut,
   onResetLayout,
-  onToggleView,
-  onToggleTable,
   onAddDependency,
-  onToggleHideCompleted,
+  hasSelection,
 }: GraphToolbarProps) {
   const { t } = useTranslation();
 
   return (
     <div role="group" aria-label={t("graph.toolbar.label")} className={styles.toolbar}>
-      {viewMode === "graph" && (
-        <>
-          <Button variant="ghost" onClick={onFit}>
-            {t("graph.action.fit")}
-          </Button>
-          <Button variant="ghost" onClick={onZoomIn}>
-            {t("graph.action.zoomIn")}
-          </Button>
-          <Button variant="ghost" onClick={onZoomOut}>
-            {t("graph.action.zoomOut")}
-          </Button>
-          <Button variant="ghost" onClick={onResetLayout}>
-            {t("graph.action.resetLayout")}
-          </Button>
-          <Button variant="ghost" onClick={onAddDependency} disabled={!hasSelection}>
-            {t("graph.action.addDependency")}
-          </Button>
-        </>
-      )}
-      {onToggleHideCompleted && (
-        <Button variant="ghost" onClick={onToggleHideCompleted} aria-pressed={hideCompleted}>
-          {hideCompleted ? t("graph.action.showCompleted") : t("graph.action.hideCompleted")}
-        </Button>
-      )}
-      <div className={styles.spacer} />
-      {onToggleTable && viewMode !== "list" && (
-        <Button variant="ghost" onClick={onToggleTable}>
-          {viewMode === "graph" ? t("graph.action.tabsView") : t("graph.action.graphView")}
-        </Button>
-      )}
-      {!onToggleTable && (
-        <Button variant="ghost" onClick={onToggleView}>
-          {viewMode === "graph" ? t("graph.action.listView") : t("graph.action.graphView")}
-        </Button>
-      )}
+      <button
+        className={styles.iconBtn}
+        onClick={onZoomIn}
+        aria-label={t("graph.action.zoomIn")}
+        title={t("graph.action.zoomIn")}
+      >
+        ⊕
+      </button>
+      <button
+        className={styles.iconBtn}
+        onClick={onZoomOut}
+        aria-label={t("graph.action.zoomOut")}
+        title={t("graph.action.zoomOut")}
+      >
+        ⊖
+      </button>
+      <button
+        className={styles.iconBtn}
+        onClick={onFit}
+        aria-label={t("graph.action.fit")}
+        title={t("graph.action.fit")}
+      >
+        ⊡
+      </button>
+      <button
+        className={styles.iconBtn}
+        onClick={onResetLayout}
+        aria-label={t("graph.action.resetLayout")}
+        title={t("graph.action.resetLayout")}
+      >
+        ↺
+      </button>
+      <div className={styles.separator} />
+      <button
+        className={styles.iconBtn}
+        onClick={onAddDependency}
+        disabled={!hasSelection}
+        aria-label={t("graph.action.addDependency")}
+        title={t("graph.action.addDependency")}
+      >
+        +
+      </button>
     </div>
   );
 }

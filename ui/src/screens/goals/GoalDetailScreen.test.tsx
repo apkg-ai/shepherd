@@ -85,13 +85,16 @@ describe("GoalDetailScreen", () => {
     expect(screen.getByText("3 tasks")).toBeInTheDocument();
   });
 
-  it("has an edit link to the goal edit page", async () => {
+  it("has edit and new epic links in the page header", async () => {
     renderRoute("/projects/p1/goals/g1", {
       handlers: [...baseHandlers, epicListHandler([])],
     });
 
     const editButton = await screen.findByRole("link", { name: /edit/i });
     expect(editButton).toHaveAttribute("href", "/projects/p1/goals/g1/edit");
+
+    const newEpicButton = screen.getByRole("link", { name: /New epic/i });
+    expect(newEpicButton).toHaveAttribute("href", "/projects/p1/goals/g1/epics/new");
   });
 
   it("shows error state when project fetch fails", async () => {
@@ -133,6 +136,7 @@ describe("GoalDetailScreen", () => {
           problemResponse(500, "internal-error", { title: "Server Error" }),
         ),
         epicListHandler([]),
+        goalGraphHandler(),
       ],
     });
 

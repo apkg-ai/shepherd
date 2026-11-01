@@ -76,7 +76,7 @@ describe("GraphScreen", () => {
 
     const toolbar = await screen.findByRole("group", { name: "Graph controls" });
     expect(toolbar).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Fit to view" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "List view" }));
 
@@ -87,7 +87,6 @@ describe("GraphScreen", () => {
     await user.click(screen.getByRole("button", { name: "Graph view" }));
 
     expect(await screen.findByRole("button", { name: "List view" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Fit to view" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Zoom out" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset layout" })).toBeInTheDocument();
