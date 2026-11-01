@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -100,25 +100,32 @@ function GraphScreenInner({
     return ids;
   }, [selectedNodeId, dependencies]);
 
-  const rfNodes: GraphNodeType[] = useMemo(
-    () =>
-      layout.nodes.map((n) => ({
+  const rfNodes: GraphNodeType[] = useMemo(() => {
+    const freshData = new Map(nodes.map((n) => [n.id, n]));
+    return layout.nodes.map((n) => {
+      const data = freshData.get(n.id) ?? n.data;
+      return {
         ...n,
         data: {
-          ...n.data,
+          ...data,
           selected: n.id === selectedNodeId,
           dimmed:
             selectedNodeId !== null &&
             n.id !== selectedNodeId &&
             !neighbors.has(n.id),
         },
-      })) as GraphNodeType[],
-    [layout.nodes, selectedNodeId, neighbors],
-  );
+      };
+    }) as GraphNodeType[];
+  }, [layout.nodes, nodes, selectedNodeId, neighbors]);
 
   const rfEdges = layout.edges;
 
   const cachedViewport = viewportCache.get(cacheKey);
+  if (cachedViewport) {
+    // Promote to most-recent for LRU eviction
+    viewportCache.delete(cacheKey);
+    viewportCache.set(cacheKey, cachedViewport);
+  }
 
   const onNodeClick: NodeMouseHandler<GraphNodeType> = useCallback(
     (_event, node) => {
@@ -190,6 +197,12 @@ function GraphScreenInner({
   const selectedNode = selectedNodeId
     ? nodes.find((n) => n.id === selectedNodeId) ?? null
     : null;
+
+  useEffect(() => {
+    if (selectedNodeId && nodes.length > 0 && !nodes.some((n) => n.id === selectedNodeId)) {
+      setSelectedNodeId(null);
+    }
+  }, [selectedNodeId, nodes]);
 
   if (graphQuery.isPending && viewMode === "graph") {
     return <LoadingState />;

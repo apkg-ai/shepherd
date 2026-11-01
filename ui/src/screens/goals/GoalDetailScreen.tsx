@@ -99,13 +99,11 @@ export function GoalDetailScreen() {
             detailPath={(nodeId) => `/projects/${projectId}/epics/${nodeId}`}
             listContent={
             <>
-              {allEpics.length > 0 ? (
-                <StatusFilter
-                  value={filter}
-                  onChange={setFilter}
-                  counts={{ active: active.length, done: done.length, total: allEpics.length }}
-                />
-              ) : null}
+              <StatusFilter
+                value={filter}
+                onChange={setFilter}
+                counts={{ active: active.length, done: done.length, total: allEpics.length }}
+              />
 
               {visible.length === 0 ? (
                 <p className={styles.noResults}>{t("filter.status.noResults")}</p>

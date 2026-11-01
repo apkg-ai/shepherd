@@ -111,13 +111,11 @@ export function EpicDetailScreen() {
             detailPath={(nodeId) => `/projects/${projectId}/tasks/${nodeId}`}
             listContent={
               <>
-                {allTasks.length > 0 ? (
                 <StatusFilter
                   value={filter}
                   onChange={setFilter}
                   counts={{ active: active.length, done: done.length, total: allTasks.length }}
                 />
-              ) : null}
 
               {visible.length === 0 ? (
                 <p className={styles.noResults}>{t("filter.status.noResults")}</p>
