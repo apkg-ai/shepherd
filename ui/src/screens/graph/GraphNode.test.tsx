@@ -22,6 +22,8 @@ function nodeProps(overrides?: Partial<GraphNodeData>): NodeProps<GraphNodeType>
       ...node,
       selected: overrides?.selected ?? false,
       dimmed: overrides?.dimmed ?? false,
+      root: overrides?.root ?? false,
+      leaf: overrides?.leaf ?? false,
     },
     type: "graphNode",
     dragging: false,
@@ -33,10 +35,10 @@ function nodeProps(overrides?: Partial<GraphNodeData>): NodeProps<GraphNodeType>
     isConnectable: true,
     positionAbsoluteX: 0,
     positionAbsoluteY: 0,
-    width: 200,
-    height: 100,
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left,
+    width: 280,
+    height: 60,
+    sourcePosition: Position.Bottom,
+    targetPosition: Position.Top,
   };
 }
 

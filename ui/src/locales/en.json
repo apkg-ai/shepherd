@@ -170,13 +170,20 @@
       "removeDependencyWarning": "Removing this dependency may unblock work that was waiting on it.",
       "resetLayout": "Reset layout",
       "zoomIn": "Zoom in",
-      "zoomOut": "Zoom out"
+      "zoomOut": "Zoom out",
+      "expandTasks": "Show tasks",
+      "collapseTasks": "Hide tasks"
     },
     "canvas": {
       "label": "Dependency graph"
     },
+    "group": {
+      "label": "Goal: {{title}}"
+    },
     "node": {
-      "label": "{{title}} — {{status}}"
+      "label": "{{title}} — {{status}}",
+      "leaf": "End",
+      "root": "Start"
     },
     "panel": {
       "close": "Close panel",

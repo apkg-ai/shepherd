@@ -14,7 +14,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import type { Graph } from "../../api/generated/model/graph";
 import type { Problem } from "../../api/generated/model/problem";
 import { isShepherdError, errorSlug } from "../../api/problem";
-import { computeLayout, topologyKey } from "../../lib/graphLayout";
+import { computeLayout, topologyKey, classifyDagPosition } from "../../lib/graphLayout";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import { GraphNode, type GraphNodeType } from "./GraphNode";
 import { GraphSidePanel } from "./GraphSidePanel";
@@ -103,6 +103,7 @@ function GraphScreenInner({
     const freshData = new Map(nodes.map((n) => [n.id, n]));
     return layout.nodes.map((n) => {
       const data = freshData.get(n.id) ?? n.data;
+      const pos = classifyDagPosition(n.id, dependencies);
       return {
         ...n,
         ariaLabel: t("graph.node.label", {
@@ -113,10 +114,12 @@ function GraphScreenInner({
           ...data,
           selected: n.id === selectedNodeId,
           dimmed: selectedNodeId !== null && n.id !== selectedNodeId && !neighbors.has(n.id),
+          root: pos.root,
+          leaf: pos.leaf,
         },
       };
     }) as GraphNodeType[];
-  }, [layout.nodes, nodes, selectedNodeId, neighbors, t]);
+  }, [layout.nodes, nodes, dependencies, selectedNodeId, neighbors, t]);
 
   const rfEdges = layout.edges;
 

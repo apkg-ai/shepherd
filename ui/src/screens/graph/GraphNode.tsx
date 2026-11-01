@@ -1,5 +1,6 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
+import { useTranslation } from "react-i18next";
 import type { Counts } from "../../api/generated/model/counts";
 import type { Eligibility } from "../../api/generated/model/eligibility";
 import type { EntityStatus } from "../../api/generated/model/entityStatus";
@@ -14,12 +15,16 @@ export type GraphNodeData = {
   counts: Counts;
   selected: boolean;
   dimmed: boolean;
+  root: boolean;
+  leaf: boolean;
   [key: string]: unknown;
 };
 
 export type GraphNodeType = Node<GraphNodeData, "graphNode">;
 
 export function GraphNode({ id, data }: NodeProps<GraphNodeType>) {
+  const { t } = useTranslation();
+
   return (
     <div
       className={styles.node}
@@ -27,14 +32,30 @@ export function GraphNode({ id, data }: NodeProps<GraphNodeType>) {
       data-status={data.status}
       data-selected={data.selected || false}
       data-dimmed={data.dimmed || false}
+      data-root={data.root || false}
+      data-leaf={data.leaf || false}
     >
-      <Handle type="target" position={Position.Left} className={styles.handle} />
-      <div className={styles.title}>{data.title}</div>
-      <div className={styles.tags}>
-        <StatusBadge status={data.status} />
-        {data.counts.total > 0 && <ProgressCounts counts={data.counts} />}
+      <Handle type="target" position={Position.Top} className={styles.handle} />
+      {data.root && (
+        <span className={styles.indicator} data-kind="root" aria-hidden="true">
+          ▶
+        </span>
+      )}
+      <div className={styles.content}>
+        <div className={styles.title}>{data.title}</div>
+        <div className={styles.tags}>
+          <StatusBadge status={data.status} />
+          {data.counts.total > 0 && <ProgressCounts counts={data.counts} />}
+        </div>
       </div>
-      <Handle type="source" position={Position.Right} className={styles.handle} />
+      {data.leaf && (
+        <span className={styles.indicator} data-kind="leaf" aria-hidden="true">
+          ◼
+        </span>
+      )}
+      {data.root && <span className={styles.srOnly}>{t("graph.node.root")}</span>}
+      {data.leaf && <span className={styles.srOnly}>{t("graph.node.leaf")}</span>}
+      <Handle type="source" position={Position.Bottom} className={styles.handle} />
     </div>
   );
 }
