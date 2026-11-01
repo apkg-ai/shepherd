@@ -177,6 +177,10 @@
     "canvas": {
       "label": "Dependency graph"
     },
+    "endpoint": {
+      "end": "end",
+      "start": "start"
+    },
     "group": {
       "label": "Goal: {{title}}"
     },

@@ -28,6 +28,11 @@
   opacity: 0.4;
 }
 
+.node[data-expanded="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+
 /* Status-colored top border */
 .node[data-status="proposed"] {
   border-top-color: var(--color-warning);
@@ -47,29 +52,6 @@
 
 .node[data-status="cancelled"] {
   border-top-color: var(--color-danger);
-}
-
-/* Root/leaf indicators */
-.node[data-root="true"] {
-  border-top-color: var(--color-success);
-}
-
-.node[data-leaf="true"] {
-  border-bottom: 2px dashed var(--color-text-faint);
-}
-
-.indicator {
-  flex-shrink: 0;
-  font-size: var(--text-xs);
-  line-height: 1;
-}
-
-.indicator[data-kind="root"] {
-  color: var(--color-success);
-}
-
-.indicator[data-kind="leaf"] {
-  color: var(--color-text-faint);
 }
 
 .content {
@@ -95,20 +77,25 @@
   align-items: center;
 }
 
+.expandToggle {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  padding: 2px var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.expandToggle:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
 .handle {
   opacity: 0;
   width: 8px;
   height: 8px;
-}
-
-.srOnly {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }

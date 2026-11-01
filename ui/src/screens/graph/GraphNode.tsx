@@ -17,6 +17,10 @@ export type GraphNodeData = {
   dimmed: boolean;
   root: boolean;
   leaf: boolean;
+  expandable: boolean;
+  expanded: boolean;
+  onToggleExpand?: (nodeId: string) => void;
+  nodeId: string;
   [key: string]: unknown;
 };
 
@@ -25,6 +29,11 @@ export type GraphNodeType = Node<GraphNodeData, "graphNode">;
 export function GraphNode({ id, data }: NodeProps<GraphNodeType>) {
   const { t } = useTranslation();
 
+  const handleExpandClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    data.onToggleExpand?.(data.nodeId);
+  };
+
   return (
     <div
       className={styles.node}
@@ -32,15 +41,9 @@ export function GraphNode({ id, data }: NodeProps<GraphNodeType>) {
       data-status={data.status}
       data-selected={data.selected || false}
       data-dimmed={data.dimmed || false}
-      data-root={data.root || false}
-      data-leaf={data.leaf || false}
+      data-expanded={data.expanded || false}
     >
       <Handle type="target" position={Position.Top} className={styles.handle} />
-      {data.root && (
-        <span className={styles.indicator} data-kind="root" aria-hidden="true">
-          ▶
-        </span>
-      )}
       <div className={styles.content}>
         <div className={styles.title}>{data.title}</div>
         <div className={styles.tags}>
@@ -48,13 +51,18 @@ export function GraphNode({ id, data }: NodeProps<GraphNodeType>) {
           {data.counts.total > 0 && <ProgressCounts counts={data.counts} />}
         </div>
       </div>
-      {data.leaf && (
-        <span className={styles.indicator} data-kind="leaf" aria-hidden="true">
-          ◼
-        </span>
+      {data.expandable && (
+        <button
+          type="button"
+          className={styles.expandToggle}
+          onClick={handleExpandClick}
+          aria-label={
+            data.expanded ? t("graph.action.collapseTasks") : t("graph.action.expandTasks")
+          }
+        >
+          {data.expanded ? "▲" : "▼"}
+        </button>
       )}
-      {data.root && <span className={styles.srOnly}>{t("graph.node.root")}</span>}
-      {data.leaf && <span className={styles.srOnly}>{t("graph.node.leaf")}</span>}
       <Handle type="source" position={Position.Bottom} className={styles.handle} />
     </div>
   );

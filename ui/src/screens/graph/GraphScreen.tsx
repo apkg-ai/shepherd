@@ -5,25 +5,33 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
-  type NodeMouseHandler,
   type OnMoveEnd,
   type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { Graph } from "../../api/generated/model/graph";
+import type { GraphNodesItem } from "../../api/generated/model/graphNodesItem";
 import type { Problem } from "../../api/generated/model/problem";
 import { isShepherdError, errorSlug } from "../../api/problem";
-import { computeLayout, topologyKey, classifyDagPosition } from "../../lib/graphLayout";
+import {
+  computeLayout,
+  topologyKey,
+  addDagEndpoints,
+  computeLayoutWithEndpoints,
+  DAG_START_ID,
+  DAG_END_ID,
+} from "../../lib/graphLayout";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import { GraphNode, type GraphNodeType } from "./GraphNode";
+import { DagEndpointNode } from "./DagEndpointNode";
 import { GraphSidePanel } from "./GraphSidePanel";
 import { GraphToolbar } from "./GraphToolbar";
 import { GraphActions } from "./GraphActions";
 import styles from "./GraphScreen.module.css";
 import type { ReactNode } from "react";
 
-const nodeTypes = { graphNode: GraphNode };
+const nodeTypes = { graphNode: GraphNode, dagEndpoint: DagEndpointNode };
 
 const MAX_VIEWPORT_CACHE = 50;
 const viewportCache = new Map<string, Viewport>();
@@ -81,11 +89,12 @@ function GraphScreenInner({
 
   const currentTopology = useMemo(() => topologyKey(nodes, dependencies), [nodes, dependencies]);
 
-  const layout = useMemo(
-    () => computeLayout(nodes, dependencies),
+  const layout = useMemo(() => {
+    const base = computeLayout(nodes, dependencies);
+    const withEndpoints = addDagEndpoints(base.nodes, base.edges);
+    return computeLayoutWithEndpoints(withEndpoints.nodes, withEndpoints.edges);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- relayout only on topology change, not status updates
-    [currentTopology],
-  );
+  }, [currentTopology]);
 
   const neighbors = useMemo(() => {
     if (!selectedNodeId) return new Set<string>();
@@ -99,23 +108,26 @@ function GraphScreenInner({
     /* v8 ignore stop */
   }, [selectedNodeId, dependencies]);
 
-  const rfNodes: GraphNodeType[] = useMemo(() => {
+  const rfNodes = useMemo(() => {
     const freshData = new Map(nodes.map((n) => [n.id, n]));
     return layout.nodes.map((n) => {
+      if (n.type === "dagEndpoint") return n;
       const data = freshData.get(n.id) ?? n.data;
-      const pos = classifyDagPosition(n.id, dependencies);
       return {
         ...n,
         ariaLabel: t("graph.node.label", {
-          title: data.title,
-          status: t(`common.status.${data.status}`),
+          title: (data as GraphNodesItem).title,
+          status: t(`common.status.${(data as GraphNodesItem).status}`),
         }),
         data: {
           ...data,
           selected: n.id === selectedNodeId,
           dimmed: selectedNodeId !== null && n.id !== selectedNodeId && !neighbors.has(n.id),
-          root: pos.root,
-          leaf: pos.leaf,
+          root: false,
+          leaf: false,
+          expandable: false,
+          expanded: false,
+          nodeId: n.id,
         },
       };
     }) as GraphNodeType[];
@@ -132,14 +144,21 @@ function GraphScreenInner({
   /* v8 ignore stop */
 
   /* v8 ignore start -- React Flow canvas callbacks; covered by E2E */
-  const onNodeClick: NodeMouseHandler<GraphNodeType> = useCallback((_event, node) => {
-    openerRef.current = document.activeElement as HTMLElement | null;
-    setSelectedNodeId(node.id);
-    setTimeout(() => sidePanelRef.current?.focus(), 0);
-  }, []);
+  const onNodeClick = useCallback(
+    (_event: React.MouseEvent, node: { id: string; type?: string }) => {
+      if (node.id === DAG_START_ID || node.id === DAG_END_ID) return;
+      openerRef.current = document.activeElement as HTMLElement | null;
+      setSelectedNodeId(node.id);
+      setTimeout(() => sidePanelRef.current?.focus(), 0);
+    },
+    [],
+  );
 
-  const onNodeDoubleClick: NodeMouseHandler<GraphNodeType> = useCallback(
-    (_event, node) => void navigate(detailPath(node.id)),
+  const onNodeDoubleClick = useCallback(
+    (_event: React.MouseEvent, node: { id: string }) => {
+      if (node.id === DAG_START_ID || node.id === DAG_END_ID) return;
+      void navigate(detailPath(node.id));
+    },
     [navigate, detailPath],
   );
 
