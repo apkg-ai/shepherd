@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { MarkerType } from "@xyflow/react";
-import { computeLayout, topologyKey, classifyDagPosition, computeProjectLayout } from "./graphLayout";
+import {
+  computeLayout,
+  topologyKey,
+  classifyDagPosition,
+  computeProjectLayout,
+} from "./graphLayout";
 import type { GoalCluster } from "./graphLayout";
 import type { GraphNodesItem } from "../api/generated/model/graphNodesItem";
 import type { Dependency } from "../api/generated/model/dependency";

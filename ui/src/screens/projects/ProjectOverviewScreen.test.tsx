@@ -1,8 +1,15 @@
 import { http } from "msw";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { makeProject, makeGoal } from "../../test/fixtures";
-import { sessionHandler, projectHandler, goalListHandler, problemResponse } from "../../test/msw";
+import {
+  sessionHandler,
+  projectHandler,
+  goalListHandler,
+  goalGraphHandler,
+  problemResponse,
+} from "../../test/msw";
 import { renderRoute } from "../../test/test-utils";
 
 const project = makeProject({ id: "p1", name: "Space Game", description: "A galactic adventure" });
@@ -20,7 +27,8 @@ describe("ProjectOverviewScreen", () => {
     expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/");
   });
 
-  it("shows goal cards with epic counts", async () => {
+  it("shows goal cards with epic counts in list view", async () => {
+    const user = userEvent.setup();
     const goals = [
       makeGoal({
         id: "g1",
@@ -36,8 +44,11 @@ describe("ProjectOverviewScreen", () => {
       }),
     ];
     renderRoute("/projects/p1", {
-      handlers: [...baseHandlers, goalListHandler(goals)],
+      handlers: [...baseHandlers, goalListHandler(goals), goalGraphHandler()],
     });
+
+    await screen.findByRole("heading", { name: "Space Game" });
+    await user.click(screen.getByRole("button", { name: /List view/ }));
 
     expect(await screen.findByText("Combat system")).toBeInTheDocument();
     expect(screen.getByText("Economy")).toBeInTheDocument();
@@ -54,11 +65,15 @@ describe("ProjectOverviewScreen", () => {
     expect(screen.getByRole("link", { name: /Create your first goal/ })).toBeInTheDocument();
   });
 
-  it("goal card links to goal detail", async () => {
+  it("goal card links to goal detail in list view", async () => {
+    const user = userEvent.setup();
     const goal = makeGoal({ id: "g1", project_id: "p1", title: "Combat" });
     renderRoute("/projects/p1", {
-      handlers: [...baseHandlers, goalListHandler([goal])],
+      handlers: [...baseHandlers, goalListHandler([goal]), goalGraphHandler()],
     });
+
+    await screen.findByRole("heading", { name: "Space Game" });
+    await user.click(screen.getByRole("button", { name: /List view/ }));
 
     const link = await screen.findByRole("link", { name: /Combat/ });
     expect(link).toHaveAttribute("href", "/projects/p1/goals/g1");
