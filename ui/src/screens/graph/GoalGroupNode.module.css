@@ -55,3 +55,9 @@
   background: var(--color-surface);
   color: var(--color-text);
 }
+
+.handle {
+  opacity: 0;
+  width: 8px;
+  height: 8px;
+}

@@ -1,3 +1,4 @@
+import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
 import type { Counts } from "../../api/generated/model/counts";
@@ -33,6 +34,7 @@ export function GoalGroupNode({ id, data }: NodeProps<GoalGroupNodeType>) {
       data-expanded={data.expanded}
       aria-label={t("graph.group.label", { title: data.title })}
     >
+      <Handle type="target" position={Position.Top} className={styles.handle} />
       <div className={styles.header}>
         <button
           type="button"
@@ -48,6 +50,7 @@ export function GoalGroupNode({ id, data }: NodeProps<GoalGroupNodeType>) {
         {data.completed && <StatusBadge status="done" />}
         {data.epicCounts.total > 0 && <ProgressCounts counts={data.epicCounts} />}
       </div>
+      <Handle type="source" position={Position.Bottom} className={styles.handle} />
     </div>
   );
 }
