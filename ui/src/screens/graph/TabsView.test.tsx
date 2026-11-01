@@ -99,45 +99,45 @@ function renderTabsView(hideCompleted = false) {
 describe("TabsView", () => {
   it("renders goal rows", async () => {
     renderTabsView();
-    expect(await screen.findByText("Combat System")).toBeInTheDocument();
-    expect(screen.getByText("Economy")).toBeInTheDocument();
+    expect(await screen.findByText(/Combat System/)).toBeInTheDocument();
+    expect(screen.getByText(/Economy/)).toBeInTheDocument();
   });
 
   it("expands goal to show epics", async () => {
     renderTabsView();
     const user = userEvent.setup();
 
-    await screen.findByText("Combat System");
+    await screen.findByText(/Combat System/);
     const expandButtons = screen.getAllByRole("button", { name: "Expand goal" });
     await user.click(expandButtons[0]);
 
-    expect(await screen.findByText("Damage Model")).toBeInTheDocument();
-    expect(screen.getByText("Targeting System")).toBeInTheDocument();
+    expect(await screen.findByText(/Damage Model/)).toBeInTheDocument();
+    expect(screen.getByText(/Targeting System/)).toBeInTheDocument();
   });
 
   it("expands epic to show tasks", async () => {
     renderTabsView();
     const user = userEvent.setup();
 
-    await screen.findByText("Combat System");
+    await screen.findByText(/Combat System/);
     const goalExpand = screen.getAllByRole("button", { name: "Expand goal" });
     await user.click(goalExpand[0]);
 
     const epicExpands = await screen.findAllByRole("button", { name: "Expand epic" });
     await user.click(epicExpands[0]);
 
-    expect(await screen.findByText("Define damage types")).toBeInTheDocument();
+    expect(await screen.findByText(/Define damage types/)).toBeInTheDocument();
   });
 
   it("hides completed goals when hideCompleted is true", async () => {
     renderTabsView(true);
-    expect(await screen.findByText("Combat System")).toBeInTheDocument();
+    expect(await screen.findByText(/Combat System/)).toBeInTheDocument();
     expect(screen.queryByText("Economy")).not.toBeInTheDocument();
   });
 
   it("goal title links to goal detail", async () => {
     renderTabsView();
-    const link = await screen.findByRole("link", { name: "Combat System" });
+    const link = await screen.findByRole("link", { name: /Combat System/ });
     expect(link).toHaveAttribute("href", "/projects/p1/goals/g1");
   });
 
@@ -145,11 +145,11 @@ describe("TabsView", () => {
     renderTabsView();
     const user = userEvent.setup();
 
-    await screen.findByText("Combat System");
+    await screen.findByText(/Combat System/);
     const expandButtons = screen.getAllByRole("button", { name: "Expand goal" });
     await user.click(expandButtons[0]);
 
-    const link = await screen.findByRole("link", { name: "Damage Model" });
+    const link = await screen.findByRole("link", { name: /Damage Model/ });
     expect(link).toHaveAttribute("href", "/projects/p1/epics/e1");
   });
 
@@ -157,14 +157,14 @@ describe("TabsView", () => {
     renderTabsView();
     const user = userEvent.setup();
 
-    await screen.findByText("Combat System");
+    await screen.findByText(/Combat System/);
     const goalExpand = screen.getAllByRole("button", { name: "Expand goal" });
     await user.click(goalExpand[0]);
 
     const epicExpands = await screen.findAllByRole("button", { name: "Expand epic" });
     await user.click(epicExpands[0]);
 
-    const link = await screen.findByRole("link", { name: "Define damage types" });
+    const link = await screen.findByRole("link", { name: /Define damage types/ });
     expect(link).toHaveAttribute("href", "/projects/p1/tasks/t1");
   });
 

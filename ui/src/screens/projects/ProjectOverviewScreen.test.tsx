@@ -49,8 +49,8 @@ describe("ProjectOverviewScreen", () => {
     await screen.findByRole("heading", { name: /Space Game/ });
     await user.click(screen.getByRole("button", { name: /Table view/ }));
 
-    expect(await screen.findByText("Combat system")).toBeInTheDocument();
-    expect(screen.getByText("Economy")).toBeInTheDocument();
+    expect(await screen.findByText(/Combat system/)).toBeInTheDocument();
+    expect(screen.getByText(/Economy/)).toBeInTheDocument();
   });
 
   it("shows empty state with CTA when no goals", async () => {

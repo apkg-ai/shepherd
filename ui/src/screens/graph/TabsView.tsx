@@ -50,7 +50,10 @@ function GoalRow({
 
   return (
     <>
-      <div className={`${styles.goalRow}${goal.completed ? ` ${styles.completed}` : ""}`}>
+      <div
+        className={`${styles.goalRow}${goal.completed ? ` ${styles.completed}` : ""}`}
+        data-status={goal.completed ? "done" : "open"}
+      >
         <button
           className={styles.toggle}
           onClick={() => setExpanded(!expanded)}
@@ -61,7 +64,7 @@ function GoalRow({
         </button>
         <span className={styles.title}>
           <Link className={styles.titleLink} to={`/projects/${projectId}/goals/${goal.id}`}>
-            {goal.title}
+            {"\u{1F3AF}"} {goal.title}
           </Link>
         </span>
         <span className={styles.meta}>
@@ -124,7 +127,10 @@ function EpicRow({
 
   return (
     <>
-      <div className={`${styles.epicRow}${isDone ? ` ${styles.completed}` : ""}`}>
+      <div
+        className={`${styles.epicRow}${isDone ? ` ${styles.completed}` : ""}`}
+        data-status={epic.status}
+      >
         <button
           className={styles.toggle}
           onClick={() => setExpanded(!expanded)}
@@ -135,7 +141,7 @@ function EpicRow({
         </button>
         <span className={styles.title}>
           <Link className={styles.titleLink} to={`/projects/${projectId}/epics/${epic.id}`}>
-            {epic.title}
+            {"\u{1F3D7}\u{FE0F}"} {epic.title}
           </Link>
         </span>
         <span className={styles.meta}>
@@ -182,10 +188,11 @@ function TaskList({
             key={task.id}
 
             className={`${styles.taskRow}${isDone ? ` ${styles.completed}` : ""}`}
+            data-status={task.status}
           >
             <span className={styles.title}>
               <Link className={styles.titleLink} to={`/projects/${projectId}/tasks/${task.id}`}>
-                {task.title}
+                {"\u{1F4CB}"} {task.title}
               </Link>
             </span>
             <span className={styles.meta}>
