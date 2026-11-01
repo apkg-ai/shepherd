@@ -73,6 +73,7 @@ export function GraphActions({
     deleteMutation.mutate(removeEdge.dependencyId);
   };
 
+  /* v8 ignore start -- dialog close with reset; covered by E2E */
   const handleAddClose = () => {
     onAddDialogClose();
     setPrerequisiteId("");
@@ -83,6 +84,7 @@ export function GraphActions({
     onRemoveDialogClose();
     deleteMutation.reset();
   };
+  /* v8 ignore stop */
 
   return (
     <>

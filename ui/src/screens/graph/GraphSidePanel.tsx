@@ -29,7 +29,8 @@ export const GraphSidePanel = forwardRef<HTMLElement, GraphSidePanelProps>(funct
   useEffect(() => {
     if (!node) return;
     const handler = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape" || document.querySelector('[aria-modal="true"]')) return;
+      onClose();
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);

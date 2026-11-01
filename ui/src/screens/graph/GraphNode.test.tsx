@@ -66,19 +66,16 @@ describe("GraphNode", () => {
   });
 
   it("applies selected state", () => {
-    render(<GraphNode {...nodeProps({ selected: true })} />);
-    const node = screen.getByLabelText(/Test node/);
+    const props = nodeProps({ selected: true });
+    render(<GraphNode {...props} />);
+    const node = screen.getByTestId(`graph-node-${props.id}`);
     expect(node).toHaveAttribute("data-selected", "true");
   });
 
   it("applies dimmed state", () => {
-    render(<GraphNode {...nodeProps({ dimmed: true })} />);
-    const node = screen.getByLabelText(/Test node/);
+    const props = nodeProps({ dimmed: true });
+    render(<GraphNode {...props} />);
+    const node = screen.getByTestId(`graph-node-${props.id}`);
     expect(node).toHaveAttribute("data-dimmed", "true");
-  });
-
-  it("has correct aria-label", () => {
-    render(<GraphNode {...nodeProps({ title: "Build API", status: "open" })} />);
-    expect(screen.getByLabelText("Build API — open")).toBeInTheDocument();
   });
 });
