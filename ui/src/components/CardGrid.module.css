@@ -14,8 +14,7 @@
   background: var(--color-surface-raised);
   transition:
     box-shadow 0.15s,
-    border-color 0.15s,
-    opacity 0.15s;
+    border-color 0.15s;
 }
 
 .card:hover {
@@ -38,17 +37,10 @@
 
 .card[data-status="done"] {
   border-left-color: var(--color-success);
-  opacity: 0.7;
 }
 
 .card[data-status="cancelled"] {
   border-left-color: var(--color-danger);
-  opacity: 0.7;
-}
-
-.card[data-status="done"]:hover,
-.card[data-status="cancelled"]:hover {
-  opacity: 1;
 }
 
 .cardLink {

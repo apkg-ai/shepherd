@@ -103,16 +103,16 @@ describe("EligibilityPanel", () => {
     allowed_actions: [],
   };
 
-  it("renders capability flags", () => {
+  it("renders capability flags with their active state as text", () => {
     wrap(
       <EligibilityPanel
         eligibility={{ ...baseEligibility, can_plan: true, can_execute: true }}
         projectId="p1"
       />,
     );
-    expect(screen.getByText("Can plan")).toBeInTheDocument();
-    expect(screen.getByText("Can execute")).toBeInTheDocument();
-    expect(screen.getByText("Can review")).toBeInTheDocument();
+    expect(screen.getByText("Can plan: Yes")).toBeInTheDocument();
+    expect(screen.getByText("Can execute: Yes")).toBeInTheDocument();
+    expect(screen.getByText("Can review: No")).toBeInTheDocument();
   });
 
   it("shows no blockers message when reasons empty", () => {

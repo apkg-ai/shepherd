@@ -197,13 +197,18 @@ function TaskForm({
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (isEdit) {
+      // Settings fields ship only when the user changed them: unchanged ones
+      // must not clobber concurrent edits after a conflict-retry resubmit,
+      // and policy fields trigger a capability check server-side.
       form.submitUpdate({
         title: form.title.trim(),
         description: form.description.trim(),
-        type_key: typeKey,
-        planning_required: planningRequired,
-        plan_review: planReview,
-        work_review: workReview,
+        ...(typeKey !== initialTypeKey && { type_key: typeKey }),
+        ...(planningRequired !== initialPlanningRequired && {
+          planning_required: planningRequired,
+        }),
+        ...(planReview !== initialPlanReview && { plan_review: planReview }),
+        ...(workReview !== initialWorkReview && { work_review: workReview }),
       });
     } else {
       form.submitCreate({

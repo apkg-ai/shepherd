@@ -153,7 +153,7 @@ describe("EpicDetailScreen", () => {
     });
 
     expect(await screen.findByText("Eligibility")).toBeInTheDocument();
-    expect(screen.getByText("Can plan")).toBeInTheDocument();
+    expect(screen.getByText("Can plan: Yes")).toBeInTheDocument();
     expect(screen.getByText("Prerequisite epic not complete")).toBeInTheDocument();
   });
 

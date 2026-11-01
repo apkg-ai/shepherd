@@ -21,9 +21,10 @@ export function ReasonDialog({ open, title, busy = false, onSubmit, onCancel }: 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     const trimmed = reason.trim();
+    // Keep the text on failure so the user can retry without retyping;
+    // success unmounts the dialog from the parent.
     if (trimmed) {
       onSubmit(trimmed);
-      setReason("");
     }
   };
 

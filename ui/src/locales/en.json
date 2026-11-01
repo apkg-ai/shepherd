@@ -94,7 +94,9 @@
       "canExecute": "Can execute",
       "canReview": "Can review",
       "blocked": "Blocked",
-      "noReasons": "No blockers"
+      "noReasons": "No blockers",
+      "no": "No",
+      "yes": "Yes"
     }
   },
   "epic": {

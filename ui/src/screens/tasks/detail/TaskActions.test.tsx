@@ -229,6 +229,44 @@ describe("TaskActions", () => {
     });
   });
 
+  it("keeps the reason dialog open with the reason when the mutation fails", async () => {
+    const user = userEvent.setup();
+    const onMutationError = vi.fn();
+    let calls = 0;
+
+    server.use(
+      http.post("/api/v1/projects/p1/tasks/t1/block", async () => {
+        calls++;
+        if (calls === 1) {
+          return problemResponse(412, "revision_conflict", {
+            title: "Stale revision",
+            detail: "Task changed while blocking.",
+          });
+        }
+        return HttpResponse.json(taskResponse);
+      }),
+      taskGetHandler(),
+    );
+
+    renderActions({ ...noEligibility, allowed_actions: ["blockTask"] }, onMutationError);
+
+    await user.click(screen.getByRole("button", { name: "Block" }));
+    await user.type(screen.getByLabelText("Reason"), "Waiting on dep");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() =>
+      expect(onMutationError).toHaveBeenCalledWith("Task changed while blocking."),
+    );
+    expect(screen.getByRole("dialog", { name: "Block task" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Reason")).toHaveValue("Waiting on dep");
+
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Block task" })).not.toBeInTheDocument(),
+    );
+    expect(calls).toBe(2);
+  });
+
   it("unblock action sends request", async () => {
     const user = userEvent.setup();
     let called = false;

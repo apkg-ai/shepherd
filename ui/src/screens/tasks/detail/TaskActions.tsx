@@ -132,8 +132,11 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
       ),
     onSettled: () => {
       setBusyAction(null);
-      setReasonDialog(null);
       void invalidateTask();
+    },
+    // Keep the dialog (with its reason) open on failure for a retry.
+    onSuccess: () => {
+      setReasonDialog(null);
     },
   });
 
@@ -152,8 +155,10 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
       ),
     onSettled: () => {
       setBusyAction(null);
-      setReasonDialog(null);
       void invalidateTask();
+    },
+    onSuccess: () => {
+      setReasonDialog(null);
     },
   });
 
@@ -172,8 +177,10 @@ export function TaskActions({ projectId, taskId, revision, eligibility }: TaskAc
       ),
     onSettled: () => {
       setBusyAction(null);
-      setReasonDialog(null);
       void invalidateTask();
+    },
+    onSuccess: () => {
+      setReasonDialog(null);
     },
   });
 

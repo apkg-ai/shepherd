@@ -351,7 +351,7 @@ describe("TaskFormScreen — edit mode", () => {
     expect(await screen.findByText("Server exploded")).toBeInTheDocument();
   });
 
-  it("submits edit with all fields including settings", async () => {
+  it("submits only changed settings in the edit payload", async () => {
     const user = userEvent.setup();
     let capturedBody: unknown;
     const updatedTask = makeTask({ ...existingTask, title: "Updated", revision: 2 });
@@ -373,7 +373,49 @@ describe("TaskFormScreen — edit mode", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1/tasks/t1"));
-    expect(capturedBody).toMatchObject({ title: "Updated" });
+    expect(capturedBody).toEqual({
+      title: "Updated",
+      description: "Original desc",
+    });
+  });
+
+  it("sends settings fields in the edit payload only once changed", async () => {
+    const user = userEvent.setup();
+    let capturedBody: unknown;
+    const updatedTask = makeTask({
+      ...existingTask,
+      title: "Updated",
+      planning_required: false,
+      work_review: "none",
+      revision: 2,
+    });
+
+    server.use(
+      http.patch("/api/v1/projects/p1/tasks/t1", async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json(updatedTask);
+      }),
+      http.get("/api/v1/projects/:projectId/epics/:epicId", () => HttpResponse.json(epic)),
+      http.get("/api/v1/projects/:projectId/goals/:goalId", () => HttpResponse.json(goal)),
+    );
+
+    const { router } = renderRoute("/projects/p1/tasks/t1/edit", { handlers: editHandlers });
+
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Original task"));
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "Updated");
+    await user.selectOptions(screen.getByLabelText("Work review"), "none");
+    await user.click(screen.getByLabelText("Planning required"));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/p1/tasks/t1"));
+    expect(capturedBody).toMatchObject({
+      title: "Updated",
+      planning_required: false,
+      work_review: "none",
+    });
+    expect(capturedBody).not.toHaveProperty("plan_review");
+    expect(capturedBody).not.toHaveProperty("type_key");
   });
 
   it("cancel navigates back to task detail in edit mode when clean", async () => {

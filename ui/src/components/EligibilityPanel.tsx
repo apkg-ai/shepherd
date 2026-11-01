@@ -61,10 +61,11 @@ export function EligibilityPanel({ eligibility, projectId }: EligibilityPanelPro
 }
 
 function Flag({ active, label }: { active: boolean; label: string }) {
+  const { t } = useTranslation();
   return (
     <span className={styles.flag} data-active={active}>
       <span className={styles.flagDot} aria-hidden="true" />
-      {label}
+      {label}: {active ? t("eligibility.panel.yes") : t("eligibility.panel.no")}
     </span>
   );
 }
