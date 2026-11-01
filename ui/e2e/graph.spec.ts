@@ -140,7 +140,7 @@ test.describe("dependency graph", () => {
     expect(consoleErrors).toEqual([]);
   });
 
-  test("double-click graph node navigates to epic detail", async ({ page }) => {
+  test("clicking node opens side panel and navigates to detail", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error" && !msg.text().includes("Content Security Policy"))
@@ -150,10 +150,18 @@ test.describe("dependency graph", () => {
     await login(page);
     await page.goto(`/#/projects/${projectId}/goals/${goalId}`);
 
-    const node = page.getByTestId(`graph-node-${epicIds[0]}`);
+    // Click a graph node to open the side panel
+    const node = page.locator(`.react-flow__node[data-id="${epicIds[0]}"]`);
     await expect(node).toBeVisible();
-    await node.dblclick();
+    await node.click();
 
+    // Side panel shows node details
+    const panel = page.getByRole("complementary", { name: "Selected item details" });
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText("Epic Alpha")).toBeVisible();
+
+    // Navigate via "Open details" link
+    await panel.getByRole("link", { name: "Open details" }).click();
     await expect(page).toHaveURL(new RegExp(`#/projects/${projectId}/epics/${epicIds[0]}$`));
     await expect(page.getByRole("heading", { name: "Epic Alpha" })).toBeVisible();
 

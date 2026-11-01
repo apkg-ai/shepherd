@@ -105,9 +105,11 @@ test.describe("hierarchy flow", () => {
 
     await page.getByRole("link", { name: "E2E Test Project" }).click();
     await page.getByRole("link", { name: "Updated Goal" }).click();
+    // Goal detail defaults to graph view — switch to list to click the epic link
+    await page.getByRole("button", { name: "List view" }).click();
     await page.getByRole("link", { name: "E2E Epic" }).click();
 
-    // Switch to list view to see task cards
+    // Epic detail also defaults to graph view — switch to list for task cards
     await page.getByRole("button", { name: "List view" }).click();
 
     // Default Active filter shows the task
