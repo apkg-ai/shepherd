@@ -229,7 +229,7 @@ function GraphScreenInner({
         <EmptyState title={t("graph.state.empty")} icon="🔗" />
       ) : (
         <div className={styles.canvas}>
-          <div className={styles.flow}>
+          <div className={styles.flow} role="img" aria-label={t("graph.canvas.label")}>
             <ReactFlow
               nodes={rfNodes}
               edges={rfEdges}

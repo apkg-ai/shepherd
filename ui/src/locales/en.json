@@ -171,6 +171,9 @@
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out"
     },
+    "canvas": {
+      "label": "Dependency graph"
+    },
     "node": {
       "label": "{{title}} — {{status}}"
     },

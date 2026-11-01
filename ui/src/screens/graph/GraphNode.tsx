@@ -20,12 +20,13 @@ export type GraphNodeData = {
 
 export type GraphNodeType = Node<GraphNodeData, "graphNode">;
 
-export function GraphNode({ data }: NodeProps<GraphNodeType>) {
+export function GraphNode({ id, data }: NodeProps<GraphNodeType>) {
   const { t } = useTranslation();
 
   return (
     <div
       className={styles.node}
+      data-testid={`graph-node-${id}`}
       data-status={data.status}
       data-selected={data.selected || false}
       data-dimmed={data.dimmed || false}
