@@ -12,6 +12,7 @@ command -v openapi-to-rust >/dev/null 2>&1 || {
 }
 
 (cd "$ROOT/core/shepherd-server" && openapi-to-rust generate)
+(cd "$ROOT/core/shepherd-client" && openapi-to-rust generate)
 (cd "$ROOT/core" && cargo fmt)
 
-echo "regen: Rust wire types regenerated"
+echo "regen: Rust wire types regenerated (server + client)"

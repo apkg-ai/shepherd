@@ -1,0 +1,28 @@
+[package]
+name = "shepherd-client"
+description = "shared local REST client for the shepherd daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# chrono/serde/uuid are declared by the generated REQUIRED_DEPS.toml.
+chrono = { version = "0.4.45", default-features = false, features = ["serde"] }
+# Pinned by plan/dependencies.md; loopback plain-HTTP only, so no TLS features.
+reqwest = { version = "=0.13.5", default-features = false, features = ["json"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", default-features = false, features = ["time"] }
+tracing = "=0.1.44"
+uuid = { version = "1.26.1", features = ["serde"] }
+
+[dev-dependencies]
+axum = "0.8.9"
+# test-support exposes the TestClock/StoreOptions fixtures; never in release builds.
+shepherd-core = { path = "../shepherd-core", features = ["test-support"] }
+shepherd-server = { path = "../shepherd-server" }
+tempfile = "3"
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
+uuid = { version = "1.26.1", features = ["serde", "v7"] }

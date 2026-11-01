@@ -90,12 +90,12 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: ./.github/actions/install-cargo-llvm-cov
 
-      # Scoped to shepherd-core; the server is covered by the integration suite.
+      # Scoped to shepherd-core; server and client are covered by the integration suite.
       - name: Unit Tests (Coverage)
         run: |
           mkdir -p coverage
           cargo llvm-cov --workspace --lib --bins \
-            --ignore-filename-regex 'shepherd-server/' \
+            --ignore-filename-regex 'shepherd-server/|shepherd-client/' \
             --lcov --output-path coverage/core-unit.lcov
 
       - name: Doc Tests

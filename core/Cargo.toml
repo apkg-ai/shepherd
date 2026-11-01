@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["shepherd-core", "shepherd-server"]
+members = ["shepherd-client", "shepherd-core", "shepherd-server"]
 
 [workspace.package]
 version = "0.1.0"

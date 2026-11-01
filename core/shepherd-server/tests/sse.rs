@@ -343,15 +343,16 @@ async fn sse_sends_comment_heartbeats_without_ids() {
     let w = world().await;
     let h = seed_hierarchy(&w).await;
     let mut stream = connect(&w, &h.project, &[]).await;
-    // Pause after setup (SQLite open uses real timers); auto-advance then
-    // fires the 15s heartbeat interval instantly while the test is idle.
-    tokio::time::pause();
-    let frame = stream.next_frame().await.unwrap();
+    // Real 15s wait: the liveness recheck does real SQLite IO, and a paused
+    // tokio clock auto-advances past sqlx's internal deadlines while that IO
+    // is in flight, closing the stream (flaky under llvm-cov).
+    let frame = tokio::time::timeout(Duration::from_secs(20), stream.next_frame())
+        .await
+        .expect("heartbeat within 20s")
+        .unwrap();
     assert!(frame.comment, "{frame:?}");
     assert!(frame.id.is_none());
     assert!(frame.event.is_none());
-    let frame = stream.next_frame().await.unwrap();
-    assert!(frame.comment, "{frame:?}");
 }
 
 #[tokio::test]

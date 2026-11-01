@@ -95,6 +95,7 @@ coverage/
 
 # Generated code — regenerated from openapi/shepherd.yaml at build time.
 # Run `scripts/regen-generated.sh` (Rust) and `npm run generate:api` (TS).
+core/shepherd-client/src/generated/
 core/shepherd-server/src/generated/
 ui/src/api/generated/
 
