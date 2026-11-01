@@ -106,7 +106,7 @@ export function GraphActions({
               value={prerequisiteId}
               onChange={(e) => setPrerequisiteId(e.target.value)}
             >
-              <option value="" disabled />
+              <option value="" disabled>—</option>
               {candidates.map((node) => (
                 <option key={node.id} value={node.id}>
                   {node.title}

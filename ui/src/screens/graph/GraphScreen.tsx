@@ -74,8 +74,8 @@ function GraphScreenInner({
   const cacheKey = `${level}:${scopeId}`;
 
   const graphData = graphQuery.data;
-  const nodes = graphData?.nodes ?? [];
-  const dependencies = graphData?.dependencies ?? [];
+  const nodes = useMemo(() => graphData?.nodes ?? [], [graphData]);
+  const dependencies = useMemo(() => graphData?.dependencies ?? [], [graphData]);
 
   const currentTopology = useMemo(
     () => topologyKey(nodes, dependencies),
@@ -84,7 +84,7 @@ function GraphScreenInner({
 
   const layout = useMemo(
     () => computeLayout(nodes, dependencies),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- relayout only on topology change
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- relayout only on topology change, not status updates
     [currentTopology],
   );
 

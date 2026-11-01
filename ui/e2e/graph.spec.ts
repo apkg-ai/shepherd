@@ -90,7 +90,7 @@ test.describe("dependency graph", () => {
 
     // Switch to list view
     await page.getByRole("button", { name: "List view" }).click();
-    await expect(page.getByRole("list", { name: "Epics" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Filter by status" })).toBeVisible();
     await expect(page.getByText("Epic Alpha")).toBeVisible();
     await expect(page.getByText("Epic Beta")).toBeVisible();
     await expect(page.getByText("Epic Gamma")).toBeVisible();
@@ -116,7 +116,7 @@ test.describe("dependency graph", () => {
     await page.goto(`/#/projects/${projectId}/goals/${goalId}`);
     await page.getByRole("button", { name: "List view" }).click();
 
-    const filterGroup = page.getByRole("group", { name: "Status filter" });
+    const filterGroup = page.getByRole("group", { name: "Filter by status" });
     await expect(filterGroup).toBeVisible();
     await expect(page.getByRole("button", { name: "Active" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Done" })).toBeVisible();
@@ -175,7 +175,7 @@ test.describe("dependency graph", () => {
     await listViewButton.focus();
     await page.keyboard.press("Enter");
 
-    await expect(page.getByRole("list", { name: "Epics" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Filter by status" })).toBeVisible();
 
     expect(consoleErrors).toEqual([]);
   });
@@ -198,7 +198,7 @@ test.describe("dependency graph", () => {
 
     // Toggle views back and forth
     await page.getByRole("button", { name: "List view" }).click();
-    await expect(page.getByRole("list", { name: "Epics" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Filter by status" })).toBeVisible();
     await page.getByRole("button", { name: "Graph view" }).click();
     await expect(page.getByRole("img", { name: "Dependency graph" })).toBeVisible();
 

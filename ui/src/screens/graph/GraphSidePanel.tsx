@@ -35,7 +35,6 @@ export const GraphSidePanel = forwardRef<HTMLElement, GraphSidePanelProps>(
 
     return (
       <aside
-        role="complementary"
         aria-label={t("graph.panel.label")}
         className={styles.panel}
         ref={ref}

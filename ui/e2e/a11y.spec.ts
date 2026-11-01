@@ -216,7 +216,7 @@ test.describe("graph a11y", () => {
     await login(page);
     await page.goto(`/#/projects/${graphProjectId}/goals/${graphGoalId}`);
     await page.getByRole("button", { name: "List view" }).click();
-    await expect(page.getByRole("list", { name: "Epics" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Filter by status" })).toBeVisible();
     await auditBothThemes(page, "graph-list-view");
   });
 });
