@@ -4,9 +4,12 @@ import { useTranslation } from "react-i18next";
 import {
   ReactFlow,
   ReactFlowProvider,
+  MarkerType,
   useReactFlow,
   type OnMoveEnd,
   type Viewport,
+  type Node,
+  type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { UseQueryResult } from "@tanstack/react-query";
@@ -15,7 +18,6 @@ import type { GraphNodesItem } from "../../api/generated/model/graphNodesItem";
 import type { Problem } from "../../api/generated/model/problem";
 import { isShepherdError, errorSlug } from "../../api/problem";
 import {
-  computeLayout,
   topologyKey,
   addDagEndpoints,
   computeLayoutWithEndpoints,
@@ -90,8 +92,20 @@ function GraphScreenInner({
   const currentTopology = useMemo(() => topologyKey(nodes, dependencies), [nodes, dependencies]);
 
   const layout = useMemo(() => {
-    const base = computeLayout(nodes, dependencies);
-    const withEndpoints = addDagEndpoints(base.nodes, base.edges);
+    const rawNodes: Node[] = nodes.map((n) => ({
+      id: n.id,
+      type: "graphNode",
+      position: { x: 0, y: 0 },
+      data: n,
+    }));
+    const rawEdges: Edge[] = dependencies.map((d) => ({
+      id: d.id,
+      source: d.prerequisite_id,
+      target: d.dependent_id,
+      markerEnd: { type: MarkerType.ArrowClosed },
+      data: d as unknown as Record<string, unknown>,
+    }));
+    const withEndpoints = addDagEndpoints(rawNodes, rawEdges);
     return computeLayoutWithEndpoints(withEndpoints.nodes, withEndpoints.edges);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- relayout only on topology change, not status updates
   }, [currentTopology]);
@@ -131,16 +145,19 @@ function GraphScreenInner({
         },
       };
     }) as GraphNodeType[];
-  }, [layout.nodes, nodes, dependencies, selectedNodeId, neighbors, t]);
+  }, [layout.nodes, nodes, selectedNodeId, neighbors, t]);
 
   const rfEdges = layout.edges;
 
   const cachedViewport = viewportCache.get(cacheKey);
+
   /* v8 ignore start -- LRU promotion; covered by E2E */
-  if (cachedViewport) {
-    viewportCache.delete(cacheKey);
-    viewportCache.set(cacheKey, cachedViewport);
-  }
+  useEffect(() => {
+    if (cachedViewport) {
+      viewportCache.delete(cacheKey);
+      viewportCache.set(cacheKey, cachedViewport);
+    }
+  }, [cacheKey, cachedViewport]);
   /* v8 ignore stop */
 
   /* v8 ignore start -- React Flow canvas callbacks; covered by E2E */
@@ -201,6 +218,7 @@ function GraphScreenInner({
   /* v8 ignore start -- fires from React Flow canvas; covered by E2E */
   const onEdgeClick = useCallback(
     (_event: React.MouseEvent, edge: { id: string; source: string; target: string }) => {
+      if (edge.id.startsWith("__")) return;
       const prereq = nodes.find((n) => n.id === edge.source);
       const dep = nodes.find((n) => n.id === edge.target);
       if (!prereq || !dep) return;

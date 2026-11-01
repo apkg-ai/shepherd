@@ -81,6 +81,8 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   const handleToggleGoal = useCallback((goalId: string) => {
     setExpandedGoalId((prev) => (prev === goalId ? null : goalId));
     setSelectedNodeId(null);
+    setAddDialogOpen(false);
+    setRemoveEdge(null);
   }, []);
 
   // Build the graph layout
@@ -95,15 +97,23 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
       const epicLayout = computeLayout(expandedGraph.nodes, expandedGraph.dependencies);
 
       // Compute bounding box of the epic sub-DAG
+      let minX = Infinity;
+      let minY = Infinity;
       let maxX = 0;
       let maxY = 0;
       for (const n of epicLayout.nodes) {
+        minX = Math.min(minX, n.position.x);
+        minY = Math.min(minY, n.position.y);
         maxX = Math.max(maxX, n.position.x + NODE_WIDTH);
         maxY = Math.max(maxY, n.position.y + NODE_HEIGHT);
       }
+      if (!Number.isFinite(minX)) {
+        minX = 0;
+        minY = 0;
+      }
 
-      const containerWidth = Math.max(GOAL_NODE_WIDTH, maxX + EPIC_PADDING * 2);
-      const containerHeight = EPIC_HEADER_HEIGHT + maxY + EPIC_PADDING;
+      const containerWidth = Math.max(GOAL_NODE_WIDTH, maxX - minX + EPIC_PADDING * 2);
+      const containerHeight = EPIC_HEADER_HEIGHT + (maxY - minY) + EPIC_PADDING;
 
       // Position goals: expanded goal centered, others beside it
       let xOffset = 0;
@@ -126,15 +136,15 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
             style: { width: containerWidth, height: containerHeight },
           });
 
-          // Epic children inside the container
+          // Epic children inside the container (normalized to top-left origin)
           for (const n of epicLayout.nodes) {
             allNodes.push({
               ...n,
               parentId: goal.id,
               extent: "parent" as const,
               position: {
-                x: n.position.x + EPIC_PADDING,
-                y: n.position.y + EPIC_HEADER_HEIGHT,
+                x: n.position.x - minX + EPIC_PADDING,
+                y: n.position.y - minY + EPIC_HEADER_HEIGHT,
               },
             });
           }
