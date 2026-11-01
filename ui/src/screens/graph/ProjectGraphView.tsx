@@ -8,6 +8,8 @@ import { useListGoals, useGetGoalGraph } from "../../api/generated/goals/goals";
 import type { GraphNodesItem } from "../../api/generated/model/graphNodesItem";
 import {
   computeLayout,
+  addDagEndpoints,
+  computeLayoutWithEndpoints,
   NODE_WIDTH,
   NODE_HEIGHT,
   DAG_START_ID,
@@ -28,7 +30,6 @@ const nodeTypes = { graphNode: GraphNode, goalGroup: GoalGroupNode, dagEndpoint:
 
 const GOAL_NODE_WIDTH = 320;
 const GOAL_NODE_HEIGHT = 52;
-const GOAL_GAP = 40;
 const EPIC_PADDING = 20;
 const EPIC_HEADER_HEIGHT = 52;
 
@@ -85,15 +86,32 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
     setRemoveEdge(null);
   }, []);
 
-  // Build the graph layout
+  // Build the graph layout — same DAG structure as epic/task views
   const layout = useMemo(() => {
     if (visibleGoals.length === 0) return { nodes: [] as Node[], edges: [] as Edge[] };
 
-    const allNodes: Node[] = [];
-    const allEdges: Edge[] = [];
+    // Build goal nodes (no inter-goal dependencies, so edges are empty)
+    const goalNodes: Node[] = visibleGoals.map((goal) => ({
+      id: goal.id,
+      type: "goalGroup",
+      position: { x: 0, y: 0 },
+      data: {
+        title: goal.title,
+        completed: goal.completed,
+        epicCounts: goal.epic_counts,
+        expanded: goal.id === expandedGoalId,
+        onToggleExpand: handleToggleGoal,
+        goalId: goal.id,
+      },
+      style: { width: GOAL_NODE_WIDTH, height: GOAL_NODE_HEIGHT },
+    }));
 
+    // Add start/end nodes and compute DAG layout (start → all goals → end)
+    const withEndpoints = addDagEndpoints(goalNodes, []);
+    const dagLayout = computeLayoutWithEndpoints(withEndpoints.nodes, withEndpoints.edges);
+
+    // If a goal is expanded, inject its epic sub-DAG inside the container
     if (expandedGoalId && expandedGraph) {
-      // Compute epic sub-layout for the expanded goal
       const epicLayout = computeLayout(expandedGraph.nodes, expandedGraph.dependencies);
 
       // Compute bounding box of the epic sub-DAG
@@ -115,84 +133,32 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
       const containerWidth = Math.max(GOAL_NODE_WIDTH, maxX - minX + EPIC_PADDING * 2);
       const containerHeight = EPIC_HEADER_HEIGHT + (maxY - minY) + EPIC_PADDING;
 
-      // Position goals: expanded goal centered, others beside it
-      let xOffset = 0;
-
-      for (const goal of visibleGoals) {
-        if (goal.id === expandedGoalId) {
-          // Expanded goal as group container
-          allNodes.push({
-            id: goal.id,
-            type: "goalGroup",
-            position: { x: xOffset, y: 0 },
-            data: {
-              title: goal.title,
-              completed: goal.completed,
-              epicCounts: goal.epic_counts,
-              expanded: true,
-              onToggleExpand: handleToggleGoal,
-              goalId: goal.id,
-            },
-            style: { width: containerWidth, height: containerHeight },
-          });
-
-          // Epic children inside the container (normalized to top-left origin)
-          for (const n of epicLayout.nodes) {
-            allNodes.push({
-              ...n,
-              parentId: goal.id,
-              extent: "parent" as const,
-              position: {
-                x: n.position.x - minX + EPIC_PADDING,
-                y: n.position.y - minY + EPIC_HEADER_HEIGHT,
-              },
-            });
-          }
-
-          allEdges.push(...epicLayout.edges);
-          xOffset += containerWidth + GOAL_GAP;
-        } else {
-          // Collapsed goal as compact node
-          allNodes.push({
-            id: goal.id,
-            type: "goalGroup",
-            position: { x: xOffset, y: 0 },
-            data: {
-              title: goal.title,
-              completed: goal.completed,
-              epicCounts: goal.epic_counts,
-              expanded: false,
-              onToggleExpand: handleToggleGoal,
-              goalId: goal.id,
-            },
-            style: { width: GOAL_NODE_WIDTH, height: GOAL_NODE_HEIGHT },
-          });
-          xOffset += GOAL_NODE_WIDTH + GOAL_GAP;
-        }
+      // Update the expanded goal node's dimensions
+      const expandedIdx = dagLayout.nodes.findIndex((n) => n.id === expandedGoalId);
+      if (expandedIdx >= 0) {
+        dagLayout.nodes[expandedIdx] = {
+          ...dagLayout.nodes[expandedIdx],
+          style: { width: containerWidth, height: containerHeight },
+        };
       }
-    } else {
-      // All goals collapsed — simple horizontal row
-      let xOffset = 0;
-      for (const goal of visibleGoals) {
-        allNodes.push({
-          id: goal.id,
-          type: "goalGroup",
-          position: { x: xOffset, y: 0 },
-          data: {
-            title: goal.title,
-            completed: goal.completed,
-            epicCounts: goal.epic_counts,
-            expanded: false,
-            onToggleExpand: handleToggleGoal,
-            goalId: goal.id,
+
+      // Add epic children inside the container
+      for (const n of epicLayout.nodes) {
+        dagLayout.nodes.push({
+          ...n,
+          parentId: expandedGoalId,
+          extent: "parent" as const,
+          position: {
+            x: n.position.x - minX + EPIC_PADDING,
+            y: n.position.y - minY + EPIC_HEADER_HEIGHT,
           },
-          style: { width: GOAL_NODE_WIDTH, height: GOAL_NODE_HEIGHT },
         });
-        xOffset += GOAL_NODE_WIDTH + GOAL_GAP;
       }
+
+      dagLayout.edges.push(...epicLayout.edges);
     }
 
-    return { nodes: allNodes, edges: allEdges };
+    return dagLayout;
   }, [visibleGoals, expandedGoalId, expandedGraph, handleToggleGoal]);
 
   // All epic nodes for the side panel and actions
