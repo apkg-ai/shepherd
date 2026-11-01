@@ -29,7 +29,7 @@ import type { ReactNode } from "react";
 const nodeTypes = { graphNode: GraphNode, goalGroup: GoalGroupNode, dagEndpoint: DagEndpointNode };
 
 const EPIC_PADDING = 20;
-const EPIC_HEADER_HEIGHT = 52;
+const EPIC_HEADER_HEIGHT = 68;
 
 interface ProjectGraphViewProps {
   projectId: string;

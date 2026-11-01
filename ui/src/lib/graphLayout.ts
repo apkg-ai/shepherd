@@ -9,7 +9,7 @@ export const NODE_WIDTH = 280;
 export const NODE_HEIGHT = 60;
 
 const GROUP_PADDING = 40;
-const GROUP_HEADER = 52;
+const GROUP_HEADER = 68;
 const NODESEP = 40;
 const RANKSEP = 60;
 const GROUP_GAP = 60;

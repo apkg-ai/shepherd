@@ -12,6 +12,7 @@ import { PageHeader } from "../../../components/PageHeader";
 import { PhaseBadge } from "../../../components/PhaseBadge";
 import { StatusBadge } from "../../../components/StatusBadge";
 import { ErrorState, LoadingState } from "../../../components/states";
+import { formatDateTime } from "../../../lib/format";
 import { TaskActions } from "./TaskActions";
 import styles from "./TaskDetailScreen.module.css";
 
@@ -74,7 +75,9 @@ export function TaskDetailScreen() {
       >
         <div className={styles.badges}>
           <StatusBadge status={taskData.status} />
-          <PhaseBadge phase={taskData.phase} />
+          {taskData.status !== "cancelled" && taskData.status !== "done" && (
+            <PhaseBadge phase={taskData.phase} />
+          )}
         </div>
       </PageHeader>
 
@@ -100,6 +103,14 @@ export function TaskDetailScreen() {
             <dt>{t("task.detail.workReview")}</dt>
             <dd>{reviewLabel(t, taskData.work_review)}</dd>
           </div>
+          <div className={styles.metaItem}>
+            <dt>{t("task.detail.createdAt")}</dt>
+            <dd>{formatDateTime(taskData.created_at)}</dd>
+          </div>
+          <div className={styles.metaItem}>
+            <dt>{t("task.detail.updatedAt")}</dt>
+            <dd>{formatDateTime(taskData.updated_at)}</dd>
+          </div>
         </dl>
       </section>
 
@@ -120,6 +131,17 @@ export function TaskDetailScreen() {
           {taskData.waivers.map((waiver, i) => (
             <p key={i} className={styles.lifecycleReason}>
               {t("task.detail.waiveReason", { reason: waiver.reason })}
+            </p>
+          ))}
+        </section>
+      ) : null}
+
+      {taskData.cancellations.length > 0 ? (
+        <section className={styles.lifecycle} aria-label={t("task.detail.cancelled")}>
+          <h3 className={styles.lifecycleTitle}>{t("task.detail.cancelled")}</h3>
+          {taskData.cancellations.map((cancellation, i) => (
+            <p key={i} className={styles.lifecycleReason}>
+              {t("task.detail.cancelReason", { reason: cancellation.reason })}
             </p>
           ))}
         </section>

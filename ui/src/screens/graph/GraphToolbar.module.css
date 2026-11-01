@@ -39,6 +39,12 @@
   cursor: default;
 }
 
+.iconBtn[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-color: var(--color-accent);
+}
+
 .separator {
   height: 1px;
   background: var(--color-border);

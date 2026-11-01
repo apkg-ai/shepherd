@@ -122,6 +122,11 @@ function GraphScreenInner({
     /* v8 ignore stop */
   }, [selectedNodeId, dependencies]);
 
+  const handleNodeExpand = useCallback(
+    (nodeId: string) => void navigate(detailPath(nodeId)),
+    [navigate, detailPath],
+  );
+
   const rfNodes = useMemo(() => {
     const freshData = new Map(nodes.map((n) => [n.id, n]));
     return layout.nodes.map((n) => {
@@ -140,13 +145,14 @@ function GraphScreenInner({
           dimmed: selectedNodeId !== null && n.id !== selectedNodeId && !neighbors.has(n.id),
           root: false,
           leaf: false,
-          expandable: false,
+          expandable: (data as GraphNodesItem).counts?.total > 0,
           expanded: false,
+          onToggleExpand: handleNodeExpand,
           nodeId: n.id,
         },
       };
     }) as GraphNodeType[];
-  }, [layout.nodes, nodes, selectedNodeId, neighbors, t, level]);
+  }, [layout.nodes, nodes, selectedNodeId, neighbors, t, level, handleNodeExpand]);
 
   const rfEdges = layout.edges;
 

@@ -254,7 +254,11 @@
       "planningRequiredYes": "Yes",
       "blocked": "Blocked",
       "blockReason": "Reason: {{reason}}",
+      "cancelReason": "Reason: {{reason}}",
+      "cancelled": "Cancelled",
+      "createdAt": "Created",
       "type": "Type",
+      "updatedAt": "Updated",
       "waived": "Waived",
       "waiveReason": "Reason: {{reason}}",
       "workReview": "Work review"
