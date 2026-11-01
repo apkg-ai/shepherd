@@ -58,11 +58,6 @@ export function ProjectListScreen() {
               to={`/projects/${project.id}`}
               title={project.name}
               description={project.description || undefined}
-              meta={
-                project.epic_counts.total > 0
-                  ? t("project.overview.epicCount", { count: project.epic_counts.total })
-                  : undefined
-              }
             />
           ))}
         </CardGrid>

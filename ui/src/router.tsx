@@ -7,6 +7,10 @@ import { ProjectListScreen } from "./screens/projects/ProjectListScreen";
 import { ProjectOverviewScreen } from "./screens/projects/ProjectOverviewScreen";
 import { GoalDetailScreen } from "./screens/goals/GoalDetailScreen";
 import { GoalFormScreen } from "./screens/goals/GoalFormScreen";
+import { EpicDetailScreen } from "./screens/epics/EpicDetailScreen";
+import { EpicFormScreen } from "./screens/epics/EpicFormScreen";
+import { TaskFormScreen } from "./screens/tasks/TaskFormScreen";
+import { TaskDetailScreen } from "./screens/tasks/detail/TaskDetailScreen";
 import { NotFound } from "./screens/NotFound";
 import { RouteError } from "./screens/RouteError";
 
@@ -33,6 +37,12 @@ export const routes: RouteObject[] = [
               { path: "goals/new", element: <GoalFormScreen /> },
               { path: "goals/:goalId", element: <GoalDetailScreen /> },
               { path: "goals/:goalId/edit", element: <GoalFormScreen /> },
+              { path: "goals/:goalId/epics/new", element: <EpicFormScreen /> },
+              { path: "epics/:epicId", element: <EpicDetailScreen /> },
+              { path: "epics/:epicId/edit", element: <EpicFormScreen /> },
+              { path: "epics/:epicId/tasks/new", element: <TaskFormScreen /> },
+              { path: "tasks/:taskId", element: <TaskDetailScreen /> },
+              { path: "tasks/:taskId/edit", element: <TaskFormScreen /> },
             ],
           },
         ],

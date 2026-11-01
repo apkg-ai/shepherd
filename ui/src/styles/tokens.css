@@ -20,6 +20,13 @@
 
   --color-on-accent: #ffffff;
 
+  --color-info: #0369a1;
+  --color-info-subtle: #e0f2fe;
+  --color-warning: #92400e;
+  --color-warning-subtle: #fef3c7;
+  --color-accent-subtle: #dbe7fe;
+  --color-success-subtle: #dcf2e3;
+
   /* Spacing / shape */
   --space-1: 4px;
   --space-2: 8px;
@@ -63,6 +70,13 @@
 
   /* Accent is light in dark mode — dark text keeps the chip legible. */
   --color-on-accent: #0c1220;
+
+  --color-info: #38bdf8;
+  --color-info-subtle: #0c2d44;
+  --color-warning: #fbbf24;
+  --color-warning-subtle: #3b2a0a;
+  --color-accent-subtle: #1c2f4d;
+  --color-success-subtle: #12291f;
 
   --shadow-1: 0 1px 3px rgb(0 0 0 / 45%);
   --shadow-2: 0 8px 30px rgb(0 0 0 / 60%);

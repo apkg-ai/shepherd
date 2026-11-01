@@ -1,0 +1,44 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: var(--color-surface-raised);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+.badge[data-phase="planning"] {
+  background: var(--color-info-subtle);
+  color: var(--color-info);
+  border-color: var(--color-info);
+}
+
+.badge[data-phase="plan_review"] {
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.badge[data-phase="execution"] {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.badge[data-phase="work_review"] {
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.badge[data-phase="complete"] {
+  background: var(--color-success-subtle);
+  color: var(--color-success);
+  border-color: var(--color-success);
+}

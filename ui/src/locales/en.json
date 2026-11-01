@@ -39,6 +39,13 @@
       "breadcrumb": "Breadcrumb",
       "projects": "Projects"
     },
+    "phase": {
+      "planning": "Planning",
+      "planReview": "Plan review",
+      "execution": "Execution",
+      "workReview": "Work review",
+      "complete": "Complete"
+    },
     "state": {
       "loading": "Loading…"
     },
@@ -48,25 +55,87 @@
       "done": "Done",
       "open": "Open",
       "proposed": "Proposed"
+    },
+    "review": {
+      "agent": "Agent",
+      "human": "Human",
+      "none": "None"
+    }
+  },
+  "conflict": {
+    "view": {
+      "discard": "Discard my changes",
+      "none": "—",
+      "retry": "Save anyway",
+      "theirs": "Current version",
+      "yours": "Your version"
+    }
+  },
+  "filter": {
+    "status": {
+      "active": "Active",
+      "all": "All",
+      "done": "Done",
+      "label": "Filter by status",
+      "noResults": "No items match this filter."
+    }
+  },
+  "counts": {
+    "progress": {
+      "cancelled": "{{count}} cancelled",
+      "waived": "{{count}} waived",
+      "of": "of"
+    }
+  },
+  "eligibility": {
+    "panel": {
+      "title": "Eligibility",
+      "canPlan": "Can plan",
+      "canExecute": "Can execute",
+      "canReview": "Can review",
+      "blocked": "Blocked",
+      "noReasons": "No blockers",
+      "no": "No",
+      "yes": "Yes"
+    }
+  },
+  "epic": {
+    "conflict": {
+      "description": "This epic was updated since you started editing. Compare your changes with the current version.",
+      "title": "Edit conflict"
+    },
+    "detail": {
+      "edit": "Edit",
+      "emptyTasksCta": "Tasks will appear here once created.",
+      "emptyTasksTitle": "No tasks yet",
+      "newTask": "New task",
+      "tasksTitle": "Tasks"
+    },
+    "form": {
+      "conflictPreviousSubmission": "A previous submission may already have created this epic. Check the goal epics before submitting again.",
+      "createSubmit": "Create epic",
+      "descriptionLabel": "Description",
+      "discardConfirm": "Discard changes",
+      "discardDescription": "You have unsaved changes. Are you sure you want to discard them?",
+      "discardTitle": "Discard changes?",
+      "editTitle": "Edit epic",
+      "inspectEpics": "Check goal epics",
+      "newTitle": "New epic",
+      "titleLabel": "Title",
+      "updateSubmit": "Save changes"
     }
   },
   "goal": {
     "conflict": {
       "description": "This goal was updated since you started editing. Compare your changes with the current version.",
-      "discard": "Discard my changes",
-      "none": "—",
-      "retry": "Save anyway",
-      "theirs": "Current version",
-      "title": "Edit conflict",
-      "yours": "Your version"
+      "title": "Edit conflict"
     },
     "detail": {
       "edit": "Edit",
       "emptyEpicsCta": "Epics will appear here once created.",
       "emptyEpicsTitle": "No epics yet",
-      "epicCount_one": "{{count}} epic",
-      "epicCount_other": "{{count}} epics",
       "epicsTitle": "Epics",
+      "newEpic": "New epic",
       "taskCount_one": "{{count}} task",
       "taskCount_other": "{{count}} tasks"
     },
@@ -89,6 +158,67 @@
       "title": "Page not found"
     }
   },
+  "reason": {
+    "dialog": {
+      "label": "Reason",
+      "placeholder": "Explain why…",
+      "submit": "Submit"
+    }
+  },
+  "task": {
+    "action": {
+      "accept": "Accept",
+      "block": "Block",
+      "blockTitle": "Block task",
+      "cancel": "Cancel task",
+      "cancelTitle": "Cancel task",
+      "claimExecute": "Claim execution",
+      "claimPlan": "Claim planning",
+      "noActions": "No actions available",
+      "release": "Release",
+      "reportFailure": "Report failure",
+      "reportSuccess": "Report success",
+      "unblock": "Unblock",
+      "waive": "Waive task",
+      "waiveTitle": "Waive task"
+    },
+    "detail": {
+      "edit": "Edit",
+      "metadata": "Task metadata",
+      "planReview": "Plan review",
+      "planningRequired": "Planning required",
+      "planningRequiredNo": "No",
+      "planningRequiredYes": "Yes",
+      "blocked": "Blocked",
+      "blockReason": "Reason: {{reason}}",
+      "type": "Type",
+      "waived": "Waived",
+      "waiveReason": "Reason: {{reason}}",
+      "workReview": "Work review"
+    },
+    "conflict": {
+      "description": "This task was updated since you started editing. Compare your changes with the current version.",
+      "title": "Edit conflict"
+    },
+    "form": {
+      "conflictPreviousSubmission": "A previous submission may already have created this task. Check the epic tasks before submitting again.",
+      "createSubmit": "Create task",
+      "descriptionLabel": "Description",
+      "discardConfirm": "Discard changes",
+      "discardDescription": "You have unsaved changes. Are you sure you want to discard them?",
+      "discardTitle": "Discard changes?",
+      "editTitle": "Edit task",
+      "inspectTasks": "Check epic tasks",
+      "newTitle": "New task",
+      "planReviewLabel": "Plan review",
+      "planningRequiredLabel": "Planning required",
+      "settingsLegend": "Task settings",
+      "titleLabel": "Title",
+      "typeLabel": "Type",
+      "updateSubmit": "Save changes",
+      "workReviewLabel": "Work review"
+    }
+  },
   "project": {
     "form": {
       "createSubmit": "Create project",
@@ -108,6 +238,8 @@
       "emptyGoalsTitle": "No goals yet",
       "epicCount_one": "{{count}} epic",
       "epicCount_other": "{{count}} epics",
+      "goalCount_one": "{{count}} goal",
+      "goalCount_other": "{{count}} goals",
       "newGoal": "New goal"
     }
   },

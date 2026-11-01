@@ -7,6 +7,10 @@ import type { EntityStatus } from "../api/generated/model/entityStatus";
 import type { Goal } from "../api/generated/model/goal";
 import type { Project } from "../api/generated/model/project";
 import type { ProjectSettings } from "../api/generated/model/projectSettings";
+import type { Task } from "../api/generated/model/task";
+import type { TaskPhase } from "../api/generated/model/taskPhase";
+import type { TaskType } from "../api/generated/model/taskType";
+import type { ReviewPolicy } from "../api/generated/model/reviewPolicy";
 
 const now = () => new Date().toISOString();
 
@@ -99,6 +103,54 @@ export function makeEpic(overrides?: Partial<Epic> & { status?: EntityStatus }):
     task_counts: { ...emptyCounts },
     cancellations: [],
     archives: [],
+    ...overrides,
+  };
+}
+
+export function makeTask(
+  overrides?: Partial<Task> & { status?: EntityStatus; phase?: TaskPhase },
+): Task {
+  const ts = now();
+  return {
+    id: crypto.randomUUID(),
+    revision: 1,
+    created_at: ts,
+    updated_at: ts,
+    project_id: crypto.randomUUID(),
+    epic_id: crypto.randomUUID(),
+    title: "Test task",
+    description: "",
+    type_key: "code",
+    status: "open",
+    phase: "planning",
+    planning_required: true,
+    plan_review: "human" as ReviewPolicy,
+    work_review: "human" as ReviewPolicy,
+    selected_plan_revision_ids: [],
+    accepted_plan_submission_ids: [],
+    archived: false,
+    blocks: [],
+    waivers: [],
+    attempt_count: 0,
+    eligibility: { ...defaultEligibility },
+    cancellations: [],
+    archives: [],
+    ...overrides,
+  };
+}
+
+export function makeTaskType(overrides?: Partial<TaskType>): TaskType {
+  const ts = now();
+  return {
+    id: crypto.randomUUID(),
+    revision: 1,
+    created_at: ts,
+    updated_at: ts,
+    project_id: crypto.randomUUID(),
+    key: "code",
+    label: "Code",
+    archived: false,
+    builtin: true,
     ...overrides,
   };
 }

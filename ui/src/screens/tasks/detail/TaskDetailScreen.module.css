@@ -1,0 +1,52 @@
+.badges {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.metadata {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  background: var(--color-surface-raised);
+}
+
+.metaList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.metaItem dt {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.metaItem dd {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-md);
+}
+
+.lifecycle {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-warning);
+  border-radius: var(--radius-2);
+  background: var(--color-surface-raised);
+}
+
+.lifecycleTitle {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.lifecycleReason {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
