@@ -6,6 +6,7 @@ import { GraphToolbar } from "./GraphToolbar";
 function renderToolbar(overrides: Partial<Parameters<typeof GraphToolbar>[0]> = {}) {
   const props = {
     hasSelection: false,
+    floating: true,
     onFit: vi.fn(),
     onZoomIn: vi.fn(),
     onZoomOut: vi.fn(),

@@ -24,7 +24,6 @@ import {
   DAG_START_ID,
   DAG_END_ID,
 } from "../../lib/graphLayout";
-import { Button } from "../../components/Button";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import { GraphNode, type GraphNodeType } from "./GraphNode";
 import { DagEndpointNode } from "./DagEndpointNode";
@@ -136,6 +135,7 @@ function GraphScreenInner({
         }),
         data: {
           ...data,
+          typeIcon: level === "epic" ? "\u{1F3D7}\u{FE0F}" : "\u{1F4CB}",
           selected: n.id === selectedNodeId,
           dimmed: selectedNodeId !== null && n.id !== selectedNodeId && !neighbors.has(n.id),
           root: false,
@@ -146,7 +146,7 @@ function GraphScreenInner({
         },
       };
     }) as GraphNodeType[];
-  }, [layout.nodes, nodes, selectedNodeId, neighbors, t]);
+  }, [layout.nodes, nodes, selectedNodeId, neighbors, t, level]);
 
   const rfEdges = layout.edges;
 
@@ -269,28 +269,32 @@ function GraphScreenInner({
     return <ErrorState error={graphQuery.error} onRetry={() => void graphQuery.refetch()} />;
   }
 
+  const toolbarProps = {
+    hasSelection: selectedNodeId !== null,
+    onFit: handleFit,
+    onZoomIn: handleZoomIn,
+    onZoomOut: handleZoomOut,
+    onResetLayout: handleResetLayout,
+    onAddDependency: handleAddDependency,
+    viewMode: viewMode as "graph" | "list",
+    onToggleView: handleToggleView,
+  };
+
   return (
     <>
-      <div className={styles.viewControls}>
-        <Button variant="ghost" onClick={handleToggleView}>
-          {viewMode === "graph" ? t("graph.action.listView") : t("graph.action.graphView")}
-        </Button>
-      </div>
-
       {viewMode === "list" ? (
-        listContent
+        <>
+          <GraphToolbar {...toolbarProps} />
+          {listContent}
+        </>
       ) : nodes.length === 0 ? (
-        <EmptyState title={t("graph.state.empty")} icon="🔗" />
+        <>
+          <GraphToolbar {...toolbarProps} />
+          <EmptyState title={t("graph.state.empty")} icon="🔗" />
+        </>
       ) : (
         <div className={styles.canvas}>
-          <GraphToolbar
-            hasSelection={selectedNodeId !== null}
-            onFit={handleFit}
-            onZoomIn={handleZoomIn}
-            onZoomOut={handleZoomOut}
-            onResetLayout={handleResetLayout}
-            onAddDependency={handleAddDependency}
-          />
+          <GraphToolbar {...toolbarProps} floating />
           <div className={styles.flow} data-testid="graph-canvas">
             <ReactFlow
               nodes={rfNodes}

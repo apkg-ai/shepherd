@@ -15,7 +15,6 @@ import {
   DAG_START_ID,
   DAG_END_ID,
 } from "../../lib/graphLayout";
-import { Button } from "../../components/Button";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
 import { GraphNode } from "./GraphNode";
 import { GoalGroupNode } from "./GoalGroupNode";
@@ -185,6 +184,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
         }),
         data: {
           ...data,
+          typeIcon: "\u{1F3D7}\u{FE0F}",
           selected: n.id === selectedNodeId,
           dimmed: selectedNodeId !== null && n.id !== selectedNodeId && !neighbors.has(n.id),
           root: false,
@@ -276,6 +276,12 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
       setSelectedNodeId(null);
     }
   }, [selectedNodeId, allEpicNodes]);
+
+  useEffect(() => {
+    if (expandedGoalId !== null) {
+      setTimeout(() => fitView({ duration: 200 }), 50);
+    }
+  }, [expandedGoalId, fitView]);
   /* v8 ignore stop */
 
   if (goalsQuery.isPending && viewMode === "graph") {
@@ -286,33 +292,39 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
     return <ErrorState error={goalsQuery.error} onRetry={() => void goalsQuery.refetch()} />;
   }
 
+  const toolbarProps = {
+    hasSelection: selectedNodeId !== null,
+    onFit: handleFit,
+    onZoomIn: handleZoomIn,
+    onZoomOut: handleZoomOut,
+    onResetLayout: handleResetLayout,
+    onAddDependency: handleAddDependency,
+    viewMode: viewMode as "graph" | "list" | "table",
+    onToggleTable: handleToggleTable,
+    hideCompleted,
+    onToggleHideCompleted: handleToggleHideCompleted,
+  };
+
   return (
     <>
-      <div className={styles.viewControls}>
-        <Button variant="ghost" onClick={handleToggleTable}>
-          {viewMode === "graph" ? t("graph.action.tabsView") : t("graph.action.graphView")}
-        </Button>
-        <Button variant="ghost" onClick={handleToggleHideCompleted} aria-pressed={hideCompleted}>
-          {hideCompleted ? t("graph.action.showCompleted") : t("graph.action.hideCompleted")}
-        </Button>
-      </div>
-
       {viewMode === "table" ? (
-        <TabsView projectId={projectId} hideCompleted={hideCompleted} />
+        <>
+          <GraphToolbar {...toolbarProps} />
+          <TabsView projectId={projectId} hideCompleted={hideCompleted} />
+        </>
       ) : viewMode === "list" ? (
-        listContent
+        <>
+          <GraphToolbar {...toolbarProps} />
+          {listContent}
+        </>
       ) : !visibleGoals.length ? (
-        <EmptyState title={t("graph.state.empty")} icon="🔗" />
+        <>
+          <GraphToolbar {...toolbarProps} />
+          <EmptyState title={t("graph.state.empty")} icon="🔗" />
+        </>
       ) : (
         <div className={styles.canvas}>
-          <GraphToolbar
-            hasSelection={selectedNodeId !== null}
-            onFit={handleFit}
-            onZoomIn={handleZoomIn}
-            onZoomOut={handleZoomOut}
-            onResetLayout={handleResetLayout}
-            onAddDependency={handleAddDependency}
-          />
+          <GraphToolbar {...toolbarProps} floating />
           <div className={styles.flow} data-testid="graph-canvas">
             <ReactFlow
               nodes={rfNodes}

@@ -23,9 +23,10 @@ export function GoalGroupNode({ id, data }: NodeProps<GoalGroupNodeType>) {
   };
 
   return (
-    <div className={styles.wrapper} data-testid={`goal-group-${id}`}>
+    <div className={styles.wrapper} data-testid={`goal-group-${id}`} data-expanded={data.expanded}>
       <Handle type="target" position={Position.Top} className={styles.handle} />
       <NodeContent
+        typeIcon={"\u{1F3AF}"}
         title={data.title}
         status={data.completed ? "done" : "open"}
         counts={data.epicCounts}

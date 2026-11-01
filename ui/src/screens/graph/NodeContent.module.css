@@ -68,6 +68,11 @@
   overflow: hidden;
 }
 
+.typeIcon {
+  margin-right: var(--space-1);
+  font-size: var(--text-xs);
+}
+
 .tags {
   display: flex;
   gap: var(--space-1);

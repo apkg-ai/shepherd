@@ -46,7 +46,7 @@ describe("ProjectOverviewScreen", () => {
       handlers: [...baseHandlers, goalListHandler(goals), goalGraphHandler()],
     });
 
-    await screen.findByRole("heading", { name: "Space Game" });
+    await screen.findByRole("heading", { name: /Space Game/ });
     await user.click(screen.getByRole("button", { name: /Table view/ }));
 
     expect(await screen.findByText("Combat system")).toBeInTheDocument();
@@ -69,7 +69,7 @@ describe("ProjectOverviewScreen", () => {
       handlers: [...baseHandlers, goalListHandler([goal]), goalGraphHandler()],
     });
 
-    await screen.findByRole("heading", { name: "Space Game" });
+    await screen.findByRole("heading", { name: /Space Game/ });
     await user.click(screen.getByRole("button", { name: /Table view/ }));
 
     const link = await screen.findByRole("link", { name: /Combat/ });

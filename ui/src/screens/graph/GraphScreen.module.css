@@ -1,14 +1,7 @@
-.viewControls {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  padding: var(--space-1) 0;
-}
-
 .canvas {
   position: relative;
   display: flex;
-  min-height: 400px;
+  min-height: calc(100vh - 160px);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-2);
   overflow: hidden;
@@ -20,7 +13,7 @@
 
 .flow {
   flex: 1;
-  min-height: 400px;
+  min-height: calc(100vh - 160px);
 }
 
 .flow :global(.react-flow__background) {

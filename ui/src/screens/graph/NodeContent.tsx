@@ -5,6 +5,7 @@ import type { Counts } from "../../api/generated/model/counts";
 import styles from "./NodeContent.module.css";
 
 export interface NodeContentProps {
+  typeIcon?: string;
   title: string;
   status: string;
   counts: Counts;
@@ -17,6 +18,7 @@ export interface NodeContentProps {
 
 /* v8 ignore start -- rendered inside React Flow; covered by E2E */
 export function NodeContent({
+  typeIcon,
   title,
   status,
   counts,
@@ -37,7 +39,10 @@ export function NodeContent({
       data-expanded={expanded || false}
     >
       <div className={styles.content}>
-        <div className={styles.title}>{title}</div>
+        <div className={styles.title}>
+          {typeIcon && <span className={styles.typeIcon}>{typeIcon}</span>}
+          {title}
+        </div>
         <div className={styles.tags}>
           <StatusBadge status={status} />
           {counts.total > 0 && <ProgressCounts counts={counts} />}

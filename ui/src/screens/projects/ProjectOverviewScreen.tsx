@@ -46,28 +46,29 @@ export function ProjectOverviewScreen() {
         items={[{ label: t("common.nav.projects"), to: "/" }, { label: project.data.name }]}
       />
       <PageHeader
-        title={project.data.name}
+        title={
+          <>
+            {project.data.name}
+            {(allGoals.length > 0 || project.data.epic_counts.total > 0) && (
+              <span className={styles.counts}>
+                {t("project.overview.goalCount", { count: allGoals.length })}
+                {project.data.epic_counts.total > 0 && (
+                  <>
+                    {" "}
+                    · <ProgressCounts counts={project.data.epic_counts} />
+                  </>
+                )}
+              </span>
+            )}
+          </>
+        }
         description={project.data.description || undefined}
         actions={
           <LinkButton to={`/projects/${projectId}/goals/new`} variant="primary">
             {t("project.overview.newGoal")}
           </LinkButton>
         }
-      >
-        {allGoals.length > 0 || project.data.epic_counts.total > 0 ? (
-          <div className={styles.summary}>
-            <span className={styles.summaryItem}>
-              {t("project.overview.goalCount", { count: allGoals.length })}
-            </span>
-            {project.data.epic_counts.total > 0 ? (
-              <>
-                <span className={styles.summaryDot}>·</span>
-                <ProgressCounts counts={project.data.epic_counts} />
-              </>
-            ) : null}
-          </div>
-        ) : null}
-      </PageHeader>
+      />
 
       {allGoals.length === 0 ? (
         <EmptyState title={t("project.overview.emptyGoalsTitle")} icon="🎯">

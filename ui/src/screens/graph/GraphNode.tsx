@@ -7,6 +7,7 @@ import { NodeContent } from "./NodeContent";
 import styles from "./GraphNode.module.css";
 
 export type GraphNodeData = {
+  typeIcon?: string;
   title: string;
   status: EntityStatus;
   eligibility: Eligibility;
@@ -35,6 +36,7 @@ export function GraphNode({ id, data }: NodeProps<GraphNodeType>) {
     <div className={styles.wrapper} data-testid={`graph-node-${id}`}>
       <Handle type="target" position={Position.Top} className={styles.handle} />
       <NodeContent
+        typeIcon={data.typeIcon}
         title={data.title}
         status={data.status}
         counts={data.counts}

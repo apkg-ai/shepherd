@@ -1,5 +1,12 @@
 .wrapper {
   min-width: 280px;
+  border-radius: var(--radius-2);
+}
+
+.wrapper[data-expanded="true"] {
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border-strong);
+  padding-bottom: var(--space-2);
 }
 
 .handle {
