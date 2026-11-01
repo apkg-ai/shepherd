@@ -114,7 +114,7 @@ export function GraphToolbar({
                 viewMode === "table" ? t("graph.action.graphView") : t("graph.action.tabsView")
               }
             >
-              {viewMode === "table" ? "⊞" : "☰"}
+              {viewMode === "table" ? "⊞" : "▤"}
             </button>
           )}
           {onToggleHideCompleted && (

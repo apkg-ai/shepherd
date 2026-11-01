@@ -156,6 +156,29 @@ function GraphScreenInner({
 
   const rfEdges = layout.edges;
 
+  const labeledEdges = useMemo(() => {
+    const nodeMap = new Map(nodes.map((n) => [n.id, n.title]));
+    return rfEdges.map((e) => {
+      if (e.id.startsWith("__start_"))
+        return {
+          ...e,
+          ariaLabel: t("graph.edge.startTo", { title: nodeMap.get(e.target) ?? "node" }),
+        };
+      if (e.id.startsWith("__end_"))
+        return {
+          ...e,
+          ariaLabel: t("graph.edge.toEnd", { title: nodeMap.get(e.source) ?? "node" }),
+        };
+      return {
+        ...e,
+        ariaLabel: t("graph.edge.link", {
+          source: nodeMap.get(e.source) ?? "node",
+          target: nodeMap.get(e.target) ?? "node",
+        }),
+      };
+    });
+  }, [rfEdges, nodes, t]);
+
   const cachedViewport = viewportCache.get(cacheKey);
 
   /* v8 ignore start -- LRU promotion; covered by E2E */
@@ -309,7 +332,7 @@ function GraphScreenInner({
           <div className={styles.flow} data-testid="graph-canvas">
             <ReactFlow
               nodes={rfNodes}
-              edges={rfEdges}
+              edges={labeledEdges}
               nodeTypes={nodeTypes}
               onNodeClick={onNodeClick}
               onNodeDoubleClick={onNodeDoubleClick}

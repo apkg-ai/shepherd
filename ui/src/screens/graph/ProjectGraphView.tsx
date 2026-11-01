@@ -199,6 +199,31 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
 
   const rfEdges = layout.edges;
 
+  const labeledEdges = useMemo(() => {
+    const nodeMap = new Map<string, string>();
+    for (const g of visibleGoals) nodeMap.set(g.id, g.title);
+    for (const n of allEpicNodes) nodeMap.set(n.id, n.title);
+    return rfEdges.map((e) => {
+      if (e.id.startsWith("__start_"))
+        return {
+          ...e,
+          ariaLabel: t("graph.edge.startTo", { title: nodeMap.get(e.target) ?? "node" }),
+        };
+      if (e.id.startsWith("__end_"))
+        return {
+          ...e,
+          ariaLabel: t("graph.edge.toEnd", { title: nodeMap.get(e.source) ?? "node" }),
+        };
+      return {
+        ...e,
+        ariaLabel: t("graph.edge.link", {
+          source: nodeMap.get(e.source) ?? "node",
+          target: nodeMap.get(e.target) ?? "node",
+        }),
+      };
+    });
+  }, [rfEdges, visibleGoals, allEpicNodes, t]);
+
   /* v8 ignore start -- React Flow canvas callbacks; covered by E2E */
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: { id: string; type?: string }) => {
@@ -254,8 +279,13 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   }, [expandedGoalGraphQuery.refetch]);
   /* v8 ignore stop */
 
+  const handleToggleView = useCallback(
+    () => setViewMode((v) => (v === "list" ? "graph" : "list")),
+    [],
+  );
+
   const handleToggleTable = useCallback(
-    () => setViewMode((v) => (v === "graph" ? "table" : "graph")),
+    () => setViewMode((v) => (v === "table" ? "graph" : "table")),
     [],
   );
 
@@ -321,6 +351,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
     onResetLayout: handleResetLayout,
     onAddDependency: handleAddDependency,
     viewMode: viewMode as "graph" | "list" | "table",
+    onToggleView: handleToggleView,
     onToggleTable: handleToggleTable,
     hideCompleted,
     onToggleHideCompleted: handleToggleHideCompleted,
@@ -349,7 +380,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
           <div className={styles.flow} data-testid="graph-canvas">
             <ReactFlow
               nodes={rfNodes}
-              edges={rfEdges}
+              edges={labeledEdges}
               nodeTypes={nodeTypes}
               onNodeClick={onNodeClick}
               onNodeDoubleClick={onNodeDoubleClick}
@@ -380,7 +411,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
         <GraphActions
           projectId={projectId}
           level="epic"
-          nodes={allEpicNodes}
+          nodes={expandedGraph?.nodes ?? []}
           selectedNodeId={selectedNodeId}
           addDialogOpen={addDialogOpen}
           onAddDialogClose={() => setAddDialogOpen(false)}

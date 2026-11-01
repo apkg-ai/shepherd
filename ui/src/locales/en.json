@@ -182,6 +182,11 @@
     "canvas": {
       "label": "Dependency graph"
     },
+    "edge": {
+      "startTo": "Start to {{title}}",
+      "toEnd": "{{title}} to end",
+      "link": "{{source}} to {{target}}"
+    },
     "endpoint": {
       "end": "end",
       "start": "start"
