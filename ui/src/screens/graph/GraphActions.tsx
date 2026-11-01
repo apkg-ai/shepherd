@@ -140,7 +140,7 @@ export function GraphActions({
         {removeEdge && (
           <p className={styles.edgeInfo}>
             {removeEdge.prerequisiteTitle} <span aria-hidden="true">→</span>
-            <span className={styles.srOnly}>{t("graph.action.removeDependencyArrow")}</span>{" "}
+            <span className="sr-only">{t("graph.action.removeDependencyArrow")}</span>{" "}
             {removeEdge.dependentTitle}
           </p>
         )}

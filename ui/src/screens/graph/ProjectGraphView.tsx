@@ -99,8 +99,8 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
       epicLayout = computeLayout(expandedGraph.nodes, expandedGraph.dependencies);
       let minX = Infinity;
       let minY = Infinity;
-      let maxX = 0;
-      let maxY = 0;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
       for (const n of epicLayout.nodes) {
         minX = Math.min(minX, n.position.x);
         minY = Math.min(minY, n.position.y);
@@ -324,9 +324,9 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   }, [hideCompleted, expandedGoalId, goals]);
 
   useEffect(() => {
-    if (expandedGoalId !== null) {
-      setTimeout(() => fitView({ duration: 200 }), 50);
-    }
+    if (expandedGoalId === null) return;
+    const timer = setTimeout(() => fitView({ duration: 200 }), 50);
+    return () => clearTimeout(timer);
   }, [expandedGoalId, fitView]);
   /* v8 ignore stop */
 
