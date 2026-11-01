@@ -28,8 +28,6 @@ import type { ReactNode } from "react";
 
 const nodeTypes = { graphNode: GraphNode, goalGroup: GoalGroupNode, dagEndpoint: DagEndpointNode };
 
-const GOAL_NODE_WIDTH = 320;
-const GOAL_NODE_HEIGHT = 52;
 const EPIC_PADDING = 20;
 const EPIC_HEADER_HEIGHT = 52;
 
@@ -103,7 +101,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
         onToggleExpand: handleToggleGoal,
         goalId: goal.id,
       },
-      style: { width: GOAL_NODE_WIDTH, height: GOAL_NODE_HEIGHT },
+      style: { width: NODE_WIDTH, height: NODE_HEIGHT },
     }));
 
     // Add start/end nodes and compute DAG layout (start → all goals → end)
@@ -130,7 +128,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
         minY = 0;
       }
 
-      const containerWidth = Math.max(GOAL_NODE_WIDTH, maxX - minX + EPIC_PADDING * 2);
+      const containerWidth = Math.max(NODE_WIDTH, maxX - minX + EPIC_PADDING * 2);
       const containerHeight = EPIC_HEADER_HEIGHT + (maxY - minY) + EPIC_PADDING;
 
       // Update the expanded goal node's dimensions
