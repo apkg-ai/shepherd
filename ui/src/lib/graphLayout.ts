@@ -282,6 +282,20 @@ export function addDagEndpoints(nodes: Node[], edges: Edge[]): { nodes: Node[]; 
   };
 }
 
+function nodeWidth(n: Node): number {
+  if (n.type === "dagEndpoint") return ENDPOINT_WIDTH;
+  const sw = n.style?.width;
+  if (typeof sw === "number") return sw;
+  return NODE_WIDTH;
+}
+
+function nodeHeight(n: Node): number {
+  if (n.type === "dagEndpoint") return ENDPOINT_HEIGHT;
+  const sh = n.style?.height;
+  if (typeof sh === "number") return sh;
+  return NODE_HEIGHT;
+}
+
 export function computeLayoutWithEndpoints(
   nodes: Node[],
   edges: Edge[],
@@ -293,11 +307,9 @@ export function computeLayoutWithEndpoints(
   g.setDefaultEdgeLabel(() => ({}));
 
   for (const n of nodes) {
-    const isEndpoint = n.type === "dagEndpoint";
-    g.setNode(n.id, {
-      width: isEndpoint ? ENDPOINT_WIDTH : NODE_WIDTH,
-      height: isEndpoint ? ENDPOINT_HEIGHT : NODE_HEIGHT,
-    });
+    const w = nodeWidth(n);
+    const h = nodeHeight(n);
+    g.setNode(n.id, { width: w, height: h });
   }
   for (const e of edges) {
     g.setEdge(e.source, e.target);
@@ -307,9 +319,8 @@ export function computeLayoutWithEndpoints(
 
   const positioned = nodes.map((n) => {
     const pos = g.node(n.id) as { x: number; y: number };
-    const isEndpoint = n.type === "dagEndpoint";
-    const w = isEndpoint ? ENDPOINT_WIDTH : NODE_WIDTH;
-    const h = isEndpoint ? ENDPOINT_HEIGHT : NODE_HEIGHT;
+    const w = nodeWidth(n);
+    const h = nodeHeight(n);
     return { ...n, position: { x: pos.x - w / 2, y: pos.y - h / 2 } };
   });
 

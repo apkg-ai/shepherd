@@ -88,7 +88,34 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   const layout = useMemo(() => {
     if (visibleGoals.length === 0) return { nodes: [] as Node[], edges: [] as Edge[] };
 
-    // Build goal nodes (no inter-goal dependencies, so edges are empty)
+    // Pre-compute expanded goal container dimensions BEFORE dagre runs
+    let epicLayout: { nodes: Node[]; edges: Edge[] } | null = null;
+    let containerWidth = NODE_WIDTH;
+    let containerHeight = NODE_HEIGHT;
+    let epicMinX = 0;
+    let epicMinY = 0;
+
+    if (expandedGoalId && expandedGraph) {
+      epicLayout = computeLayout(expandedGraph.nodes, expandedGraph.dependencies);
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = 0;
+      let maxY = 0;
+      for (const n of epicLayout.nodes) {
+        minX = Math.min(minX, n.position.x);
+        minY = Math.min(minY, n.position.y);
+        maxX = Math.max(maxX, n.position.x + NODE_WIDTH);
+        maxY = Math.max(maxY, n.position.y + NODE_HEIGHT);
+      }
+      if (Number.isFinite(minX)) {
+        epicMinX = minX;
+        epicMinY = minY;
+        containerWidth = Math.max(NODE_WIDTH, maxX - minX + EPIC_PADDING * 2);
+        containerHeight = EPIC_HEADER_HEIGHT + (maxY - minY) + EPIC_PADDING;
+      }
+    }
+
+    // Build goal nodes with CORRECT dimensions (expanded goal gets container size)
     const goalNodes: Node[] = visibleGoals.map((goal) => ({
       id: goal.id,
       type: "goalGroup",
@@ -101,58 +128,29 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
         onToggleExpand: handleToggleGoal,
         goalId: goal.id,
       },
-      style: { width: NODE_WIDTH, height: NODE_HEIGHT },
+      style: {
+        width: goal.id === expandedGoalId ? containerWidth : NODE_WIDTH,
+        height: goal.id === expandedGoalId ? containerHeight : NODE_HEIGHT,
+      },
     }));
 
-    // Add start/end nodes and compute DAG layout (start → all goals → end)
+    // Dagre now computes positions using the ACTUAL dimensions
     const withEndpoints = addDagEndpoints(goalNodes, []);
     const dagLayout = computeLayoutWithEndpoints(withEndpoints.nodes, withEndpoints.edges);
 
-    // If a goal is expanded, inject its epic sub-DAG inside the container
-    if (expandedGoalId && expandedGraph) {
-      const epicLayout = computeLayout(expandedGraph.nodes, expandedGraph.dependencies);
-
-      // Compute bounding box of the epic sub-DAG
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = 0;
-      let maxY = 0;
-      for (const n of epicLayout.nodes) {
-        minX = Math.min(minX, n.position.x);
-        minY = Math.min(minY, n.position.y);
-        maxX = Math.max(maxX, n.position.x + NODE_WIDTH);
-        maxY = Math.max(maxY, n.position.y + NODE_HEIGHT);
-      }
-      if (!Number.isFinite(minX)) {
-        minX = 0;
-        minY = 0;
-      }
-
-      const containerWidth = Math.max(NODE_WIDTH, maxX - minX + EPIC_PADDING * 2);
-      const containerHeight = EPIC_HEADER_HEIGHT + (maxY - minY) + EPIC_PADDING;
-
-      // Update the expanded goal node's dimensions
-      const expandedIdx = dagLayout.nodes.findIndex((n) => n.id === expandedGoalId);
-      if (expandedIdx >= 0) {
-        dagLayout.nodes[expandedIdx] = {
-          ...dagLayout.nodes[expandedIdx],
-          style: { width: containerWidth, height: containerHeight },
-        };
-      }
-
-      // Add epic children inside the container
+    // Inject epic children inside the expanded container
+    if (expandedGoalId && epicLayout) {
       for (const n of epicLayout.nodes) {
         dagLayout.nodes.push({
           ...n,
           parentId: expandedGoalId,
           extent: "parent" as const,
           position: {
-            x: n.position.x - minX + EPIC_PADDING,
-            y: n.position.y - minY + EPIC_HEADER_HEIGHT,
+            x: n.position.x - epicMinX + EPIC_PADDING,
+            y: n.position.y - epicMinY + EPIC_HEADER_HEIGHT,
           },
         });
       }
-
       dagLayout.edges.push(...epicLayout.edges);
     }
 
