@@ -204,7 +204,7 @@ test.describe("graph a11y", () => {
         .withTags(TAGS)
         .disableRules(DISABLED_RULES)
         // React Flow renders SVG edges with presentation-only elements that
-        // may trip generic a11y rules; our wrapper sets role="application" with a label.
+        // may trip generic a11y rules; the canvas itself carries an aria-label.
         .exclude(".react-flow__edges")
         .analyze();
       expect(

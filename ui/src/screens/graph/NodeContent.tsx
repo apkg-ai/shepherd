@@ -17,7 +17,6 @@ export interface NodeContentProps {
   expandAriaLabel?: string;
 }
 
-/* v8 ignore start -- rendered inside React Flow; covered by E2E */
 export function NodeContent({
   typeIcon,
   title,
@@ -66,4 +65,3 @@ export function NodeContent({
     </div>
   );
 }
-/* v8 ignore stop */

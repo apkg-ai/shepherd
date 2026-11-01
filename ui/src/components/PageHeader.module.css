@@ -17,6 +17,13 @@
   letter-spacing: -0.01em;
 }
 
+.description {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  max-width: 640px;
+}
+
 .actions {
   display: flex;
   gap: var(--space-3);

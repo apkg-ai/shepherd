@@ -84,6 +84,40 @@ describe("EpicDetailScreen", () => {
     expect(screen.getByText("Tasks will appear here once created.")).toBeInTheDocument();
   });
 
+  it("shows eligibility panel", async () => {
+    const epicWithReasons = makeEpic({
+      ...epic,
+      eligibility: {
+        can_plan: true,
+        can_execute: false,
+        can_review: false,
+        reasons: [
+          {
+            code: "epic_prerequisite",
+            resource_id: "e2",
+            message: "Prerequisite epic not complete",
+          },
+        ],
+        allowed_actions: [],
+      },
+    });
+
+    renderRoute("/projects/p1/epics/e1", {
+      handlers: [
+        sessionHandler(),
+        projectHandler(project),
+        goalHandler(goal),
+        epicHandler(epicWithReasons),
+        taskListHandler([]),
+        epicGraphHandler(),
+      ],
+    });
+
+    expect(await screen.findByText("Eligibility")).toBeInTheDocument();
+    expect(screen.getByText("Can plan: Yes")).toBeInTheDocument();
+    expect(screen.getByText("Prerequisite epic not complete")).toBeInTheDocument();
+  });
+
   it("shows task cards with status badges in list view", async () => {
     const user = userEvent.setup();
     const tasks = [
@@ -114,8 +148,7 @@ describe("EpicDetailScreen", () => {
       ],
     });
 
-    await screen.findByRole("heading", { name: "Combat rules" });
-    await user.click(screen.getByRole("button", { name: /List view/ }));
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
 
     expect(await screen.findByText("Implement targeting")).toBeInTheDocument();
     expect(screen.getByText("Add damage model")).toBeInTheDocument();
@@ -174,8 +207,7 @@ describe("EpicDetailScreen", () => {
       ],
     });
 
-    await screen.findByRole("heading", { name: "Combat rules" });
-    await user.click(screen.getByRole("button", { name: /List view/ }));
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
 
     expect(await screen.findByText("Active task")).toBeInTheDocument();
     expect(screen.queryByText("Cancelled task")).not.toBeInTheDocument();
@@ -205,8 +237,7 @@ describe("EpicDetailScreen", () => {
       ],
     });
 
-    await screen.findByRole("heading", { name: "Combat rules" });
-    await user.click(screen.getByRole("button", { name: /List view/ }));
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
     await screen.findByText("Active task");
     await user.click(screen.getByRole("button", { name: /Done/ }));
 
@@ -238,8 +269,7 @@ describe("EpicDetailScreen", () => {
       ],
     });
 
-    await screen.findByRole("heading", { name: "Combat rules" });
-    await user.click(screen.getByRole("button", { name: /List view/ }));
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
     await screen.findByText("Active task");
     await user.click(screen.getByRole("button", { name: /All/ }));
 
@@ -264,8 +294,7 @@ describe("EpicDetailScreen", () => {
       ],
     });
 
-    await screen.findByRole("heading", { name: "Combat rules" });
-    await user.click(screen.getByRole("button", { name: /List view/ }));
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
     await screen.findByText("Active task");
     await user.click(screen.getByRole("button", { name: /Done/ }));
 

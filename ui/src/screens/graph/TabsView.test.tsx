@@ -135,6 +135,21 @@ describe("TabsView", () => {
     expect(screen.queryByText("Economy")).not.toBeInTheDocument();
   });
 
+  it("omits progress counts for rows with nothing to count", async () => {
+    renderTabsView();
+    // Override the default goal list after renderTabsView registered its handlers.
+    server.use(
+      http.get(`/api/v1/projects/${PROJECT_ID}/goals`, () =>
+        HttpResponse.json(
+          makePage([makeGoal({ id: "g3", project_id: PROJECT_ID, title: "Empty Goal" })]),
+        ),
+      ),
+    );
+
+    expect(await screen.findByText(/Empty Goal/)).toBeInTheDocument();
+    expect(screen.queryByText(/0 of 0/)).not.toBeInTheDocument();
+  });
+
   it("goal title links to goal detail", async () => {
     renderTabsView();
     const link = await screen.findByRole("link", { name: /Combat System/ });

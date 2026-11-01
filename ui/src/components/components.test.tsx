@@ -108,13 +108,24 @@ describe("CopyButton", () => {
 describe("PageHeader", () => {
   it("renders title, description, actions, and children slots", () => {
     render(
-      <PageHeader title="Shepherd" actions={<button type="button">Act</button>}>
+      <PageHeader
+        title="Shepherd"
+        description="v1 scaffold"
+        actions={<button type="button">Act</button>}
+      >
         <p>slot content</p>
       </PageHeader>,
     );
     expect(screen.getByRole("heading", { name: "Shepherd" })).toBeInTheDocument();
+    expect(screen.getByText("v1 scaffold")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Act" })).toBeInTheDocument();
     expect(screen.getByText("slot content")).toBeInTheDocument();
+  });
+
+  it("omits the description paragraph when absent", () => {
+    render(<PageHeader title="Bare" />);
+    expect(screen.getByRole("heading", { name: "Bare" })).toBeInTheDocument();
+    expect(screen.queryByRole("paragraph")).not.toBeInTheDocument();
   });
 });
 

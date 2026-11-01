@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useGetProject } from "../../api/generated/projects/projects";
@@ -12,8 +12,12 @@ import { ProgressCounts } from "../../components/ProgressCounts";
 import { StatusBadge } from "../../components/StatusBadge";
 import { StatusFilter } from "../../components/StatusFilter";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
-import { ProjectGraphView } from "../graph/ProjectGraphView";
 import styles from "./ProjectOverviewScreen.module.css";
+
+// Lazy so the React Flow + dagre stack loads only when a graph actually renders.
+const ProjectGraphView = lazy(() =>
+  import("../graph/ProjectGraphView").then((m) => ({ default: m.ProjectGraphView })),
+);
 
 function splitGoals(goals: Goal[]) {
   const active = goals.filter((g) => !g.completed);
@@ -77,39 +81,41 @@ export function ProjectOverviewScreen() {
           </LinkButton>
         </EmptyState>
       ) : (
-        <ProjectGraphView
-          projectId={projectId!}
-          listContent={
-            <>
-              <StatusFilter
-                value={filter}
-                onChange={setFilter}
-                counts={{ active: active.length, done: done.length, total: allGoals.length }}
-              />
-              {visible.length === 0 ? (
-                <p className={styles.noResults}>{t("filter.status.noResults")}</p>
-              ) : (
-                <CardGrid>
-                  {visible.map((goal) => (
-                    <Card
-                      key={goal.id}
-                      to={`/projects/${projectId}/goals/${goal.id}`}
-                      title={goal.title}
-                      description={goal.description || undefined}
-                      status={goal.completed ? "done" : undefined}
-                      badge={goal.completed ? <StatusBadge status="done" /> : undefined}
-                      meta={
-                        goal.epic_counts.total > 0
-                          ? t("project.overview.epicCount", { count: goal.epic_counts.total })
-                          : undefined
-                      }
-                    />
-                  ))}
-                </CardGrid>
-              )}
-            </>
-          }
-        />
+        <Suspense fallback={<LoadingState />}>
+          <ProjectGraphView
+            projectId={projectId!}
+            listContent={
+              <>
+                <StatusFilter
+                  value={filter}
+                  onChange={setFilter}
+                  counts={{ active: active.length, done: done.length, total: allGoals.length }}
+                />
+                {visible.length === 0 ? (
+                  <p className={styles.noResults}>{t("filter.status.noResults")}</p>
+                ) : (
+                  <CardGrid>
+                    {visible.map((goal) => (
+                      <Card
+                        key={goal.id}
+                        to={`/projects/${projectId}/goals/${goal.id}`}
+                        title={goal.title}
+                        description={goal.description || undefined}
+                        status={goal.completed ? "done" : undefined}
+                        badge={goal.completed ? <StatusBadge status="done" /> : undefined}
+                        meta={
+                          goal.epic_counts.total > 0
+                            ? t("project.overview.epicCount", { count: goal.epic_counts.total })
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </CardGrid>
+                )}
+              </>
+            }
+          />
+        </Suspense>
       )}
     </>
   );

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useGetProject } from "../../api/generated/projects/projects";
@@ -13,8 +13,12 @@ import { ProgressCounts } from "../../components/ProgressCounts";
 import { StatusBadge } from "../../components/StatusBadge";
 import { StatusFilter } from "../../components/StatusFilter";
 import { EmptyState, ErrorState, LoadingState } from "../../components/states";
-import { GraphScreen } from "../graph";
 import styles from "./GoalDetailScreen.module.css";
+
+// Lazy so the React Flow + dagre stack loads only when a graph actually renders.
+const GraphScreen = lazy(() =>
+  import("../graph/GraphScreen").then((m) => ({ default: m.GraphScreen })),
+);
 
 const ACTIVE_STATUSES = new Set(["proposed", "open", "active"]);
 const DONE_STATUSES = new Set(["done", "cancelled"]);
@@ -31,7 +35,10 @@ export function GoalDetailScreen() {
   const project = useGetProject(projectId!);
   const goal = useGetGoal(projectId!, goalId!);
   const epics = useListEpics(projectId!, { goal_id: goalId! });
-  const graphQuery = useGetGoalGraph(projectId!, goalId!);
+  // Only fetched when a graph will render — a goal without epics shows the empty state.
+  const graphQuery = useGetGoalGraph(projectId!, goalId!, {
+    query: { enabled: (epics.data?.items.length ?? 0) > 0 },
+  });
   const [filter, setFilter] = useState<"active" | "done" | "all">("active");
 
   if (project.isPending || goal.isPending || epics.isPending) {
@@ -87,50 +94,52 @@ export function GoalDetailScreen() {
           <p className={styles.emptyHint}>{t("goal.detail.emptyEpicsCta")}</p>
         </EmptyState>
       ) : (
-        <GraphScreen
-          projectId={projectId!}
-          level="epic"
-          scopeId={goalId!}
-          graphQuery={graphQuery}
-          detailPath={(nodeId) => `/projects/${projectId}/epics/${nodeId}`}
-          listContent={
-            <>
-              <StatusFilter
-                value={filter}
-                onChange={setFilter}
-                counts={{ active: active.length, done: done.length, total: allEpics.length }}
-              />
+        <Suspense fallback={<LoadingState />}>
+          <GraphScreen
+            projectId={projectId!}
+            level="epic"
+            scopeId={goalId!}
+            graphQuery={graphQuery}
+            detailPath={(nodeId) => `/projects/${projectId}/epics/${nodeId}`}
+            listContent={
+              <>
+                <StatusFilter
+                  value={filter}
+                  onChange={setFilter}
+                  counts={{ active: active.length, done: done.length, total: allEpics.length }}
+                />
 
-              {visible.length === 0 ? (
-                <p className={styles.noResults}>{t("filter.status.noResults")}</p>
-              ) : (
-                <CardGrid>
-                  {visible.map((epic) => (
-                    <Card
-                      key={epic.id}
-                      to={`/projects/${projectId}/epics/${epic.id}`}
-                      title={epic.title}
-                      status={epic.status}
-                      tags={
-                        <>
-                          <StatusBadge status={epic.status} />
-                          {epic.task_counts.total > 0 ? (
-                            <ProgressCounts counts={epic.task_counts} />
-                          ) : null}
-                        </>
-                      }
-                      meta={
-                        epic.task_counts.total > 0
-                          ? t("goal.detail.taskCount", { count: epic.task_counts.total })
-                          : undefined
-                      }
-                    />
-                  ))}
-                </CardGrid>
-              )}
-            </>
-          }
-        />
+                {visible.length === 0 ? (
+                  <p className={styles.noResults}>{t("filter.status.noResults")}</p>
+                ) : (
+                  <CardGrid>
+                    {visible.map((epic) => (
+                      <Card
+                        key={epic.id}
+                        to={`/projects/${projectId}/epics/${epic.id}`}
+                        title={epic.title}
+                        status={epic.status}
+                        tags={
+                          <>
+                            <StatusBadge status={epic.status} />
+                            {epic.task_counts.total > 0 ? (
+                              <ProgressCounts counts={epic.task_counts} />
+                            ) : null}
+                          </>
+                        }
+                        meta={
+                          epic.task_counts.total > 0
+                            ? t("goal.detail.taskCount", { count: epic.task_counts.total })
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </CardGrid>
+                )}
+              </>
+            }
+          />
+        </Suspense>
       )}
     </>
   );

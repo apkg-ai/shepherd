@@ -75,6 +75,10 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
     query: { enabled: expandedGoalId !== null },
   });
   const expandedGraph = expandedGoalGraphQuery.data;
+  const { refetch } = expandedGoalGraphQuery;
+
+  const allEpicNodes = useMemo(() => expandedGraph?.nodes ?? [], [expandedGraph]);
+  const allDependencies = useMemo(() => expandedGraph?.dependencies ?? [], [expandedGraph]);
 
   /* v8 ignore start -- layout and callbacks only exercised with React Flow; covered by E2E */
   const handleToggleGoal = useCallback((goalId: string) => {
@@ -120,6 +124,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
       id: goal.id,
       type: "goalGroup",
       position: { x: 0, y: 0 },
+      ariaLabel: t("graph.group.label", { title: goal.title }),
       data: {
         title: goal.title,
         completed: goal.completed,
@@ -155,21 +160,23 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
     }
 
     return dagLayout;
-  }, [visibleGoals, expandedGoalId, expandedGraph, handleToggleGoal]);
+  }, [visibleGoals, expandedGoalId, expandedGraph, handleToggleGoal, t]);
 
-  // All epic nodes for the side panel and actions
-  const allEpicNodes: GraphNodesItem[] = expandedGraph?.nodes ?? [];
-  const allDependencies = expandedGraph?.dependencies ?? [];
+  // Derived from the actual node list so a collapsed goal or failed refetch
+  // clears the side panel without a state-reset effect.
+  const selection = selectedNodeId
+    ? (allEpicNodes.find((n) => n.id === selectedNodeId)?.id ?? null)
+    : null;
 
   const neighbors = useMemo(() => {
-    if (!selectedNodeId) return new Set<string>();
+    if (!selection) return new Set<string>();
     const ids = new Set<string>();
     for (const dep of allDependencies) {
-      if (dep.prerequisite_id === selectedNodeId) ids.add(dep.dependent_id);
-      if (dep.dependent_id === selectedNodeId) ids.add(dep.prerequisite_id);
+      if (dep.prerequisite_id === selection) ids.add(dep.dependent_id);
+      if (dep.dependent_id === selection) ids.add(dep.prerequisite_id);
     }
     return ids;
-  }, [selectedNodeId, allDependencies]);
+  }, [selection, allDependencies]);
 
   const rfNodes = useMemo(() => {
     const freshData = new Map(allEpicNodes.map((n) => [n.id, n]));
@@ -185,17 +192,15 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
         data: {
           ...data,
           typeIcon: "\u{1F3D7}\u{FE0F}",
-          selected: n.id === selectedNodeId,
-          dimmed: selectedNodeId !== null && n.id !== selectedNodeId && !neighbors.has(n.id),
-          root: false,
-          leaf: false,
+          selected: n.id === selection,
+          dimmed: selection !== null && n.id !== selection && !neighbors.has(n.id),
           expandable: false,
           expanded: false,
           nodeId: n.id,
         },
       };
     });
-  }, [layout.nodes, allEpicNodes, selectedNodeId, neighbors, t]);
+  }, [layout.nodes, allEpicNodes, selection, neighbors, t]);
 
   const rfEdges = layout.edges;
 
@@ -257,7 +262,6 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   const handleFit = useCallback(() => void fitView({ duration: 200 }), [fitView]);
   const handleZoomIn = useCallback(() => void zoomIn({ duration: 200 }), [zoomIn]);
   const handleZoomOut = useCallback(() => void zoomOut({ duration: 200 }), [zoomOut]);
-  const handleResetLayout = useCallback(() => void fitView({ duration: 200 }), [fitView]);
 
   const onEdgeClick = useCallback(
     (_event: React.MouseEvent, edge: { id: string; source: string; target: string }) => {
@@ -275,10 +279,11 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   );
 
   const handleMutationSuccess = useCallback(() => {
-    void expandedGoalGraphQuery.refetch();
-  }, [expandedGoalGraphQuery.refetch]);
+    void refetch();
+  }, [refetch]);
   /* v8 ignore stop */
 
+  // Graph -> list, list -> graph, table -> list (matching the button label in each mode).
   const handleToggleView = useCallback(
     () => setViewMode((v) => (v === "list" ? "graph" : "list")),
     [],
@@ -293,19 +298,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
 
   const handleAddDependency = useCallback(() => setAddDialogOpen(true), []);
 
-  const selectedNode = selectedNodeId
-    ? (allEpicNodes.find((n) => n.id === selectedNodeId) ?? null)
-    : null;
-
-  useEffect(() => {
-    if (
-      selectedNodeId &&
-      allEpicNodes.length > 0 &&
-      !allEpicNodes.some((n) => n.id === selectedNodeId)
-    ) {
-      setSelectedNodeId(null);
-    }
-  }, [selectedNodeId, allEpicNodes]);
+  const selectedNode = selection ? (allEpicNodes.find((n) => n.id === selection) ?? null) : null;
 
   useEffect(() => {
     if (expandedGoalGraphQuery.isError) {
@@ -344,11 +337,10 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   }
 
   const toolbarProps = {
-    hasSelection: selectedNodeId !== null,
+    hasSelection: selection !== null,
     onFit: handleFit,
     onZoomIn: handleZoomIn,
     onZoomOut: handleZoomOut,
-    onResetLayout: handleResetLayout,
     onAddDependency: handleAddDependency,
     viewMode: viewMode as "graph" | "list" | "table",
     onToggleView: handleToggleView,
@@ -382,6 +374,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
               nodes={rfNodes}
               edges={labeledEdges}
               nodeTypes={nodeTypes}
+              aria-label={t("graph.canvas.label")}
               onNodeClick={onNodeClick}
               onNodeDoubleClick={onNodeDoubleClick}
               onPaneClick={onPaneClick}
@@ -412,7 +405,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
           projectId={projectId}
           level="epic"
           nodes={expandedGraph?.nodes ?? []}
-          selectedNodeId={selectedNodeId}
+          selectedNodeId={selection}
           addDialogOpen={addDialogOpen}
           onAddDialogClose={() => setAddDialogOpen(false)}
           removeEdge={removeEdge}

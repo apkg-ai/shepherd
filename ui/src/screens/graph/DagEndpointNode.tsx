@@ -9,7 +9,6 @@ interface DagEndpointData extends Record<string, unknown> {
 
 export type DagEndpointNodeType = Node<DagEndpointData, "dagEndpoint">;
 
-/* v8 ignore start -- rendered inside React Flow; covered by E2E */
 export function DagEndpointNode({ data }: NodeProps<DagEndpointNodeType>) {
   const { t } = useTranslation();
   const isStart = data.label === "start";
@@ -22,4 +21,3 @@ export function DagEndpointNode({ data }: NodeProps<DagEndpointNodeType>) {
     </div>
   );
 }
-/* v8 ignore stop */

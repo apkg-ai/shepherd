@@ -5,7 +5,7 @@ interface GraphToolbarProps {
   onFit: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
-  onResetLayout: () => void;
+  onResetLayout?: () => void;
   onAddDependency: () => void;
   hasSelection: boolean;
   viewMode?: "graph" | "list" | "table";
@@ -43,6 +43,7 @@ export function GraphToolbar({
       {floating && (
         <>
           <button
+            type="button"
             className={styles.iconBtn}
             onClick={onZoomIn}
             aria-label={t("graph.action.zoomIn")}
@@ -51,6 +52,7 @@ export function GraphToolbar({
             ⊕
           </button>
           <button
+            type="button"
             className={styles.iconBtn}
             onClick={onZoomOut}
             aria-label={t("graph.action.zoomOut")}
@@ -59,6 +61,7 @@ export function GraphToolbar({
             ⊖
           </button>
           <button
+            type="button"
             className={styles.iconBtn}
             onClick={onFit}
             aria-label={t("graph.action.fit")}
@@ -66,16 +69,20 @@ export function GraphToolbar({
           >
             ⊡
           </button>
-          <button
-            className={styles.iconBtn}
-            onClick={onResetLayout}
-            aria-label={t("graph.action.resetLayout")}
-            title={t("graph.action.resetLayout")}
-          >
-            ↺
-          </button>
+          {onResetLayout && (
+            <button
+              type="button"
+              className={styles.iconBtn}
+              onClick={onResetLayout}
+              aria-label={t("graph.action.resetLayout")}
+              title={t("graph.action.resetLayout")}
+            >
+              ↺
+            </button>
+          )}
           <div className={styles.separator} />
           <button
+            type="button"
             className={styles.iconBtn}
             onClick={onAddDependency}
             disabled={!hasSelection}
@@ -91,20 +98,20 @@ export function GraphToolbar({
           {floating && <div className={styles.separator} />}
           {onToggleView && (
             <button
+              type="button"
               className={styles.iconBtn}
               onClick={onToggleView}
               aria-label={
-                viewMode === "graph" ? t("graph.action.listView") : t("graph.action.graphView")
+                viewMode === "list" ? t("graph.action.graphView") : t("graph.action.listView")
               }
-              title={
-                viewMode === "graph" ? t("graph.action.listView") : t("graph.action.graphView")
-              }
+              title={viewMode === "list" ? t("graph.action.graphView") : t("graph.action.listView")}
             >
-              {viewMode === "graph" ? "☰" : "⊞"}
+              {viewMode === "list" ? "⊞" : "☰"}
             </button>
           )}
           {onToggleTable && (
             <button
+              type="button"
               className={styles.iconBtn}
               onClick={onToggleTable}
               aria-label={
@@ -119,6 +126,7 @@ export function GraphToolbar({
           )}
           {onToggleHideCompleted && (
             <button
+              type="button"
               className={styles.iconBtn}
               onClick={onToggleHideCompleted}
               aria-label={

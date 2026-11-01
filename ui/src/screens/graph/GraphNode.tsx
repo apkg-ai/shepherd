@@ -14,8 +14,6 @@ export type GraphNodeData = {
   counts: Counts;
   selected: boolean;
   dimmed: boolean;
-  root: boolean;
-  leaf: boolean;
   expandable: boolean;
   expanded: boolean;
   onToggleExpand?: (nodeId: string) => void;

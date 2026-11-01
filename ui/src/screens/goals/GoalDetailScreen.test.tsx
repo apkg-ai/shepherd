@@ -77,7 +77,7 @@ describe("GoalDetailScreen", () => {
     });
 
     await screen.findByRole("heading", { name: "Combat system" });
-    await user.click(screen.getByRole("button", { name: /List view/ }));
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
 
     expect(await screen.findByText("Damage model")).toBeInTheDocument();
     expect(screen.getByText("Targeting")).toBeInTheDocument();

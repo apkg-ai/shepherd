@@ -42,6 +42,49 @@ describe("GraphToolbar", () => {
     expect(screen.getByRole("button", { name: "Add dependency" })).toBeEnabled();
   });
 
+  it("shows the reset button when a reset handler is provided", () => {
+    renderToolbar();
+
+    expect(screen.getByRole("button", { name: "Reset layout" })).toBeInTheDocument();
+  });
+
+  it("hides the reset button when no reset handler is provided", () => {
+    render(
+      <GraphToolbar
+        hasSelection={false}
+        floating
+        onFit={vi.fn()}
+        onZoomIn={vi.fn()}
+        onZoomOut={vi.fn()}
+        onAddDependency={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Reset layout" })).not.toBeInTheDocument();
+  });
+
+  it("labels view toggles by destination in table mode", () => {
+    renderToolbar({
+      viewMode: "table",
+      onToggleView: vi.fn(),
+      onToggleTable: vi.fn(),
+    });
+
+    expect(screen.getByRole("button", { name: "List view" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Graph view" })).toBeInTheDocument();
+  });
+
+  it("labels view toggles by destination in list mode", () => {
+    renderToolbar({
+      viewMode: "list",
+      onToggleView: vi.fn(),
+      onToggleTable: vi.fn(),
+    });
+
+    expect(screen.getByRole("button", { name: "Graph view" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Table view" })).toBeInTheDocument();
+  });
+
   it("fires callbacks", async () => {
     const user = userEvent.setup();
     const props = renderToolbar({ hasSelection: true });

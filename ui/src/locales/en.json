@@ -164,7 +164,6 @@
       "graphView": "Graph view",
       "listView": "List view",
       "tabsView": "Table view",
-      "removeDependency": "Remove dependency",
       "removeDependencyArrow": "is required by",
       "removeDependencyConfirm": "Remove",
       "removeDependencyTitle": "Remove dependency",
@@ -195,15 +194,12 @@
       "label": "Goal: {{title}}"
     },
     "node": {
-      "label": "{{title}} — {{status}}",
-      "leaf": "End",
-      "root": "Start"
+      "label": "{{title}} — {{status}}"
     },
     "panel": {
       "close": "Close panel",
       "label": "Selected item details",
-      "openDetails": "Open details",
-      "phase": "Phase"
+      "openDetails": "Open details"
     },
     "state": {
       "empty": "No items to display",

@@ -16,7 +16,6 @@ interface GoalGroupData extends Record<string, unknown> {
 
 export type GoalGroupNodeType = Node<GoalGroupData, "goalGroup">;
 
-/* v8 ignore start -- rendered inside React Flow; covered by E2E */
 export function GoalGroupNode({ id, data }: NodeProps<GoalGroupNodeType>) {
   const { t } = useTranslation();
   const handleExpandClick = (e: React.MouseEvent) => {
@@ -45,4 +44,3 @@ export function GoalGroupNode({ id, data }: NodeProps<GoalGroupNodeType>) {
     </div>
   );
 }
-/* v8 ignore stop */

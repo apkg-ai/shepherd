@@ -78,6 +78,8 @@ function GraphScreenInner({
     prerequisiteTitle: string;
   } | null>(null);
 
+  const { refetch } = graphQuery;
+
   const isTooLarge =
     graphQuery.isError &&
     isShepherdError(graphQuery.error) &&
@@ -110,17 +112,23 @@ function GraphScreenInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- relayout only on topology change, not status updates
   }, [currentTopology]);
 
+  // Derived from the actual node list so a refetch that drops the selected node
+  // collapses the panel without a state-reset effect.
+  const selection = selectedNodeId
+    ? (nodes.find((n) => n.id === selectedNodeId)?.id ?? null)
+    : null;
+
   const neighbors = useMemo(() => {
-    if (!selectedNodeId) return new Set<string>();
+    if (!selection) return new Set<string>();
     /* v8 ignore start -- selection requires React Flow canvas click; covered by E2E */
     const ids = new Set<string>();
     for (const dep of dependencies) {
-      if (dep.prerequisite_id === selectedNodeId) ids.add(dep.dependent_id);
-      if (dep.dependent_id === selectedNodeId) ids.add(dep.prerequisite_id);
+      if (dep.prerequisite_id === selection) ids.add(dep.dependent_id);
+      if (dep.dependent_id === selection) ids.add(dep.prerequisite_id);
     }
     return ids;
     /* v8 ignore stop */
-  }, [selectedNodeId, dependencies]);
+  }, [selection, dependencies]);
 
   const handleNodeExpand = useCallback(
     (nodeId: string) => void navigate(detailPath(nodeId)),
@@ -141,10 +149,8 @@ function GraphScreenInner({
         data: {
           ...data,
           typeIcon: level === "epic" ? "\u{1F3D7}\u{FE0F}" : "\u{1F4CB}",
-          selected: n.id === selectedNodeId,
-          dimmed: selectedNodeId !== null && n.id !== selectedNodeId && !neighbors.has(n.id),
-          root: false,
-          leaf: false,
+          selected: n.id === selection,
+          dimmed: selection !== null && n.id !== selection && !neighbors.has(n.id),
           expandable: (data as GraphNodesItem).counts?.total > 0,
           expanded: false,
           onToggleExpand: handleNodeExpand,
@@ -152,7 +158,7 @@ function GraphScreenInner({
         },
       };
     }) as GraphNodeType[];
-  }, [layout.nodes, nodes, selectedNodeId, neighbors, t, level, handleNodeExpand]);
+  }, [layout.nodes, nodes, selection, neighbors, t, level, handleNodeExpand]);
 
   const rfEdges = layout.edges;
 
@@ -264,19 +270,11 @@ function GraphScreenInner({
 
   /* v8 ignore start -- mutation callback; covered by E2E */
   const handleMutationSuccess = useCallback(() => {
-    void graphQuery.refetch();
-  }, [graphQuery.refetch]);
+    void refetch();
+  }, [refetch]);
   /* v8 ignore stop */
 
-  const selectedNode = selectedNodeId ? (nodes.find((n) => n.id === selectedNodeId) ?? null) : null;
-
-  /* v8 ignore start -- stale selection guard; covered by E2E */
-  useEffect(() => {
-    if (selectedNodeId && nodes.length > 0 && !nodes.some((n) => n.id === selectedNodeId)) {
-      setSelectedNodeId(null);
-    }
-  }, [selectedNodeId, nodes]);
-  /* v8 ignore stop */
+  const selectedNode = selection ? (nodes.find((n) => n.id === selection) ?? null) : null;
 
   if (graphQuery.isPending && viewMode === "graph") {
     /* v8 ignore next -- loading flash; covered by E2E */
@@ -304,7 +302,7 @@ function GraphScreenInner({
   }
 
   const toolbarProps = {
-    hasSelection: selectedNodeId !== null,
+    hasSelection: selection !== null,
     onFit: handleFit,
     onZoomIn: handleZoomIn,
     onZoomOut: handleZoomOut,
@@ -334,6 +332,7 @@ function GraphScreenInner({
               nodes={rfNodes}
               edges={labeledEdges}
               nodeTypes={nodeTypes}
+              aria-label={t("graph.canvas.label")}
               onNodeClick={onNodeClick}
               onNodeDoubleClick={onNodeDoubleClick}
               onPaneClick={onPaneClick}
@@ -363,7 +362,7 @@ function GraphScreenInner({
         projectId={projectId}
         level={level}
         nodes={nodes}
-        selectedNodeId={selectedNodeId}
+        selectedNodeId={selection}
         addDialogOpen={addDialogOpen}
         /* v8 ignore start -- dialog callbacks; covered by E2E */
         onAddDialogClose={() => setAddDialogOpen(false)}

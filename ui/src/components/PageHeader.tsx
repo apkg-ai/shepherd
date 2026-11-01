@@ -10,11 +10,14 @@ interface PageHeaderProps {
   children?: ReactNode;
 }
 
-export function PageHeader({ title, actions, children }: PageHeaderProps) {
+export function PageHeader({ title, description, actions, children }: PageHeaderProps) {
   return (
     <header className={styles.header}>
       <div className={styles.titleRow}>
-        <h2 className={styles.title}>{title}</h2>
+        <div>
+          <h2 className={styles.title}>{title}</h2>
+          {description ? <p className={styles.description}>{description}</p> : null}
+        </div>
         {actions ? <div className={styles.actions}>{actions}</div> : null}
       </div>
       {children}

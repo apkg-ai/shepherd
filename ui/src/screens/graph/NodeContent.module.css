@@ -19,10 +19,6 @@
     var(--shadow-1);
 }
 
-.node[data-dimmed="true"] {
-  opacity: 0.4;
-}
-
 .node[data-expanded="true"] {
   border-color: var(--color-accent);
   background: var(--color-accent-subtle);
@@ -51,6 +47,11 @@
   opacity: 0.55;
   background: var(--color-danger-soft);
   text-decoration: line-through;
+}
+
+/* After the status rules: dimming must win over the done/cancelled opacity. */
+.node[data-dimmed="true"] {
+  opacity: 0.4;
 }
 
 .content {

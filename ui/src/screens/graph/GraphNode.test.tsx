@@ -22,8 +22,6 @@ function nodeProps(overrides?: Partial<GraphNodeData>): NodeProps<GraphNodeType>
       ...node,
       selected: overrides?.selected ?? false,
       dimmed: overrides?.dimmed ?? false,
-      root: overrides?.root ?? false,
-      leaf: overrides?.leaf ?? false,
       expandable: overrides?.expandable ?? false,
       expanded: overrides?.expanded ?? false,
       nodeId: node.id,

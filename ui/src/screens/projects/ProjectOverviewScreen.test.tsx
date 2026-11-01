@@ -46,11 +46,40 @@ describe("ProjectOverviewScreen", () => {
       handlers: [...baseHandlers, goalListHandler(goals), goalGraphHandler()],
     });
 
-    await screen.findByRole("heading", { name: /Space Game/ });
-    await user.click(screen.getByRole("button", { name: /Table view/ }));
+    await user.click(await screen.findByRole("button", { name: /Table view/ }));
 
     expect(await screen.findByText(/Combat system/)).toBeInTheDocument();
     expect(screen.getByText(/Economy/)).toBeInTheDocument();
+  });
+
+  it("navigates between graph, table, and list views", async () => {
+    const user = userEvent.setup();
+    const goals = [
+      makeGoal({
+        id: "g1",
+        project_id: "p1",
+        title: "Combat system",
+        epic_counts: { total: 3, done: 1, cancelled: 0, waived: 0 },
+      }),
+    ];
+    renderRoute("/projects/p1", {
+      handlers: [...baseHandlers, goalListHandler(goals), goalGraphHandler()],
+    });
+
+    // Graph is the default view; the table toggle is labeled by its destination.
+    await user.click(await screen.findByRole("button", { name: "Table view" }));
+
+    expect(await screen.findByRole("button", { name: "List view" })).toBeInTheDocument();
+    expect(await screen.findByText(/Combat system/)).toBeInTheDocument();
+
+    // From table mode, "List view" must go to the list — not back to the graph.
+    await user.click(screen.getByRole("button", { name: "List view" }));
+    expect(await screen.findByRole("button", { name: "Table view" })).toBeInTheDocument();
+    expect(screen.getByText("Combat system")).toBeInTheDocument();
+    expect(screen.queryByTestId("graph-canvas")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Graph view" }));
+    expect(await screen.findByTestId("graph-canvas")).toBeInTheDocument();
   });
 
   it("shows empty state with CTA when no goals", async () => {
@@ -69,8 +98,7 @@ describe("ProjectOverviewScreen", () => {
       handlers: [...baseHandlers, goalListHandler([goal]), goalGraphHandler()],
     });
 
-    await screen.findByRole("heading", { name: /Space Game/ });
-    await user.click(screen.getByRole("button", { name: /Table view/ }));
+    await user.click(await screen.findByRole("button", { name: /Table view/ }));
 
     const link = await screen.findByRole("link", { name: /Combat/ });
     expect(link).toHaveAttribute("href", "/projects/p1/goals/g1");

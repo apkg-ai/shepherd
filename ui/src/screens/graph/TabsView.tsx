@@ -55,6 +55,7 @@ function GoalRow({
         data-status={goal.completed ? "done" : "open"}
       >
         <button
+          type="button"
           className={styles.toggle}
           onClick={() => setExpanded(!expanded)}
           aria-expanded={expanded}
@@ -69,7 +70,7 @@ function GoalRow({
         </span>
         <span className={styles.meta}>
           {goal.completed && <StatusBadge status="done" />}
-          <ProgressCounts counts={goal.epic_counts} />
+          {goal.epic_counts.total > 0 && <ProgressCounts counts={goal.epic_counts} />}
         </span>
       </div>
       {expanded && (
@@ -132,6 +133,7 @@ function EpicRow({
         data-status={epic.status}
       >
         <button
+          type="button"
           className={styles.toggle}
           onClick={() => setExpanded(!expanded)}
           aria-expanded={expanded}
@@ -146,7 +148,7 @@ function EpicRow({
         </span>
         <span className={styles.meta}>
           <StatusBadge status={epic.status} />
-          <ProgressCounts counts={epic.task_counts} />
+          {epic.task_counts.total > 0 && <ProgressCounts counts={epic.task_counts} />}
         </span>
       </div>
       {expanded && (
