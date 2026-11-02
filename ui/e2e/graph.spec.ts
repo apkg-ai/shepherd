@@ -166,6 +166,31 @@ test.describe("dependency graph", () => {
     expect(consoleErrors).toEqual([]);
   });
 
+  test("keyboard node selection opens the side panel", async ({ page }) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error" && !msg.text().includes("Content Security Policy"))
+        consoleErrors.push(msg.text());
+    });
+
+    await login(page);
+    await page.goto(`/#/projects/${projectId}/goals/${goalId}`);
+
+    // Focus the node and select with Enter — React Flow fires the selection
+    // change (not onNodeClick) for keyboard selection.
+    const node = page.locator(`.react-flow__node[data-id="${epicIds[0]}"]`);
+    await expect(node).toBeVisible();
+    await node.focus();
+    await page.keyboard.press("Enter");
+
+    const panel = page.getByRole("complementary", { name: "Selected item details" });
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText("Epic Alpha")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add dependency" })).toBeEnabled();
+
+    expect(consoleErrors).toEqual([]);
+  });
+
   test("keyboard navigation: Enter on list view toggle works", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {

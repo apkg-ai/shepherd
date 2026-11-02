@@ -54,6 +54,7 @@ export function NodeContent({
           type="button"
           className={styles.expandToggle}
           onClick={onExpandClick}
+          onDoubleClick={(e) => e.stopPropagation()}
           aria-label={
             expandAriaLabel ??
             (expanded ? t("graph.action.collapseTasks") : t("graph.action.expandTasks"))

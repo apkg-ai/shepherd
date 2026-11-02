@@ -66,4 +66,17 @@ describe("NodeContent", () => {
     );
     expect(screen.getByRole("button", { name: "Show epics" })).toBeInTheDocument();
   });
+
+  it("does not let double-clicks on the expand toggle bubble to the node", async () => {
+    const user = userEvent.setup();
+    const onNodeDoubleClick = vi.fn();
+    render(
+      <div onDoubleClick={onNodeDoubleClick}>
+        <NodeContent {...baseProps} expandable onExpandClick={vi.fn()} />
+      </div>,
+    );
+
+    await user.dblClick(screen.getByRole("button", { name: "Show tasks" }));
+    expect(onNodeDoubleClick).not.toHaveBeenCalled();
+  });
 });

@@ -7,6 +7,7 @@ import {
   MarkerType,
   useReactFlow,
   type OnMoveEnd,
+  type OnSelectionChangeParams,
   type Viewport,
   type Node,
   type Edge,
@@ -197,14 +198,32 @@ function GraphScreenInner({
   /* v8 ignore stop */
 
   /* v8 ignore start -- React Flow canvas callbacks; covered by E2E */
-  const onNodeClick = useCallback(
-    (_event: React.MouseEvent, node: { id: string; type?: string }) => {
-      if (node.id === DAG_START_ID || node.id === DAG_END_ID) return;
-      openerRef.current = document.activeElement as HTMLElement | null;
-      setSelectedNodeId(node.id);
-      setTimeout(() => sidePanelRef.current?.focus(), 0);
+  // React Flow does not fire onNodeClick/onEdgeClick for keyboard selection
+  // (Enter/Space on a focused node or edge), so both paths share this handler.
+  const onSelectionChange = useCallback(
+    ({ nodes: selected, edges: selectedEdges }: OnSelectionChangeParams) => {
+      const picked = selected.find((n) => n.type !== "dagEndpoint")?.id;
+      if (picked) {
+        if (selectedNodeId === null) {
+          openerRef.current = document.activeElement as HTMLElement | null;
+        }
+        setSelectedNodeId(picked);
+        setTimeout(() => sidePanelRef.current?.focus(), 0);
+        return;
+      }
+      const edge = selectedEdges.find((e) => !e.id.startsWith("__"));
+      if (edge && removeEdge?.dependencyId !== edge.id) {
+        const prereq = nodes.find((n) => n.id === edge.source);
+        const dep = nodes.find((n) => n.id === edge.target);
+        if (!prereq || !dep) return;
+        setRemoveEdge({
+          dependencyId: edge.id,
+          prerequisiteTitle: prereq.title,
+          dependentTitle: dep.title,
+        });
+      }
     },
-    [],
+    [selectedNodeId, removeEdge, nodes],
   );
 
   const onNodeDoubleClick = useCallback(
@@ -333,7 +352,7 @@ function GraphScreenInner({
               edges={labeledEdges}
               nodeTypes={nodeTypes}
               aria-label={t("graph.canvas.label")}
-              onNodeClick={onNodeClick}
+              onSelectionChange={onSelectionChange}
               onNodeDoubleClick={onNodeDoubleClick}
               onPaneClick={onPaneClick}
               onEdgeClick={onEdgeClick}

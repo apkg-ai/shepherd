@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ReactFlow, ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { Node, Edge } from "@xyflow/react";
+import type { Node, Edge, OnSelectionChangeParams } from "@xyflow/react";
 import { useListGoals, useGetGoalGraph } from "../../api/generated/goals/goals";
 import type { GraphNodesItem } from "../../api/generated/model/graphNodesItem";
 import {
@@ -230,14 +230,32 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   }, [rfEdges, visibleGoals, allEpicNodes, t]);
 
   /* v8 ignore start -- React Flow canvas callbacks; covered by E2E */
-  const onNodeClick = useCallback(
-    (_event: React.MouseEvent, node: { id: string; type?: string }) => {
-      if (node.type === "goalGroup" || node.id === DAG_START_ID || node.id === DAG_END_ID) return;
-      openerRef.current = document.activeElement as HTMLElement | null;
-      setSelectedNodeId(node.id);
-      setTimeout(() => sidePanelRef.current?.focus(), 0);
+  // React Flow does not fire onNodeClick/onEdgeClick for keyboard selection
+  // (Enter/Space on a focused node or edge), so both paths share this handler.
+  const onSelectionChange = useCallback(
+    ({ nodes: selected, edges: selectedEdges }: OnSelectionChangeParams) => {
+      const picked = selected.find((n) => n.type !== "goalGroup" && n.type !== "dagEndpoint")?.id;
+      if (picked) {
+        if (selectedNodeId === null) {
+          openerRef.current = document.activeElement as HTMLElement | null;
+        }
+        setSelectedNodeId(picked);
+        setTimeout(() => sidePanelRef.current?.focus(), 0);
+        return;
+      }
+      const edge = selectedEdges.find((e) => !e.id.startsWith("__"));
+      if (edge && removeEdge?.dependencyId !== edge.id) {
+        const prereq = allEpicNodes.find((n) => n.id === edge.source);
+        const dep = allEpicNodes.find((n) => n.id === edge.target);
+        if (!prereq || !dep) return;
+        setRemoveEdge({
+          dependencyId: edge.id,
+          prerequisiteTitle: prereq.title,
+          dependentTitle: dep.title,
+        });
+      }
     },
-    [],
+    [selectedNodeId, removeEdge, allEpicNodes],
   );
 
   const onNodeDoubleClick = useCallback(
@@ -375,7 +393,7 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
               edges={labeledEdges}
               nodeTypes={nodeTypes}
               aria-label={t("graph.canvas.label")}
-              onNodeClick={onNodeClick}
+              onSelectionChange={onSelectionChange}
               onNodeDoubleClick={onNodeDoubleClick}
               onPaneClick={onPaneClick}
               onEdgeClick={onEdgeClick}
