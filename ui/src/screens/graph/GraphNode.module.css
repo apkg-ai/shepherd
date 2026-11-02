@@ -1,0 +1,9 @@
+.wrapper {
+  width: 280px;
+}
+
+.handle {
+  opacity: 0;
+  width: 8px;
+  height: 8px;
+}

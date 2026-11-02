@@ -9,6 +9,9 @@ import type { Goal } from "../api/generated/model/goal";
 import type { Epic } from "../api/generated/model/epic";
 import type { Task } from "../api/generated/model/task";
 import type { TaskType } from "../api/generated/model/taskType";
+import type { Graph } from "../api/generated/model/graph";
+import type { Dependency } from "../api/generated/model/dependency";
+import { makeDependency, makeGraph } from "./fixtures";
 
 export const server = setupServer(...getSystemMock());
 
@@ -73,5 +76,30 @@ export function taskHandler(task: Task) {
 export function taskTypeListHandler(taskTypes: TaskType[]) {
   return http.get("/api/v1/projects/:projectId/task-types", () =>
     HttpResponse.json(makePage(taskTypes)),
+  );
+}
+
+export function goalGraphHandler(graph?: Graph) {
+  return http.get("*/api/v1/projects/:projectId/goals/:goalId/graph", () =>
+    HttpResponse.json(graph ?? makeGraph()),
+  );
+}
+
+export function epicGraphHandler(graph?: Graph) {
+  return http.get("*/api/v1/projects/:projectId/epics/:epicId/graph", () =>
+    HttpResponse.json(graph ?? makeGraph({ level: "task" })),
+  );
+}
+
+export function createDependencyHandler(dep?: Dependency) {
+  return http.post("*/api/v1/projects/:projectId/dependencies", () =>
+    HttpResponse.json(dep ?? makeDependency(), { status: 201 }),
+  );
+}
+
+export function deleteDependencyHandler() {
+  return http.delete(
+    "*/api/v1/projects/:projectId/dependencies/:dependencyId",
+    () => new HttpResponse(null, { status: 204 }),
   );
 }

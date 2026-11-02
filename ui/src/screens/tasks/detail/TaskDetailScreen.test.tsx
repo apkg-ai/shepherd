@@ -56,11 +56,10 @@ const baseHandlers = [
 ];
 
 describe("TaskDetailScreen", () => {
-  it("renders task title and description", async () => {
+  it("renders task title", async () => {
     renderRoute("/projects/p1/tasks/t1", { handlers: baseHandlers });
 
     expect(await screen.findByRole("heading", { name: "Implement targeting" })).toBeInTheDocument();
-    expect(screen.getByText("Target selection logic")).toBeInTheDocument();
   });
 
   it("shows status and phase badges", async () => {

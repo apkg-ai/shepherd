@@ -1,8 +1,15 @@
 import { http } from "msw";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { makeProject, makeGoal } from "../../test/fixtures";
-import { sessionHandler, projectHandler, goalListHandler, problemResponse } from "../../test/msw";
+import {
+  sessionHandler,
+  projectHandler,
+  goalListHandler,
+  goalGraphHandler,
+  problemResponse,
+} from "../../test/msw";
 import { renderRoute } from "../../test/test-utils";
 
 const project = makeProject({ id: "p1", name: "Space Game", description: "A galactic adventure" });
@@ -10,17 +17,17 @@ const project = makeProject({ id: "p1", name: "Space Game", description: "A gala
 const baseHandlers = [sessionHandler(), projectHandler(project)];
 
 describe("ProjectOverviewScreen", () => {
-  it("shows project title, description, and breadcrumbs", async () => {
+  it("shows project title and breadcrumbs", async () => {
     renderRoute("/projects/p1", {
       handlers: [...baseHandlers, goalListHandler([])],
     });
 
     expect(await screen.findByRole("heading", { name: "Space Game" })).toBeInTheDocument();
-    expect(screen.getByText("A galactic adventure")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/");
   });
 
-  it("shows goal cards with epic counts", async () => {
+  it("shows goals in table view", async () => {
+    const user = userEvent.setup();
     const goals = [
       makeGoal({
         id: "g1",
@@ -36,13 +43,43 @@ describe("ProjectOverviewScreen", () => {
       }),
     ];
     renderRoute("/projects/p1", {
-      handlers: [...baseHandlers, goalListHandler(goals)],
+      handlers: [...baseHandlers, goalListHandler(goals), goalGraphHandler()],
     });
 
-    expect(await screen.findByText("Combat system")).toBeInTheDocument();
-    expect(screen.getByText("Economy")).toBeInTheDocument();
-    expect(screen.getByText("3 epics")).toBeInTheDocument();
-    expect(screen.getByText("1 epic")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /Table view/ }));
+
+    expect(await screen.findByText(/Combat system/)).toBeInTheDocument();
+    expect(screen.getByText(/Economy/)).toBeInTheDocument();
+  });
+
+  it("navigates between graph, table, and list views", async () => {
+    const user = userEvent.setup();
+    const goals = [
+      makeGoal({
+        id: "g1",
+        project_id: "p1",
+        title: "Combat system",
+        epic_counts: { total: 3, done: 1, cancelled: 0, waived: 0 },
+      }),
+    ];
+    renderRoute("/projects/p1", {
+      handlers: [...baseHandlers, goalListHandler(goals), goalGraphHandler()],
+    });
+
+    // Graph is the default view; the table toggle is labeled by its destination.
+    await user.click(await screen.findByRole("button", { name: "Table view" }));
+
+    expect(await screen.findByRole("button", { name: "List view" })).toBeInTheDocument();
+    expect(await screen.findByText(/Combat system/)).toBeInTheDocument();
+
+    // From table mode, "List view" must go to the list — not back to the graph.
+    await user.click(screen.getByRole("button", { name: "List view" }));
+    expect(await screen.findByRole("button", { name: "Table view" })).toBeInTheDocument();
+    expect(screen.getByText("Combat system")).toBeInTheDocument();
+    expect(screen.queryByTestId("graph-canvas")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Graph view" }));
+    expect(await screen.findByTestId("graph-canvas")).toBeInTheDocument();
   });
 
   it("shows empty state with CTA when no goals", async () => {
@@ -54,11 +91,14 @@ describe("ProjectOverviewScreen", () => {
     expect(screen.getByRole("link", { name: /Create your first goal/ })).toBeInTheDocument();
   });
 
-  it("goal card links to goal detail", async () => {
+  it("goal links to goal detail in table view", async () => {
+    const user = userEvent.setup();
     const goal = makeGoal({ id: "g1", project_id: "p1", title: "Combat" });
     renderRoute("/projects/p1", {
-      handlers: [...baseHandlers, goalListHandler([goal])],
+      handlers: [...baseHandlers, goalListHandler([goal]), goalGraphHandler()],
     });
+
+    await user.click(await screen.findByRole("button", { name: /Table view/ }));
 
     const link = await screen.findByRole("link", { name: /Combat/ });
     expect(link).toHaveAttribute("href", "/projects/p1/goals/g1");

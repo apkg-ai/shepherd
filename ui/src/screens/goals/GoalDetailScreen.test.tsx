@@ -6,8 +6,10 @@ import {
   projectHandler,
   goalHandler,
   epicListHandler,
+  goalGraphHandler,
   problemResponse,
 } from "../../test/msw";
+import userEvent from "@testing-library/user-event";
 import { makeProject, makeGoal, makeEpic } from "../../test/fixtures";
 import { renderRoute } from "../../test/test-utils";
 
@@ -19,7 +21,12 @@ const goal = makeGoal({
   epic_counts: { total: 2, done: 1, cancelled: 0, waived: 0 },
 });
 
-const baseHandlers = [sessionHandler(), projectHandler(project), goalHandler(goal)];
+const baseHandlers = [
+  sessionHandler(),
+  projectHandler(project),
+  goalHandler(goal),
+  goalGraphHandler(),
+];
 
 describe("GoalDetailScreen", () => {
   it("shows goal title, breadcrumbs, and epic count", async () => {
@@ -45,7 +52,8 @@ describe("GoalDetailScreen", () => {
     expect(screen.getByText("Epics will appear here once created.")).toBeInTheDocument();
   });
 
-  it("shows epic cards with status and task count", async () => {
+  it("shows epic cards with status and task count in list view", async () => {
+    const user = userEvent.setup();
     const epics = [
       makeEpic({
         id: "e1",
@@ -68,20 +76,25 @@ describe("GoalDetailScreen", () => {
       handlers: [...baseHandlers, epicListHandler(epics)],
     });
 
+    await screen.findByRole("heading", { name: "Combat system" });
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
+
     expect(await screen.findByText("Damage model")).toBeInTheDocument();
     expect(screen.getByText("Targeting")).toBeInTheDocument();
-    // StatusBadge renders "Active" and StatusFilter has an "Active" button — check via role
     expect(screen.getByRole("link", { name: /Damage model/ })).toBeInTheDocument();
     expect(screen.getByText("3 tasks")).toBeInTheDocument();
   });
 
-  it("has an edit link to the goal edit page", async () => {
+  it("has edit and new epic links in the page header", async () => {
     renderRoute("/projects/p1/goals/g1", {
       handlers: [...baseHandlers, epicListHandler([])],
     });
 
     const editButton = await screen.findByRole("link", { name: /edit/i });
     expect(editButton).toHaveAttribute("href", "/projects/p1/goals/g1/edit");
+
+    const newEpicButton = screen.getByRole("link", { name: /New epic/i });
+    expect(newEpicButton).toHaveAttribute("href", "/projects/p1/goals/g1/epics/new");
   });
 
   it("shows error state when project fetch fails", async () => {
@@ -123,6 +136,7 @@ describe("GoalDetailScreen", () => {
           problemResponse(500, "internal-error", { title: "Server Error" }),
         ),
         epicListHandler([]),
+        goalGraphHandler(),
       ],
     });
 

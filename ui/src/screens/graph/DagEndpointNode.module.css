@@ -1,0 +1,33 @@
+.endpoint {
+  width: 120px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--color-border-strong);
+  border-radius: 50%;
+  background: var(--color-warning-subtle);
+}
+
+.endpoint[data-kind="start"] {
+  border-color: var(--color-success);
+  background: var(--color-success-subtle);
+}
+
+.endpoint[data-kind="end"] {
+  border-color: var(--color-text-faint);
+  background: var(--color-surface);
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  text-transform: lowercase;
+}
+
+.handle {
+  opacity: 0;
+  width: 8px;
+  height: 8px;
+}

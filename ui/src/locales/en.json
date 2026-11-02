@@ -153,6 +153,73 @@
       "updateSubmit": "Save changes"
     }
   },
+  "graph": {
+    "action": {
+      "addDependency": "Add dependency",
+      "addDependencyDependent": "Depends on completing:",
+      "addDependencyPrompt": "This item requires:",
+      "addDependencySubmit": "Add",
+      "addDependencyTitle": "Add dependency",
+      "fit": "Fit to view",
+      "graphView": "Graph view",
+      "listView": "List view",
+      "tabsView": "Table view",
+      "removeDependencyArrow": "is required by",
+      "removeDependencyConfirm": "Remove",
+      "removeDependencyTitle": "Remove dependency",
+      "removeDependencyWarning": "Removing this dependency may unblock work that was waiting on it.",
+      "resetLayout": "Reset layout",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "expandTasks": "Show tasks",
+      "collapseTasks": "Hide tasks",
+      "expandEpics": "Show epics",
+      "collapseEpics": "Hide epics",
+      "hideCompleted": "Hide completed",
+      "showCompleted": "Show completed"
+    },
+    "canvas": {
+      "label": "Dependency graph"
+    },
+    "edge": {
+      "startTo": "Start to {{title}}",
+      "toEnd": "{{title}} to end",
+      "link": "{{source}} to {{target}}"
+    },
+    "endpoint": {
+      "end": "end",
+      "start": "start"
+    },
+    "group": {
+      "label": "Goal: {{title}}"
+    },
+    "node": {
+      "label": "{{title}} — {{status}}"
+    },
+    "panel": {
+      "close": "Close panel",
+      "label": "Selected item details",
+      "openDetails": "Open details"
+    },
+    "state": {
+      "empty": "No items to display",
+      "tooLarge": "This graph is too large to display. Use the list view instead."
+    },
+    "toolbar": {
+      "label": "Graph controls"
+    }
+  },
+  "tabs": {
+    "view": {
+      "label": "Table view",
+      "expandGoal": "Expand goal",
+      "collapseGoal": "Collapse goal",
+      "expandEpic": "Expand epic",
+      "collapseEpic": "Collapse epic",
+      "loading": "Loading…",
+      "error": "Failed to load data."
+    }
+  },
   "not-found": {
     "screen": {
       "title": "Page not found"
@@ -191,7 +258,11 @@
       "planningRequiredYes": "Yes",
       "blocked": "Blocked",
       "blockReason": "Reason: {{reason}}",
+      "cancelReason": "Reason: {{reason}}",
+      "cancelled": "Cancelled",
+      "createdAt": "Created",
       "type": "Type",
+      "updatedAt": "Updated",
       "waived": "Waived",
       "waiveReason": "Reason: {{reason}}",
       "workReview": "Work review"

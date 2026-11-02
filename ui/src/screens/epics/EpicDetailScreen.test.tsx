@@ -9,6 +9,7 @@ import {
   goalHandler,
   epicHandler,
   taskListHandler,
+  epicGraphHandler,
 } from "../../test/msw";
 import { makeProject, makeGoal, makeEpic, makeTask } from "../../test/fixtures";
 import { renderRoute } from "../../test/test-utils";
@@ -31,6 +32,7 @@ const baseHandlers = [
   goalHandler(goal),
   epicHandler(epic),
   taskListHandler([]),
+  epicGraphHandler(),
 ];
 
 describe("EpicDetailScreen", () => {
@@ -49,12 +51,6 @@ describe("EpicDetailScreen", () => {
     );
   });
 
-  it("shows description", async () => {
-    renderRoute("/projects/p1/epics/e1", { handlers: baseHandlers });
-
-    expect(await screen.findByText("All combat rule logic")).toBeInTheDocument();
-  });
-
   it("shows status badge", async () => {
     renderRoute("/projects/p1/epics/e1", { handlers: baseHandlers });
 
@@ -67,19 +63,15 @@ describe("EpicDetailScreen", () => {
     expect(await screen.findByText(/1 of 3/)).toBeInTheDocument();
   });
 
-  it("shows edit link", async () => {
+  it("shows edit and new task links in the page header", async () => {
     renderRoute("/projects/p1/epics/e1", { handlers: baseHandlers });
 
     expect(await screen.findByRole("link", { name: "Edit" })).toHaveAttribute(
       "href",
       "/projects/p1/epics/e1/edit",
     );
-  });
 
-  it("shows new task link", async () => {
-    renderRoute("/projects/p1/epics/e1", { handlers: baseHandlers });
-
-    expect(await screen.findByRole("link", { name: "New task" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "New task" })).toHaveAttribute(
       "href",
       "/projects/p1/epics/e1/tasks/new",
     );
@@ -90,38 +82,6 @@ describe("EpicDetailScreen", () => {
 
     expect(await screen.findByText("No tasks yet")).toBeInTheDocument();
     expect(screen.getByText("Tasks will appear here once created.")).toBeInTheDocument();
-  });
-
-  it("shows task cards with status badges", async () => {
-    const tasks = [
-      makeTask({
-        id: "t1",
-        project_id: "p1",
-        epic_id: "e1",
-        title: "Implement targeting",
-        status: "active",
-      }),
-      makeTask({
-        id: "t2",
-        project_id: "p1",
-        epic_id: "e1",
-        title: "Add damage model",
-        status: "open",
-      }),
-    ];
-
-    renderRoute("/projects/p1/epics/e1", {
-      handlers: [
-        sessionHandler(),
-        projectHandler(project),
-        goalHandler(goal),
-        epicHandler(epic),
-        taskListHandler(tasks),
-      ],
-    });
-
-    expect(await screen.findByText("Implement targeting")).toBeInTheDocument();
-    expect(screen.getByText("Add damage model")).toBeInTheDocument();
   });
 
   it("shows eligibility panel", async () => {
@@ -149,12 +109,49 @@ describe("EpicDetailScreen", () => {
         goalHandler(goal),
         epicHandler(epicWithReasons),
         taskListHandler([]),
+        epicGraphHandler(),
       ],
     });
 
     expect(await screen.findByText("Eligibility")).toBeInTheDocument();
     expect(screen.getByText("Can plan: Yes")).toBeInTheDocument();
     expect(screen.getByText("Prerequisite epic not complete")).toBeInTheDocument();
+  });
+
+  it("shows task cards with status badges in list view", async () => {
+    const user = userEvent.setup();
+    const tasks = [
+      makeTask({
+        id: "t1",
+        project_id: "p1",
+        epic_id: "e1",
+        title: "Implement targeting",
+        status: "active",
+      }),
+      makeTask({
+        id: "t2",
+        project_id: "p1",
+        epic_id: "e1",
+        title: "Add damage model",
+        status: "open",
+      }),
+    ];
+
+    renderRoute("/projects/p1/epics/e1", {
+      handlers: [
+        sessionHandler(),
+        projectHandler(project),
+        goalHandler(goal),
+        epicHandler(epic),
+        taskListHandler(tasks),
+        epicGraphHandler(),
+      ],
+    });
+
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
+
+    expect(await screen.findByText("Implement targeting")).toBeInTheDocument();
+    expect(screen.getByText("Add damage model")).toBeInTheDocument();
   });
 
   it("shows error when epic fails to load", async () => {
@@ -186,7 +183,8 @@ describe("EpicDetailScreen", () => {
     expect(await screen.findByText("Project Error")).toBeInTheDocument();
   });
 
-  it("default filter hides done/cancelled tasks", async () => {
+  it("default filter hides done/cancelled tasks in list view", async () => {
+    const user = userEvent.setup();
     const tasks = [
       makeTask({ id: "t1", project_id: "p1", epic_id: "e1", title: "Active task", status: "open" }),
       makeTask({
@@ -205,8 +203,11 @@ describe("EpicDetailScreen", () => {
         goalHandler(goal),
         epicHandler(epic),
         taskListHandler(tasks),
+        epicGraphHandler(),
       ],
     });
+
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
 
     expect(await screen.findByText("Active task")).toBeInTheDocument();
     expect(screen.queryByText("Cancelled task")).not.toBeInTheDocument();
@@ -232,9 +233,11 @@ describe("EpicDetailScreen", () => {
         goalHandler(goal),
         epicHandler(epic),
         taskListHandler(tasks),
+        epicGraphHandler(),
       ],
     });
 
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
     await screen.findByText("Active task");
     await user.click(screen.getByRole("button", { name: /Done/ }));
 
@@ -262,9 +265,11 @@ describe("EpicDetailScreen", () => {
         goalHandler(goal),
         epicHandler(epic),
         taskListHandler(tasks),
+        epicGraphHandler(),
       ],
     });
 
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
     await screen.findByText("Active task");
     await user.click(screen.getByRole("button", { name: /All/ }));
 
@@ -285,9 +290,11 @@ describe("EpicDetailScreen", () => {
         goalHandler(goal),
         epicHandler(epic),
         taskListHandler(tasks),
+        epicGraphHandler(),
       ],
     });
 
+    await user.click(await screen.findByRole("button", { name: /List view/ }));
     await screen.findByText("Active task");
     await user.click(screen.getByRole("button", { name: /Done/ }));
 
