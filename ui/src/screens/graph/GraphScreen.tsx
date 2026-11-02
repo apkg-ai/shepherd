@@ -7,10 +7,13 @@ import {
   MarkerType,
   useReactFlow,
   type OnMoveEnd,
-  type OnSelectionChangeParams,
   type Viewport,
   type Node,
   type Edge,
+  type NodeChange,
+  type NodeSelectionChange,
+  type EdgeChange,
+  type EdgeSelectionChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { UseQueryResult } from "@tanstack/react-query";
@@ -198,32 +201,44 @@ function GraphScreenInner({
   /* v8 ignore stop */
 
   /* v8 ignore start -- React Flow canvas callbacks; covered by E2E */
-  // React Flow does not fire onNodeClick/onEdgeClick for keyboard selection
-  // (Enter/Space on a focused node or edge), so both paths share this handler.
-  const onSelectionChange = useCallback(
-    ({ nodes: selected, edges: selectedEdges }: OnSelectionChangeParams) => {
-      const picked = selected.find((n) => n.type !== "dagEndpoint")?.id;
-      if (picked) {
-        if (selectedNodeId === null) {
-          openerRef.current = document.activeElement as HTMLElement | null;
-        }
-        setSelectedNodeId(picked);
-        setTimeout(() => sidePanelRef.current?.focus(), 0);
-        return;
+  // React Flow routes both pointer clicks and Enter/Space selection through
+  // the same select changes; nodes are fully controlled, so selection is
+  // tracked here rather than in React Flow's store.
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      const picked = changes.find(
+        (c): c is NodeSelectionChange => c.type === "select" && c.selected,
+      );
+      if (!picked) return;
+      if (layout.nodes.find((n) => n.id === picked.id)?.type === "dagEndpoint") return;
+      if (selectedNodeId === null) {
+        openerRef.current = document.activeElement as HTMLElement | null;
       }
-      const edge = selectedEdges.find((e) => !e.id.startsWith("__"));
-      if (edge && removeEdge?.dependencyId !== edge.id) {
-        const prereq = nodes.find((n) => n.id === edge.source);
-        const dep = nodes.find((n) => n.id === edge.target);
-        if (!prereq || !dep) return;
-        setRemoveEdge({
-          dependencyId: edge.id,
-          prerequisiteTitle: prereq.title,
-          dependentTitle: dep.title,
-        });
-      }
+      setSelectedNodeId(picked.id);
+      setTimeout(() => sidePanelRef.current?.focus(), 0);
     },
-    [selectedNodeId, removeEdge, nodes],
+    [selectedNodeId, layout.nodes],
+  );
+
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      const picked = changes.find(
+        (c): c is EdgeSelectionChange =>
+          c.type === "select" && c.selected && !c.id.startsWith("__"),
+      );
+      if (!picked) return;
+      const edge = rfEdges.find((e) => e.id === picked.id);
+      if (!edge) return;
+      const prereq = nodes.find((n) => n.id === edge.source);
+      const dep = nodes.find((n) => n.id === edge.target);
+      if (!prereq || !dep) return;
+      setRemoveEdge({
+        dependencyId: picked.id,
+        prerequisiteTitle: prereq.title,
+        dependentTitle: dep.title,
+      });
+    },
+    [rfEdges, nodes],
   );
 
   const onNodeDoubleClick = useCallback(
@@ -269,23 +284,6 @@ function GraphScreenInner({
   );
 
   const handleAddDependency = useCallback(() => setAddDialogOpen(true), []);
-
-  /* v8 ignore start -- fires from React Flow canvas; covered by E2E */
-  const onEdgeClick = useCallback(
-    (_event: React.MouseEvent, edge: { id: string; source: string; target: string }) => {
-      if (edge.id.startsWith("__")) return;
-      const prereq = nodes.find((n) => n.id === edge.source);
-      const dep = nodes.find((n) => n.id === edge.target);
-      if (!prereq || !dep) return;
-      setRemoveEdge({
-        dependencyId: edge.id,
-        prerequisiteTitle: prereq.title,
-        dependentTitle: dep.title,
-      });
-    },
-    [nodes],
-  );
-  /* v8 ignore stop */
 
   /* v8 ignore start -- mutation callback; covered by E2E */
   const handleMutationSuccess = useCallback(() => {
@@ -352,10 +350,10 @@ function GraphScreenInner({
               edges={labeledEdges}
               nodeTypes={nodeTypes}
               aria-label={t("graph.canvas.label")}
-              onSelectionChange={onSelectionChange}
+              onNodesChange={onNodesChange}
               onNodeDoubleClick={onNodeDoubleClick}
               onPaneClick={onPaneClick}
-              onEdgeClick={onEdgeClick}
+              onEdgesChange={onEdgesChange}
               onMoveEnd={onMoveEnd}
               defaultViewport={cachedViewport}
               fitView={!cachedViewport}

@@ -3,7 +3,14 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ReactFlow, ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { Node, Edge, OnSelectionChangeParams } from "@xyflow/react";
+import type {
+  Node,
+  Edge,
+  NodeChange,
+  NodeSelectionChange,
+  EdgeChange,
+  EdgeSelectionChange,
+} from "@xyflow/react";
 import { useListGoals, useGetGoalGraph } from "../../api/generated/goals/goals";
 import type { GraphNodesItem } from "../../api/generated/model/graphNodesItem";
 import {
@@ -230,32 +237,45 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   }, [rfEdges, visibleGoals, allEpicNodes, t]);
 
   /* v8 ignore start -- React Flow canvas callbacks; covered by E2E */
-  // React Flow does not fire onNodeClick/onEdgeClick for keyboard selection
-  // (Enter/Space on a focused node or edge), so both paths share this handler.
-  const onSelectionChange = useCallback(
-    ({ nodes: selected, edges: selectedEdges }: OnSelectionChangeParams) => {
-      const picked = selected.find((n) => n.type !== "goalGroup" && n.type !== "dagEndpoint")?.id;
-      if (picked) {
-        if (selectedNodeId === null) {
-          openerRef.current = document.activeElement as HTMLElement | null;
-        }
-        setSelectedNodeId(picked);
-        setTimeout(() => sidePanelRef.current?.focus(), 0);
-        return;
+  // React Flow routes both pointer clicks and Enter/Space selection through
+  // the same select changes; nodes are fully controlled, so selection is
+  // tracked here rather than in React Flow's store.
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      const picked = changes.find(
+        (c): c is NodeSelectionChange => c.type === "select" && c.selected,
+      );
+      if (!picked) return;
+      const nodeType = layout.nodes.find((n) => n.id === picked.id)?.type;
+      if (nodeType === "goalGroup" || nodeType === "dagEndpoint") return;
+      if (selectedNodeId === null) {
+        openerRef.current = document.activeElement as HTMLElement | null;
       }
-      const edge = selectedEdges.find((e) => !e.id.startsWith("__"));
-      if (edge && removeEdge?.dependencyId !== edge.id) {
-        const prereq = allEpicNodes.find((n) => n.id === edge.source);
-        const dep = allEpicNodes.find((n) => n.id === edge.target);
-        if (!prereq || !dep) return;
-        setRemoveEdge({
-          dependencyId: edge.id,
-          prerequisiteTitle: prereq.title,
-          dependentTitle: dep.title,
-        });
-      }
+      setSelectedNodeId(picked.id);
+      setTimeout(() => sidePanelRef.current?.focus(), 0);
     },
-    [selectedNodeId, removeEdge, allEpicNodes],
+    [selectedNodeId, layout.nodes],
+  );
+
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      const picked = changes.find(
+        (c): c is EdgeSelectionChange =>
+          c.type === "select" && c.selected && !c.id.startsWith("__"),
+      );
+      if (!picked) return;
+      const edge = rfEdges.find((e) => e.id === picked.id);
+      if (!edge) return;
+      const prereq = allEpicNodes.find((n) => n.id === edge.source);
+      const dep = allEpicNodes.find((n) => n.id === edge.target);
+      if (!prereq || !dep) return;
+      setRemoveEdge({
+        dependencyId: picked.id,
+        prerequisiteTitle: prereq.title,
+        dependentTitle: dep.title,
+      });
+    },
+    [rfEdges, allEpicNodes],
   );
 
   const onNodeDoubleClick = useCallback(
@@ -280,21 +300,6 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
   const handleFit = useCallback(() => void fitView({ duration: 200 }), [fitView]);
   const handleZoomIn = useCallback(() => void zoomIn({ duration: 200 }), [zoomIn]);
   const handleZoomOut = useCallback(() => void zoomOut({ duration: 200 }), [zoomOut]);
-
-  const onEdgeClick = useCallback(
-    (_event: React.MouseEvent, edge: { id: string; source: string; target: string }) => {
-      if (edge.id.startsWith("__")) return;
-      const prereq = allEpicNodes.find((n) => n.id === edge.source);
-      const dep = allEpicNodes.find((n) => n.id === edge.target);
-      if (!prereq || !dep) return;
-      setRemoveEdge({
-        dependencyId: edge.id,
-        prerequisiteTitle: prereq.title,
-        dependentTitle: dep.title,
-      });
-    },
-    [allEpicNodes],
-  );
 
   const handleMutationSuccess = useCallback(() => {
     void refetch();
@@ -393,10 +398,10 @@ function ProjectGraphViewInner({ projectId, listContent }: ProjectGraphViewProps
               edges={labeledEdges}
               nodeTypes={nodeTypes}
               aria-label={t("graph.canvas.label")}
-              onSelectionChange={onSelectionChange}
+              onNodesChange={onNodesChange}
               onNodeDoubleClick={onNodeDoubleClick}
               onPaneClick={onPaneClick}
-              onEdgeClick={onEdgeClick}
+              onEdgesChange={onEdgesChange}
               fitView
               nodesDraggable={false}
               nodesConnectable={false}
